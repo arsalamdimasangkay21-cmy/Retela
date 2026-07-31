@@ -9,9 +9,21 @@ async function sendViaGmail(to, subject, body) {
   if (!user || !pass) return false;
 
   const transporter = nodemailer.createTransport({
-    service: "gmail",
-    auth: { user, pass }
-  });
+  host: "smtp.gmail.com",
+  port: 587,
+  secure: false,
+  auth: {
+    user,
+    pass
+  },
+  connectionTimeout: 30000,
+  greetingTimeout: 30000,
+  socketTimeout: 30000
+});
+
+await transporter.verify();
+
+console.log("SMTP Connected Successfully");
 
   try {
     const info = await transporter.sendMail({
