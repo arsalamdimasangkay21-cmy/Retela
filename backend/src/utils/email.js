@@ -21,10 +21,6 @@ async function sendViaGmail(to, subject, body) {
   socketTimeout: 30000
 });
 
-await transporter.verify();
-
-console.log("SMTP Connected Successfully");
-
   try {
     const info = await transporter.sendMail({
       from: `"RETELA" <${user}>`,
