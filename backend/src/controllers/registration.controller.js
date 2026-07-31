@@ -341,14 +341,24 @@ export const sendRegistrationOtp = asyncHandler(async (req, res) => {
     }
   );
 
-  await sendEmail(input.email, "Your RETELA verification OTP", `Your RETELA OTP is ${otp}. It expires in 5 minutes.`);
-  res.status(201).json({
-    message: "Enter the OTP sent to your Gmail address.",
-    email: input.email,
-    expiresInSeconds: 300,
-    resendAfterSeconds: 60,
-    maxAttempts: 5
-  });
+  try {
+  await sendEmail(
+    input.email,
+    "Your RETELA verification OTP",
+    `Your RETELA OTP is ${otp}. It expires in 5 minutes.`
+  );
+} catch (err) {
+  console.error("Email sending failed:", err);
+}
+
+res.status(201).json({
+  message: "OTP generated successfully.",
+  email: input.email,
+  expiresInSeconds: 300,
+  resendAfterSeconds: 60,
+  maxAttempts: 5
+});
+
 });
 
 export const resendRegistrationOtp = asyncHandler(async (req, res) => {
