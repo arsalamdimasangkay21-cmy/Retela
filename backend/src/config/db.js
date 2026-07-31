@@ -20,19 +20,42 @@ export const pool = mysql.createPool({
 });
 
 export async function query(sql, params = {}) {
-  const [rows] = await pool.execute(sql, params);
-  return rows;
+  try {
+    const [rows] = await pool.execute(sql, params);
+    return rows;
+  } catch (err) {
+    console.error("======================================");
+    console.error("DATABASE ERROR");
+    console.error("======================================");
+    console.error("SQL:");
+    console.error(sql);
+    console.error("--------------------------------------");
+    console.error("PARAMETERS:");
+    console.error(JSON.stringify(params, null, 2));
+    console.error("--------------------------------------");
+    console.error("MYSQL ERROR:");
+    console.error("Code:", err.code);
+    console.error("Errno:", err.errno);
+    console.error("SQL State:", err.sqlState);
+    console.error("Message:", err.sqlMessage);
+    console.error(err);
+    console.error("======================================");
+    throw err;
+  }
 }
 
 export async function transaction(callback) {
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
+
     const run = async (sql, params = {}) => {
       const [rows] = await connection.execute(sql, params);
       return rows;
     };
+
     const result = await callback(run, connection);
+
     await connection.commit();
     return result;
   } catch (error) {
