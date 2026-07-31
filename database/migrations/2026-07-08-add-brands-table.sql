@@ -1,0 +1,12 @@
+CREATE TABLE IF NOT EXISTS brands (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(120) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_brands_name (name)
+);
+
+INSERT INTO brands (name)
+SELECT value FROM (
+  SELECT 'Adidas' AS value UNION SELECT 'Nike' UNION SELECT 'Lacoste' UNION SELECT 'Essentials' UNION SELECT 'Uniqlo' UNION SELECT 'H&M' UNION SELECT 'Zara' UNION SELECT 'Bench' UNION SELECT 'Penshoppe' UNION SELECT 'Champion' UNION SELECT 'Puma' UNION SELECT 'Reebok' UNION SELECT 'Under Armour' UNION SELECT 'Jordan' UNION SELECT 'Levi''s' UNION SELECT 'Ralph Lauren' UNION SELECT 'Tommy Hilfiger' UNION SELECT 'GAP' UNION SELECT 'Old Navy' UNION SELECT 'Dickies' UNION SELECT 'Carhartt' UNION SELECT 'Stussy' UNION SELECT 'Converse' UNION SELECT 'Vans' UNION SELECT 'New Balance' UNION SELECT 'Gildan' UNION SELECT 'Hanes' UNION SELECT 'Fruit of the Loom' UNION SELECT 'Blue Corner' UNION SELECT 'Regatta' UNION SELECT 'Other'
+) defaults
+WHERE NOT EXISTS (SELECT 1 FROM brands WHERE LOWER(brands.name) = LOWER(defaults.value));

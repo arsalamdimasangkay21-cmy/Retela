@@ -1,0 +1,251 @@
+import { Router } from "express";
+import { z } from "zod";
+import { pool, query } from "../config/db.js";
+import { asyncHandler, HttpError } from "../utils/errors.js";
+import { requireApproved, requireAuth, requireRole } from "../middleware/auth.js";
+import { ensureProductInventoryColumns } from "../utils/productInventory.js";
+import { calculateCheckoutPricing } from "../utils/promotions.js";
+import { ensureCartTable } from "./cart.routes.js";
+
+const router = Router();
+const statuses = ["pending", "awaiting_payment", "paid", "approved", "processing", "ready", "completed", "cancelled", "payment_failed"];
+let orderColumnsReady;
+
+async function ensureOrderColumns() {
+  orderColumnsReady ||= (async () => {
+    const rows = await query(
+      `SELECT COLUMN_NAME
+       FROM INFORMATION_SCHEMA.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE()
+         AND TABLE_NAME = 'orders'
+         AND COLUMN_NAME IN ('tracking_number', 'fulfillment_method', 'subtotal_amount', 'coupon_discount', 'sale_discount', 'shipping_fee', 'coupon_code', 'payment_status', 'payment_reference', 'transaction_id', 'paid_at', 'payment_provider', 'checkout_session_id', 'checkout_url', 'order_channel', 'cash_received', 'change_amount', 'pos_cashier_id')`
+    );
+    const columns = new Set(rows.map((row) => row.COLUMN_NAME));
+    await query("ALTER TABLE orders MODIFY status ENUM('pending','awaiting_payment','paid','approved','processing','ready','completed','cancelled','payment_failed') NOT NULL DEFAULT 'pending'");
+    await query("ALTER TABLE orders MODIFY user_id INT NULL");
+    await query("ALTER TABLE orders MODIFY payment_method ENUM('cod','cash','gcash','debit','credit','maya') NOT NULL DEFAULT 'cod'");
+    if (!columns.has("order_channel")) await query("ALTER TABLE orders ADD COLUMN order_channel ENUM('online','pos') NOT NULL DEFAULT 'online' AFTER user_id");
+    if (!columns.has("tracking_number")) {
+      await query("ALTER TABLE orders ADD COLUMN tracking_number VARCHAR(120) NULL AFTER payment_method");
+    }
+    if (!columns.has("fulfillment_method")) {
+      await query("ALTER TABLE orders ADD COLUMN fulfillment_method ENUM('delivery','pickup') NOT NULL DEFAULT 'delivery' AFTER tracking_number");
+    }
+    if (!columns.has("subtotal_amount")) await query("ALTER TABLE orders ADD COLUMN subtotal_amount DECIMAL(10,2) NOT NULL DEFAULT 0 AFTER fulfillment_method");
+    if (!columns.has("coupon_discount")) await query("ALTER TABLE orders ADD COLUMN coupon_discount DECIMAL(10,2) NOT NULL DEFAULT 0 AFTER subtotal_amount");
+    if (!columns.has("sale_discount")) await query("ALTER TABLE orders ADD COLUMN sale_discount DECIMAL(10,2) NOT NULL DEFAULT 0 AFTER coupon_discount");
+    if (!columns.has("shipping_fee")) await query("ALTER TABLE orders ADD COLUMN shipping_fee DECIMAL(10,2) NOT NULL DEFAULT 0 AFTER sale_discount");
+    if (!columns.has("coupon_code")) await query("ALTER TABLE orders ADD COLUMN coupon_code VARCHAR(40) NULL AFTER shipping_fee");
+    if (!columns.has("payment_status")) await query("ALTER TABLE orders ADD COLUMN payment_status ENUM('unpaid','awaiting_payment','paid','failed','cancelled','refunded') NOT NULL DEFAULT 'unpaid' AFTER payment_method");
+    if (!columns.has("payment_reference")) await query("ALTER TABLE orders ADD COLUMN payment_reference VARCHAR(160) NULL AFTER payment_status");
+    if (!columns.has("transaction_id")) await query("ALTER TABLE orders ADD COLUMN transaction_id VARCHAR(160) NULL AFTER payment_reference");
+    if (!columns.has("paid_at")) await query("ALTER TABLE orders ADD COLUMN paid_at DATETIME NULL AFTER transaction_id");
+    if (!columns.has("payment_provider")) await query("ALTER TABLE orders ADD COLUMN payment_provider VARCHAR(40) NULL AFTER paid_at");
+    if (!columns.has("checkout_session_id")) await query("ALTER TABLE orders ADD COLUMN checkout_session_id VARCHAR(160) NULL AFTER payment_provider");
+    if (!columns.has("checkout_url")) await query("ALTER TABLE orders ADD COLUMN checkout_url TEXT NULL AFTER checkout_session_id");
+    if (!columns.has("cash_received")) await query("ALTER TABLE orders ADD COLUMN cash_received DECIMAL(10,2) NULL AFTER total_amount");
+    if (!columns.has("change_amount")) await query("ALTER TABLE orders ADD COLUMN change_amount DECIMAL(10,2) NULL AFTER cash_received");
+    if (!columns.has("pos_cashier_id")) await query("ALTER TABLE orders ADD COLUMN pos_cashier_id INT NULL AFTER change_amount");
+  })().catch((error) => {
+    orderColumnsReady = undefined;
+    throw error;
+  });
+  return orderColumnsReady;
+}
+
+router.get("/", requireAuth, requireApproved, asyncHandler(async (req, res) => {
+  await ensureOrderColumns();
+  const where = req.user.role === "admin" ? "" : "WHERE o.user_id = :userId";
+  const orders = await query(
+    `SELECT o.*, u.username, u.location, u.phone_number,
+       COUNT(oi.id) AS item_count,
+       GROUP_CONCAT(DISTINCT p.brand ORDER BY p.brand SEPARATOR ', ') AS brands,
+       GROUP_CONCAT(DISTINCT p.name ORDER BY p.name SEPARATOR ', ') AS product_names,
+       SUBSTRING_INDEX(GROUP_CONCAT(p.name ORDER BY oi.id SEPARATOR '||'), '||', 1) AS first_product_name,
+       SUBSTRING_INDEX(GROUP_CONCAT(p.image_url ORDER BY oi.id SEPARATOR '||'), '||', 1) AS first_product_image
+     FROM orders o
+     LEFT JOIN users u ON u.id = o.user_id
+     LEFT JOIN order_items oi ON oi.order_id = o.id
+     LEFT JOIN products p ON p.id = oi.product_id
+     ${where}
+     GROUP BY o.id
+     ORDER BY o.created_at DESC`,
+    { userId: req.user.id }
+  );
+  res.json(orders);
+}));
+
+router.get("/:id/items", requireAuth, requireApproved, asyncHandler(async (req, res) => {
+  await ensureOrderColumns();
+  const ownershipFilter = req.user.role === "admin" ? "" : "AND o.user_id = :userId";
+  const orders = await query(
+    `SELECT o.id, o.user_id, o.order_channel, o.status, o.payment_method, o.payment_status, o.payment_reference,
+       o.transaction_id, o.paid_at, o.cash_received, o.change_amount,
+       o.tracking_number, o.fulfillment_method, o.subtotal_amount, o.coupon_discount,
+       o.sale_discount, o.shipping_fee, o.coupon_code, o.total_amount, o.checkout_url, o.created_at,
+       u.username, u.location, u.phone_number
+     FROM orders o
+     LEFT JOIN users u ON u.id = o.user_id
+     WHERE o.id = :id
+       ${ownershipFilter}
+     LIMIT 1`,
+    { id: req.params.id, userId: req.user.id }
+  );
+  if (!orders.length) throw new HttpError(404, "Order not found");
+
+  const items = await query(
+    `SELECT oi.product_id, oi.quantity, oi.price, p.name, p.brand, p.category, p.size, p.image_url, p.\`condition\`
+     FROM order_items oi
+     JOIN products p ON p.id = oi.product_id
+     WHERE oi.order_id = :id
+     ORDER BY oi.id ASC`,
+    { id: req.params.id }
+  );
+
+  res.json({ order: orders[0], items });
+}));
+
+router.post("/", requireAuth, requireApproved, asyncHandler(async (req, res) => {
+  await ensureOrderColumns();
+  await ensureCartTable();
+  await ensureProductInventoryColumns();
+  const schema = z.object({
+    payment_method: z.enum(["cod", "gcash", "debit", "credit", "maya"]).optional().default("cod"),
+    fulfillment_method: z.enum(["delivery", "pickup"]).optional().default("delivery"),
+    coupon_code: z.string().trim().max(40).optional().default(""),
+    items: z.array(z.object({ product_id: z.coerce.number().int().positive(), quantity: z.coerce.number().int().positive() })).min(1)
+  });
+  const input = schema.parse(req.body);
+  const pricing = await calculateCheckoutPricing(input.items, input.coupon_code, input.fulfillment_method);
+  if (input.coupon_code && !pricing.coupon) throw new HttpError(400, "Coupon is invalid or expired.");
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const outOfStockProducts = [];
+    const inventoryUpdates = [];
+    for (const item of pricing.items) {
+      const [rows] = await conn.execute("SELECT id, price, stock FROM products WHERE id = ? AND is_deleted = FALSE FOR UPDATE", [item.product_id]);
+      if (!rows.length) throw new HttpError(404, "Apparel item not found");
+      if (rows[0].stock < item.quantity) throw new HttpError(400, `Only ${rows[0].stock} items remaining in stock.`);
+    }
+    const [orderResult] = await conn.execute(
+      `INSERT INTO orders
+        (user_id, status, payment_method, payment_status, fulfillment_method, subtotal_amount, coupon_discount, sale_discount, shipping_fee, coupon_code, total_amount)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        req.user.id,
+        input.payment_method === "cod" ? "pending" : "awaiting_payment",
+        input.payment_method,
+        input.payment_method === "cod" ? "unpaid" : "awaiting_payment",
+        input.fulfillment_method,
+        pricing.subtotal,
+        pricing.couponDiscount,
+        pricing.saleDiscount,
+        pricing.shippingFee,
+        pricing.coupon?.code || null,
+        pricing.total
+      ]
+    );
+    for (const item of pricing.items) {
+      const finalLinePrice = item.quantity ? Math.max(0, (item.subtotal - item.saleDiscount) / item.quantity) : item.price;
+      await conn.execute(
+        "INSERT INTO order_items (order_id, product_id, quantity, price) VALUES (?, ?, ?, ?)",
+        [orderResult.insertId, item.product_id, item.quantity, finalLinePrice]
+      );
+      await conn.execute(
+        "UPDATE products SET stock = stock - ?, status = CASE WHEN stock - ? <= 0 THEN 'Out of Stock' WHEN stock - ? <= 5 THEN 'Low Stock' ELSE 'In Stock' END WHERE id = ?",
+        [item.quantity, item.quantity, item.quantity, item.product_id]
+      );
+      const [updatedProducts] = await conn.execute("SELECT id, name, stock FROM products WHERE id = ?", [item.product_id]);
+      const nextStock = Number(updatedProducts[0]?.stock || 0);
+      inventoryUpdates.push({
+        id: Number(item.product_id),
+        name: updatedProducts[0]?.name,
+        stock: nextStock,
+        status: nextStock <= 0 ? "Out of Stock" : nextStock <= 5 ? "Low Stock" : "In Stock"
+      });
+      if (Number(updatedProducts[0]?.stock || 0) === 0) {
+        outOfStockProducts.push(updatedProducts[0].name);
+        await conn.execute(
+          "INSERT INTO notifications (type, title, body, product_id) VALUES ('inventory', 'Out of stock', ?, ?)",
+          [`${updatedProducts[0].name} is now out of stock.`, item.product_id]
+        );
+      }
+    }
+    if (pricing.items.length) {
+      const productIds = pricing.items.map((item) => item.product_id);
+      await conn.execute(
+        `DELETE FROM cart_items
+         WHERE user_id = ?
+           AND product_id IN (${productIds.map(() => "?").join(",")})`,
+        [req.user.id, ...productIds]
+      );
+    }
+    await conn.execute("INSERT INTO notifications (type, title, body) VALUES ('order', 'New order received', 'A customer placed an order.')");
+    await conn.execute(
+      "INSERT INTO notifications (user_id, type, title, body) VALUES (?, 'order', 'Order placed', ?)",
+      [req.user.id, `Your order #${orderResult.insertId} was placed successfully.`]
+    );
+    await conn.commit();
+    req.app.get("io").to("admin").emit("order:new", { id: orderResult.insertId, total_amount: pricing.total });
+    inventoryUpdates.forEach((update) => {
+      req.app.get("io").emit("inventory:update", { type: "inventory", action: "ordered", ...update });
+    });
+    outOfStockProducts.forEach((name) => {
+      req.app.get("io").to("admin").emit("notification:new", { type: "inventory", title: "Out of stock", body: `${name} is now out of stock.` });
+    });
+    res.status(201).json({ id: orderResult.insertId, total_amount: pricing.total, pricing, status: input.payment_method === "cod" ? "pending" : "awaiting_payment", payment_method: input.payment_method, fulfillment_method: input.fulfillment_method });
+  } catch (error) {
+    await conn.rollback();
+    throw error;
+  } finally {
+    conn.release();
+  }
+}));
+
+router.patch("/:id/status", requireAuth, requireRole("admin"), asyncHandler(async (req, res) => {
+  await ensureOrderColumns();
+  const schema = z.object({ status: z.enum(statuses) });
+  const { status } = schema.parse(req.body);
+  const orders = await query("SELECT user_id, status, payment_method FROM orders WHERE id = :id", { id: req.params.id });
+  if (!orders.length) throw new HttpError(404, "Order not found");
+  await query("UPDATE orders SET status = :status WHERE id = :id", { id: req.params.id, status });
+  const title = status === "ready" ? "Ready to deliver" : status === "completed" ? "Order received" : "Order update";
+  const body = status === "ready"
+    ? "Your order is ready. The admin will confirm delivery or pickup details."
+    : status === "completed"
+      ? "Your order was marked received. Please send feedback from the Feedback page."
+      : `Your order is now ${status}.`;
+  await query(
+    "INSERT INTO notifications (user_id, type, title, body) VALUES (:userId, 'order', :title, :body)",
+    { userId: orders[0].user_id, title, body }
+  );
+  if (status === "completed" && orders[0].status !== "completed") {
+    await query(
+      "INSERT INTO notifications (type, title, body) VALUES ('order', 'Sale completed', :body)",
+      { body: `Order #${req.params.id} was received by the customer. Feedback can now be collected.` }
+    );
+  }
+  req.app.get("io").to(`user:${orders[0].user_id}`).emit("order:update", { id: Number(req.params.id), status });
+  res.json({ message: "Order updated" });
+}));
+
+router.patch("/:id/tracking", requireAuth, requireRole("admin"), asyncHandler(async (req, res) => {
+  await ensureOrderColumns();
+  const schema = z.object({ tracking_number: z.string().trim().max(120).optional().default("") });
+  const input = schema.parse(req.body);
+  const orders = await query("SELECT user_id FROM orders WHERE id = :id", { id: req.params.id });
+  if (!orders.length) throw new HttpError(404, "Order not found");
+  await query("UPDATE orders SET tracking_number = :trackingNumber WHERE id = :id", {
+    id: req.params.id,
+    trackingNumber: input.tracking_number || null
+  });
+  await query(
+    "INSERT INTO notifications (user_id, type, title, body) VALUES (:userId, 'order', 'Tracking updated', :body)",
+    { userId: orders[0].user_id, body: input.tracking_number ? `Tracking number: ${input.tracking_number}` : "Tracking number was cleared." }
+  );
+  req.app.get("io").to(`user:${orders[0].user_id}`).emit("order:update", { id: Number(req.params.id), tracking_number: input.tracking_number || null });
+  res.json({ message: "Tracking updated", tracking_number: input.tracking_number || null });
+}));
+
+export default router;

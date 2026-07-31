@@ -1,0 +1,238 @@
+import crypto from "crypto";
+import { Router } from "express";
+import { z } from "zod";
+import { query } from "../config/db.js";
+import { asyncHandler, HttpError } from "../utils/errors.js";
+import { requireApproved, requireAuth } from "../middleware/auth.js";
+
+const router = Router();
+let paymentColumnsReady;
+
+async function ensurePaymentColumns() {
+  paymentColumnsReady ||= (async () => {
+    const rows = await query(
+      `SELECT COLUMN_NAME
+       FROM INFORMATION_SCHEMA.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE()
+         AND TABLE_NAME = 'orders'
+         AND COLUMN_NAME IN ('payment_status', 'payment_reference', 'transaction_id', 'paid_at', 'payment_provider', 'checkout_session_id', 'checkout_url')`
+    );
+    const columns = new Set(rows.map((row) => row.COLUMN_NAME));
+    await query("ALTER TABLE orders MODIFY status ENUM('pending','awaiting_payment','paid','approved','processing','ready','completed','cancelled','payment_failed') NOT NULL DEFAULT 'pending'");
+    await query("ALTER TABLE orders MODIFY payment_method ENUM('cod','gcash','debit','credit','maya') NOT NULL DEFAULT 'cod'");
+    if (!columns.has("payment_status")) await query("ALTER TABLE orders ADD COLUMN payment_status ENUM('unpaid','awaiting_payment','paid','failed','cancelled','refunded') NOT NULL DEFAULT 'unpaid' AFTER payment_method");
+    if (!columns.has("payment_reference")) await query("ALTER TABLE orders ADD COLUMN payment_reference VARCHAR(160) NULL AFTER payment_status");
+    if (!columns.has("transaction_id")) await query("ALTER TABLE orders ADD COLUMN transaction_id VARCHAR(160) NULL AFTER payment_reference");
+    if (!columns.has("paid_at")) await query("ALTER TABLE orders ADD COLUMN paid_at DATETIME NULL AFTER transaction_id");
+    if (!columns.has("payment_provider")) await query("ALTER TABLE orders ADD COLUMN payment_provider VARCHAR(40) NULL AFTER paid_at");
+    if (!columns.has("checkout_session_id")) await query("ALTER TABLE orders ADD COLUMN checkout_session_id VARCHAR(160) NULL AFTER payment_provider");
+    if (!columns.has("checkout_url")) await query("ALTER TABLE orders ADD COLUMN checkout_url TEXT NULL AFTER checkout_session_id");
+  })().catch((error) => {
+    paymentColumnsReady = undefined;
+    throw error;
+  });
+  return paymentColumnsReady;
+}
+
+function paymongoSecret() {
+  const key = process.env.PAYMONGO_SECRET_KEY || "";
+  if (!key) throw new HttpError(503, "PayMongo configuration missing. Contact administrator.");
+  return key;
+}
+
+function assertPaymongoConfigured() {
+  paymongoSecret();
+}
+
+function clientUrl(path) {
+  const base = (process.env.CLIENT_URL || "http://127.0.0.1:5175").split(",")[0].trim().replace(/\/$/, "");
+  return `${base}${path}`;
+}
+
+function methodTypes(method) {
+  if (method === "gcash") return ["gcash"];
+  if (method === "maya") return ["paymaya"];
+  if (method === "credit" || method === "debit") return ["card"];
+  return ["gcash"];
+}
+
+function authHeader() {
+  return `Basic ${Buffer.from(`${paymongoSecret()}:`).toString("base64")}`;
+}
+
+function verifyWebhookSignature(req) {
+  const secret = process.env.PAYMONGO_WEBHOOK_SECRET;
+  if (!secret) return true;
+  const header = req.headers["paymongo-signature"] || req.headers["Paymongo-Signature"];
+  if (!header || !Buffer.isBuffer(req.body)) return false;
+  const parts = Object.fromEntries(String(header).split(",").map((part) => part.split("=").map((value) => value.trim())));
+  const timestamp = parts.t;
+  const signature = parts.v1 || parts.li || parts.te;
+  if (!timestamp || !signature) return false;
+  const payload = `${timestamp}.${req.body.toString("utf8")}`;
+  const expected = crypto.createHmac("sha256", secret).update(payload).digest("hex");
+  const expectedBuffer = Buffer.from(expected);
+  const signatureBuffer = Buffer.from(signature);
+  return expectedBuffer.length === signatureBuffer.length && crypto.timingSafeEqual(expectedBuffer, signatureBuffer);
+}
+
+async function markOrderPaid({ orderId, transactionId, reference }) {
+  const rows = await query("SELECT id, user_id, payment_status FROM orders WHERE id = :orderId", { orderId });
+  if (!rows.length) return;
+  if (rows[0].payment_status === "paid") return;
+  await query(
+    `UPDATE orders
+     SET status = 'paid',
+         payment_status = 'paid',
+         transaction_id = COALESCE(:transactionId, transaction_id),
+         payment_reference = COALESCE(:reference, payment_reference),
+         paid_at = NOW(),
+         payment_provider = 'paymongo'
+     WHERE id = :orderId`,
+    { orderId, transactionId: transactionId || null, reference: reference || null }
+  );
+  await query(
+    "INSERT INTO notifications (user_id, type, title, body) VALUES (:userId, 'order', 'Payment received', :body)",
+    { userId: rows[0].user_id, body: `Payment for Order #${orderId} was confirmed.` }
+  );
+}
+
+async function markOrderFailed({ orderId, transactionId, reference }) {
+  const rows = await query("SELECT id, user_id, payment_status FROM orders WHERE id = :orderId", { orderId });
+  if (!rows.length || rows[0].payment_status === "paid") return;
+  await query(
+    `UPDATE orders
+     SET status = 'payment_failed',
+         payment_status = 'failed',
+         transaction_id = COALESCE(:transactionId, transaction_id),
+         payment_reference = COALESCE(:reference, payment_reference),
+         payment_provider = 'paymongo'
+     WHERE id = :orderId`,
+    { orderId, transactionId: transactionId || null, reference: reference || null }
+  );
+  await query(
+    "INSERT INTO notifications (user_id, type, title, body) VALUES (:userId, 'order', 'Payment failed', :body)",
+    { userId: rows[0].user_id, body: `Payment for Order #${orderId} failed or was cancelled.` }
+  );
+}
+
+router.post("/create-gcash-checkout", requireAuth, requireApproved, asyncHandler(async (req, res) => {
+  await ensurePaymentColumns();
+  assertPaymongoConfigured();
+  const schema = z.object({
+    orderId: z.coerce.number().int().positive(),
+    paymentMethod: z.enum(["gcash", "debit", "credit", "maya"]).default("gcash"),
+    billingPhone: z.string().trim().regex(/^[0-9+\-\s()]{7,30}$/).optional().or(z.literal(""))
+  });
+  const input = schema.parse(req.body);
+  const orders = await query(
+    `SELECT o.id, o.user_id, o.total_amount, o.status, o.payment_status, o.checkout_url,
+       u.username, u.display_name, u.email, u.phone_number
+     FROM orders o
+     JOIN users u ON u.id = o.user_id
+     WHERE o.id = :id AND o.user_id = :userId`,
+    { id: input.orderId, userId: req.user.id }
+  );
+  if (!orders.length) throw new HttpError(404, "Order not found");
+  const order = orders[0];
+  if (order.payment_status === "paid") throw new HttpError(400, "This order is already paid.");
+  if (order.checkout_url && order.payment_status === "awaiting_payment") {
+    return res.json({ checkoutUrl: order.checkout_url, orderId: order.id });
+  }
+
+  const reference = `RETELA-${order.id}-${Date.now()}`;
+  const amount = Math.round(Number(order.total_amount) * 100);
+  const billingPhone = input.billingPhone || order.phone_number || "";
+  const billing = {
+    name: order.display_name || order.username || req.user.username,
+    ...(order.email ? { email: order.email } : {}),
+    ...(billingPhone ? { phone: billingPhone } : {})
+  };
+  const response = await fetch("https://api.paymongo.com/v1/checkout_sessions", {
+    method: "POST",
+    headers: {
+      Authorization: authHeader(),
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      data: {
+        attributes: {
+          billing,
+          description: `RETELA Order #${order.id}`,
+          line_items: [{
+            currency: "PHP",
+            amount,
+            name: `RETELA Order #${order.id}`,
+            quantity: 1
+          }],
+          payment_method_types: methodTypes(input.paymentMethod),
+          reference_number: reference,
+          success_url: clientUrl(`/payment/success?order=${order.id}&ref=${reference}`),
+          cancel_url: clientUrl(`/payment/cancel?order=${order.id}&ref=${reference}`)
+        }
+      }
+    })
+  });
+
+  const data = await response.json();
+  if (!response.ok) throw new HttpError(502, data?.errors?.[0]?.detail || "PayMongo rejected the checkout request.");
+  const checkoutUrl = data?.data?.attributes?.checkout_url;
+  if (!checkoutUrl) throw new HttpError(502, "PayMongo did not return a checkout URL.");
+
+  await query(
+    `UPDATE orders
+     SET status = 'awaiting_payment',
+         payment_status = 'awaiting_payment',
+         payment_method = :paymentMethod,
+         payment_reference = :reference,
+         payment_provider = 'paymongo',
+         checkout_session_id = :sessionId,
+         checkout_url = :checkoutUrl
+     WHERE id = :orderId`,
+    {
+      orderId: order.id,
+      paymentMethod: input.paymentMethod,
+      reference,
+      sessionId: data.data.id,
+      checkoutUrl
+    }
+  );
+
+  res.json({ checkoutUrl, orderId: order.id, reference, provider: "paymongo" });
+}));
+
+router.post("/webhook", asyncHandler(async (req, res) => {
+  await ensurePaymentColumns();
+  if (!verifyWebhookSignature(req)) throw new HttpError(401, "Invalid PayMongo webhook signature.");
+  const payload = Buffer.isBuffer(req.body) ? JSON.parse(req.body.toString("utf8")) : req.body;
+  const event = payload?.data;
+  const attributes = event?.attributes || {};
+  const resource = attributes?.data || event;
+  const resourceAttributes = resource?.attributes || {};
+  const reference = resourceAttributes.reference_number || resourceAttributes.external_reference_number || resourceAttributes.description?.match(/#(\d+)/)?.[1];
+  const orderMatch = String(reference || "").match(/RETELA-(\d+)/) || String(resourceAttributes.description || "").match(/#(\d+)/);
+  const orderId = orderMatch ? Number(orderMatch[1]) : null;
+  const eventType = attributes.type || event?.type;
+
+  if (orderId && /paid|payment\.paid|checkout_session\.payment\.paid/i.test(String(eventType))) {
+    await markOrderPaid({ orderId, transactionId: resource?.id || event?.id, reference });
+  }
+  if (orderId && /failed|cancelled|canceled|expired/i.test(String(eventType))) {
+    await markOrderFailed({ orderId, transactionId: resource?.id || event?.id, reference });
+  }
+  res.json({ received: true });
+}));
+
+router.get("/status/:id", requireAuth, requireApproved, asyncHandler(async (req, res) => {
+  await ensurePaymentColumns();
+  const rows = await query(
+    `SELECT id, status, payment_status, payment_method, payment_reference, transaction_id, paid_at, payment_provider, total_amount
+     FROM orders
+     WHERE id = :id AND (:isAdmin = true OR user_id = :userId)`,
+    { id: req.params.id, userId: req.user.id, isAdmin: req.user.role === "admin" }
+  );
+  if (!rows.length) throw new HttpError(404, "Order not found");
+  res.json(rows[0]);
+}));
+
+export default router;

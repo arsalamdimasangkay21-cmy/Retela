@@ -1,0 +1,359 @@
+import crypto from "crypto";
+import { z } from "zod";
+import { query } from "../config/db.js";
+
+export const DEFAULT_SYSTEM_SETTINGS = {
+  general: {
+    shopName: "Tela to Pera Thrift Shop",
+    shopLogoUrl: "",
+    shopDescription: "AI-assisted thrift ecommerce for curated apparel and customer support.",
+    contactNumber: "",
+    emailAddress: "",
+    shopAddress: "",
+    currency: "PHP",
+    language: "English"
+  },
+  ai: {
+    openaiApiKey: "",
+    openaiApiKeySaved: false,
+    aiProvider: "auto",
+    aiAssistant: true,
+    aiAutoReply: true,
+    aiRecommendation: true,
+    aiChatTemperature: 0.35
+  },
+  notifications: {
+    newOrderNotifications: true,
+    lowStockAlerts: true,
+    outOfStockAlerts: true,
+    refundAlerts: true,
+    emailNotifications: true,
+    pushNotifications: true,
+    soundNotifications: true
+  },
+  payment: {
+    gcashNumber: "",
+    gcashQrUrl: "",
+    codEnabled: true,
+    onlinePaymentEnabled: true,
+    paymentVerificationAutomation: true,
+    shippingFeeType: "fixed",
+    shippingRateName: "Standard Shipping",
+    shippingFeeEnabled: true,
+    shippingFee: 0,
+    coupons: []
+  },
+  security: {
+    twoFactorAuthentication: false,
+    sessionTimeout: 60,
+    loginActivity: true,
+    adminAccessControl: true
+  },
+  inventory: {
+    lowStockThreshold: 3,
+    autoRestockAlert: true,
+    barcodeEnabled: true,
+    skuGeneratorEnabled: true
+  },
+  reports: {
+    autoGenerateReports: false,
+    dailyReports: true,
+    weeklyReports: true,
+    monthlyReports: true,
+    exportPdf: true,
+    exportExcel: true
+  },
+  appearance: {
+    darkMode: false,
+    themeColor: "#22C55E",
+    dashboardLayout: "Comfortable",
+    sidebarCollapse: false
+  },
+  customers: {
+    customerRegistrationApproval: false,
+    autoWelcomeMessage: true,
+    loyaltyRewards: false,
+    customerBroadcastNotifications: true
+  },
+  about: {
+    mission: "To provide affordable, quality, and sustainable thrift fashion products while improving customer experience using modern technology.",
+    vision: "To become a trusted AI-powered thrift ecommerce platform in the Philippines.",
+    fullAddress: "Tela to Pera Thrift Shop, Philippines",
+    landmark: "Near the local community market",
+    facebookPage: "https://facebook.com/telatopera",
+    instagramLink: "https://instagram.com/telatopera",
+    messengerLink: "https://m.me/telatopera",
+    businessDays: "Monday to Sunday",
+    openingTime: "9:00 AM",
+    closingTime: "7:00 PM",
+    paymentMethods: "GCash, Cash on Delivery, Online Payments",
+    deliveryAreas: "Selected nearby areas and customer pickup points",
+    estimatedDeliveryTime: "1 to 3 business days after order confirmation",
+    returnConditions: "Return allowed within 7 days. Apparel must not be heavily damaged.",
+    refundProcess: "Refund approval depends on admin verification and proof review.",
+    supportChannels: "Live chat, AI assistant support, and admin support",
+    ownerProfile: "Tela to Pera Thrift Shop Admin",
+    developers: "RETELA Development Team",
+    thesisMembers: "RETELA Thesis Members"
+  }
+};
+
+const settingsSchema = z.object({
+  general: z.object({
+    shopName: z.string().trim().min(2, "Shop name is required").max(120),
+    shopLogoUrl: z.string().trim().max(255).optional().default(""),
+    shopDescription: z.string().trim().max(1200).optional().default(""),
+    contactNumber: z.string().trim().max(30).optional().default(""),
+    emailAddress: z.string().trim().email("Use a valid email address").or(z.literal("")).default(""),
+    shopAddress: z.string().trim().max(255).optional().default(""),
+    currency: z.enum(["PHP"]).default("PHP"),
+    language: z.enum(["English", "Filipino"]).default("English")
+  }),
+  ai: z.object({
+    openaiApiKey: z.string().trim().max(300).optional().default(""),
+    openaiApiKeySaved: z.boolean().optional().default(false),
+    aiProvider: z.enum(["openai", "gemini", "auto"]).optional().default("auto"),
+    aiAssistant: z.boolean(),
+    aiAutoReply: z.boolean(),
+    aiRecommendation: z.boolean(),
+    aiChatTemperature: z.coerce.number().min(0).max(2)
+  }),
+  notifications: z.object({
+    newOrderNotifications: z.boolean(),
+    lowStockAlerts: z.boolean(),
+    outOfStockAlerts: z.boolean(),
+    refundAlerts: z.boolean(),
+    emailNotifications: z.boolean(),
+    pushNotifications: z.boolean(),
+    soundNotifications: z.boolean()
+  }),
+  payment: z.object({
+    gcashNumber: z.string().trim().max(30).optional().default(""),
+    gcashQrUrl: z.string().trim().max(255).optional().default(""),
+    codEnabled: z.boolean(),
+    onlinePaymentEnabled: z.boolean(),
+    paymentVerificationAutomation: z.boolean(),
+    shippingFeeType: z.enum(["fixed", "free"]).optional().default("fixed"),
+    shippingRateName: z.string().trim().max(120).optional().default("Standard Shipping"),
+    shippingFeeEnabled: z.boolean().optional().default(true),
+    shippingFee: z.coerce.number().min(0).max(99999).optional().default(0),
+    coupons: z.array(z.object({
+      code: z.string().trim().min(2).max(40),
+      discountPercent: z.coerce.number().min(0).max(100).optional().default(0),
+      freeShipping: z.boolean().optional().default(false),
+      expiresAt: z.string().trim().optional().default(""),
+      active: z.boolean().optional().default(true)
+    })).optional().default([])
+  }),
+  security: z.object({
+    twoFactorAuthentication: z.boolean(),
+    sessionTimeout: z.coerce.number().int().min(5).max(1440),
+    loginActivity: z.boolean(),
+    adminAccessControl: z.boolean()
+  }),
+  inventory: z.object({
+    lowStockThreshold: z.coerce.number().int().min(0).max(999),
+    autoRestockAlert: z.boolean(),
+    barcodeEnabled: z.boolean(),
+    skuGeneratorEnabled: z.boolean()
+  }),
+  reports: z.object({
+    autoGenerateReports: z.boolean(),
+    dailyReports: z.boolean(),
+    weeklyReports: z.boolean(),
+    monthlyReports: z.boolean(),
+    exportPdf: z.boolean(),
+    exportExcel: z.boolean()
+  }),
+  appearance: z.object({
+    darkMode: z.boolean(),
+    themeColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/, "Use a valid theme color"),
+    dashboardLayout: z.enum(["Comfortable", "Compact", "Analytics Focus"]),
+    sidebarCollapse: z.boolean()
+  }),
+  customers: z.object({
+    customerRegistrationApproval: z.boolean(),
+    autoWelcomeMessage: z.boolean(),
+    loyaltyRewards: z.boolean(),
+    customerBroadcastNotifications: z.boolean()
+  }),
+  about: z.object({
+    mission: z.string().trim().max(1200),
+    vision: z.string().trim().max(1200),
+    fullAddress: z.string().trim().max(255),
+    landmark: z.string().trim().max(160),
+    facebookPage: z.string().trim().max(255),
+    instagramLink: z.string().trim().max(255),
+    messengerLink: z.string().trim().max(255),
+    businessDays: z.string().trim().max(120),
+    openingTime: z.string().trim().max(40),
+    closingTime: z.string().trim().max(40),
+    paymentMethods: z.string().trim().max(255),
+    deliveryAreas: z.string().trim().max(500),
+    estimatedDeliveryTime: z.string().trim().max(160),
+    returnConditions: z.string().trim().max(800),
+    refundProcess: z.string().trim().max(800),
+    supportChannels: z.string().trim().max(255),
+    ownerProfile: z.string().trim().max(255),
+    developers: z.string().trim().max(500),
+    thesisMembers: z.string().trim().max(500)
+  })
+});
+
+let settingsTableReady;
+
+function secretKey() {
+  return crypto
+    .createHash("sha256")
+    .update(process.env.SETTINGS_SECRET || process.env.JWT_SECRET || "dev_secret_change_me")
+    .digest();
+}
+
+export function encryptSecret(value) {
+  if (!value) return null;
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", secretKey(), iv);
+  const encrypted = Buffer.concat([cipher.update(String(value), "utf8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return `v1:${iv.toString("base64")}:${tag.toString("base64")}:${encrypted.toString("base64")}`;
+}
+
+export function decryptSecret(value) {
+  if (!value) return "";
+  const [version, iv, tag, encrypted] = String(value).split(":");
+  if (version !== "v1" || !iv || !tag || !encrypted) return "";
+  const decipher = crypto.createDecipheriv("aes-256-gcm", secretKey(), Buffer.from(iv, "base64"));
+  decipher.setAuthTag(Buffer.from(tag, "base64"));
+  return Buffer.concat([
+    decipher.update(Buffer.from(encrypted, "base64")),
+    decipher.final()
+  ]).toString("utf8");
+}
+
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function deepMerge(base, input) {
+  if (!isPlainObject(input)) return { ...base };
+  return Object.entries(base).reduce((merged, [key, value]) => {
+    if (isPlainObject(value)) {
+      merged[key] = deepMerge(value, input[key]);
+      return merged;
+    }
+    merged[key] = input[key] ?? value;
+    return merged;
+  }, {});
+}
+
+function parseStoredConfig(value) {
+  try {
+    return JSON.parse(value || "{}");
+  } catch {
+    return {};
+  }
+}
+
+export async function ensureSettingsTable() {
+  settingsTableReady ||= query(`
+    CREATE TABLE IF NOT EXISTS system_settings (
+      id TINYINT PRIMARY KEY,
+      config_json LONGTEXT NOT NULL,
+      openai_api_key_encrypted TEXT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    )
+  `).catch((error) => {
+    settingsTableReady = undefined;
+    throw error;
+  });
+  return settingsTableReady;
+}
+
+export function normalizeSystemSettings(settings) {
+  const merged = deepMerge(DEFAULT_SYSTEM_SETTINGS, settings);
+  return settingsSchema.parse(merged);
+}
+
+export function sanitizeSystemSettings(settings, encryptedOpenAiApiKey, databaseStatus = null) {
+  return {
+    ...settings,
+    ai: {
+      ...settings.ai,
+      openaiApiKey: "",
+      openaiApiKeySaved: Boolean(encryptedOpenAiApiKey)
+    },
+    databaseStatus
+  };
+}
+
+export async function loadSystemSettings() {
+  await ensureSettingsTable();
+  const rows = await query("SELECT config_json, openai_api_key_encrypted FROM system_settings WHERE id = 1");
+  if (!rows.length) {
+    const config = normalizeSystemSettings(DEFAULT_SYSTEM_SETTINGS);
+    return { config, encryptedOpenAiApiKey: null };
+  }
+  const config = normalizeSystemSettings(parseStoredConfig(rows[0].config_json));
+  return { config, encryptedOpenAiApiKey: rows[0].openai_api_key_encrypted || null };
+}
+
+export async function saveSystemSettings(nextSettings, options = {}) {
+  await ensureSettingsTable();
+  const current = await loadSystemSettings();
+  const config = normalizeSystemSettings(nextSettings);
+  const cleanConfig = {
+    ...config,
+    ai: {
+      ...config.ai,
+      openaiApiKey: "",
+      openaiApiKeySaved: false
+    }
+  };
+  const nextEncryptedKey = options.clearOpenAiApiKey
+    ? null
+    : options.openaiApiKey
+      ? encryptSecret(options.openaiApiKey)
+      : current.encryptedOpenAiApiKey;
+
+  await query(
+    `INSERT INTO system_settings (id, config_json, openai_api_key_encrypted)
+     VALUES (1, :configJson, :openaiApiKey)
+     ON DUPLICATE KEY UPDATE
+       config_json = VALUES(config_json),
+       openai_api_key_encrypted = VALUES(openai_api_key_encrypted)`,
+    {
+      configJson: JSON.stringify(cleanConfig),
+      openaiApiKey: nextEncryptedKey
+    }
+  );
+  return { config: cleanConfig, encryptedOpenAiApiKey: nextEncryptedKey };
+}
+
+export async function resetSystemSettings() {
+  await ensureSettingsTable();
+  await query("DELETE FROM system_settings WHERE id = 1");
+  const config = normalizeSystemSettings(DEFAULT_SYSTEM_SETTINGS);
+  return { config, encryptedOpenAiApiKey: null };
+}
+
+export async function getOpenAiRuntimeSettings() {
+  try {
+    const { config, encryptedOpenAiApiKey } = await loadSystemSettings();
+    return {
+      apiKey: decryptSecret(encryptedOpenAiApiKey) || process.env.OPENAI_API_KEY || "",
+      aiAssistant: Boolean(config.ai.aiAssistant),
+      aiAutoReply: Boolean(config.ai.aiAutoReply),
+      aiRecommendation: Boolean(config.ai.aiRecommendation),
+      temperature: Number(config.ai.aiChatTemperature ?? 0.35)
+    };
+  } catch {
+    return {
+      apiKey: process.env.OPENAI_API_KEY || "",
+      aiAssistant: true,
+      aiAutoReply: true,
+      aiRecommendation: true,
+      temperature: 0.35
+    };
+  }
+}
