@@ -104,7 +104,6 @@ router.get("/", requireAuth, asyncHandler(async (req, res) => {
         r.admin_note,
         r.decided_at,
         r.created_at,
-        r.updated_at,
         u.username,
         o.total_amount,
         o.status AS order_status,
@@ -148,7 +147,6 @@ router.get("/", requireAuth, asyncHandler(async (req, res) => {
         r.admin_note,
         r.decided_at,
         r.created_at,
-        r.updated_at,
         u.username,
         o.total_amount,
         o.status
