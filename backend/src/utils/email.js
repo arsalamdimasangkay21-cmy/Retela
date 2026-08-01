@@ -79,8 +79,12 @@ async function sendViaGenericProvider(to, subject, body) {
 }
 
 export async function sendEmail(to, subject, body) {
-  if (await sendViaGmail(to, subject, body)) return;
   if (await sendViaResend(to, subject, body)) return;
   if (await sendViaGenericProvider(to, subject, body)) return;
-  throw new HttpError(503, "Email sending is not configured. Add EMAIL_USER and EMAIL_PASS Gmail App Password settings in backend/.env.");
+  if (await sendViaGmail(to, subject, body)) return;
+
+  throw new HttpError(
+    503,
+    "Email sending is not configured."
+  );
 }
