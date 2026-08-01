@@ -90,6 +90,29 @@ async function findDuplicateActiveProduct(input) {
   return candidates.find((product) => duplicateSignature(product) === inputSignature) || null;
 }
 
+async function ensureProductOptionValues(input) {
+  await ensureApparelOptionTables();
+  const optionValues = [
+    ["brands", input.brand],
+    ["categories", input.category],
+    ["types", input.gender],
+    ["sizes", input.size],
+    ["conditions", input.condition]
+  ];
+  for (const [table, rawName] of optionValues) {
+    const name = String(rawName || "").trim();
+    if (!name) continue;
+    await query(
+      `INSERT INTO \`${table}\` (name)
+       SELECT :name
+       WHERE NOT EXISTS (
+         SELECT 1 FROM \`${table}\` WHERE LOWER(name) = LOWER(:name)
+       )`,
+      { name }
+    );
+  }
+}
+
 router.get("/", requireAuth, requireApproved, asyncHandler(async (req, res) => {
   await ensureProductInventoryColumns();
   const schema = z.object({
@@ -221,6 +244,7 @@ router.get("/filters", requireAuth, requireApproved, asyncHandler(async (req, re
 router.post("/", requireAuth, requireRole("admin"), upload.single("image"), asyncHandler(async (req, res) => {
   await ensureProductInventoryColumns();
   const input = normalizeProductInput(productSchema.parse({ ...req.body, image_url: req.file ? `/uploads/${req.file.filename}` : req.body.image_url }));
+  await ensureProductOptionValues(input);
   const duplicate = await findDuplicateActiveProduct(input);
 
   if (duplicate) {
@@ -271,6 +295,7 @@ router.post("/", requireAuth, requireRole("admin"), upload.single("image"), asyn
 router.put("/:id", requireAuth, requireRole("admin"), upload.single("image"), asyncHandler(async (req, res) => {
   await ensureProductInventoryColumns();
   const input = normalizeProductInput(productSchema.parse({ ...req.body, image_url: req.file ? `/uploads/${req.file.filename}` : req.body.image_url }));
+  await ensureProductOptionValues(input);
   const status = productStatusForStock(input.stock);
   await query(
     `UPDATE products SET name=:name, brand=:brand, category=:category, gender=:gender, size=:size, color=:color, price=:price,

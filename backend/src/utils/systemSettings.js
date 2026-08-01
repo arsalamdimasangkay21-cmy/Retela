@@ -292,6 +292,12 @@ export async function loadSystemSettings() {
   const rows = await query("SELECT config_json, openai_api_key_encrypted FROM system_settings WHERE id = 1");
   if (!rows.length) {
     const config = normalizeSystemSettings(DEFAULT_SYSTEM_SETTINGS);
+    await query(
+      `INSERT INTO system_settings (id, config_json, openai_api_key_encrypted)
+       VALUES (1, :configJson, NULL)
+       ON DUPLICATE KEY UPDATE config_json = config_json`,
+      { configJson: JSON.stringify({ ...config, ai: { ...config.ai, openaiApiKey: "", openaiApiKeySaved: false } }) }
+    );
     return { config, encryptedOpenAiApiKey: null };
   }
   const config = normalizeSystemSettings(parseStoredConfig(rows[0].config_json));

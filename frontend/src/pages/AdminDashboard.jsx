@@ -209,7 +209,7 @@ export default function AdminDashboard({ active, onChange }) {
     setProductImage(null);
     setEditingProductId(null);
     setInventoryModalOpen(false);
-    await load();
+    await Promise.all([load(), loadApparelOptions()]);
     showProductToast(response?.data?.message || (editingProductId ? "Apparel item updated successfully." : "Apparel item saved successfully."));
   }
 

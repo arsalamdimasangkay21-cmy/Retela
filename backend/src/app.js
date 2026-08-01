@@ -23,6 +23,7 @@ import adminRoutes from "./routes/admin.routes.js";
 import chatRoutes from "./routes/chat.routes.js";
 import posRoutes from "./routes/pos.routes.js";
 import customerRoutes from "./routes/customer.routes.js";
+import { requestContextMiddleware } from "./config/db.js";
 
 import {
   brandsRoutes,
@@ -51,6 +52,7 @@ export function createApp(io) {
     .map((origin) => origin.trim());
 
   app.set("io", io);
+  app.use(requestContextMiddleware);
 
   app.use(
     helmet({
@@ -97,6 +99,27 @@ export function createApp(io) {
     })
   );
 
+  app.use("/api", (req, res, next) => {
+    const json = res.json.bind(res);
+    res.json = (body) => {
+      if (body && typeof body === "object" && Object.prototype.hasOwnProperty.call(body, "success")) {
+        return json(body);
+      }
+      if (res.statusCode >= 400) {
+        return json({
+          success: false,
+          message: body?.message || body?.error || "Request failed",
+          ...(body?.errors ? { errors: body.errors } : {}),
+        });
+      }
+      return json({
+        success: true,
+        data: body,
+      });
+    };
+    next();
+  });
+
   app.use("/api/auth", authRoutes);
   app.use("/api/brands", brandsRoutes);
   app.use("/api/categories", categoriesRoutes);
@@ -124,6 +147,7 @@ export function createApp(io) {
 
   app.use("/api", (req, res) =>
     res.status(404).json({
+      success: false,
       message: "API route not found",
     })
   );

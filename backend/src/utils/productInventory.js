@@ -40,21 +40,27 @@ async function getProductStorageTable() {
      WHERE TABLE_SCHEMA = DATABASE()
        AND TABLE_NAME IN ('apparel_items', 'products')`
   );
+  const productsTable = rows.find((row) => row.TABLE_NAME === "products" && row.TABLE_TYPE === "BASE TABLE");
+  if (productsTable) return "products";
   const apparelTable = rows.find((row) => row.TABLE_NAME === "apparel_items" && row.TABLE_TYPE === "BASE TABLE");
   if (apparelTable) return "apparel_items";
   return "products";
 }
 
 async function ensureProductsViewIncludesSku(storageTable) {
-  // Railway already uses a real "products" table.
-  // Only create the view if apparel_items exists.
-  // If using the existing products table, don't create a view.
   if (storageTable !== "apparel_items") {
     return;
   }
 
   try {
-    await query("DROP VIEW IF EXISTS products");
+    const rows = await query(
+      `SELECT TABLE_NAME
+       FROM INFORMATION_SCHEMA.TABLES
+       WHERE TABLE_SCHEMA = DATABASE()
+         AND TABLE_NAME = 'products'
+       LIMIT 1`
+    );
+    if (rows.length) return;
 
     await query(`
       CREATE VIEW products AS
@@ -77,6 +83,11 @@ async function ensureProductsViewIncludesSku(storageTable) {
         is_deleted,
         deleted_at,
         deleted_by,
+        sale_enabled,
+        sale_discount_percent,
+        sale_product_ids_json,
+        sale_starts_at,
+        sale_ends_at,
         created_at,
         updated_at
       FROM apparel_items
@@ -94,7 +105,7 @@ export async function ensureProductInventoryColumns() {
        FROM INFORMATION_SCHEMA.COLUMNS
        WHERE TABLE_SCHEMA = DATABASE()
          AND TABLE_NAME = :storageTable
-         AND COLUMN_NAME IN ('sku', 'brand', 'category', 'gender', 'size', 'color', 'description', 'status', 'is_active', 'is_deleted', 'deleted_at', 'deleted_by')`,
+         AND COLUMN_NAME IN ('sku', 'brand', 'category', 'gender', 'size', 'color', 'description', 'status', 'is_active', 'is_deleted', 'deleted_at', 'deleted_by', 'sale_enabled', 'sale_discount_percent', 'sale_product_ids_json', 'sale_starts_at', 'sale_ends_at')`,
       { storageTable }
     );
     const columns = new Set(rows.map((row) => row.COLUMN_NAME));
@@ -141,6 +152,21 @@ export async function ensureProductInventoryColumns() {
     }
     if (!columns.has("deleted_by")) {
       await query(`ALTER TABLE ${storageTable} ADD COLUMN deleted_by INT NULL AFTER deleted_at`);
+    }
+    if (!columns.has("sale_enabled")) {
+      await query(`ALTER TABLE ${storageTable} ADD COLUMN sale_enabled BOOLEAN NOT NULL DEFAULT FALSE AFTER deleted_by`);
+    }
+    if (!columns.has("sale_discount_percent")) {
+      await query(`ALTER TABLE ${storageTable} ADD COLUMN sale_discount_percent DECIMAL(5,2) NOT NULL DEFAULT 0 AFTER sale_enabled`);
+    }
+    if (!columns.has("sale_product_ids_json")) {
+      await query(`ALTER TABLE ${storageTable} ADD COLUMN sale_product_ids_json JSON NULL AFTER sale_discount_percent`);
+    }
+    if (!columns.has("sale_starts_at")) {
+      await query(`ALTER TABLE ${storageTable} ADD COLUMN sale_starts_at DATETIME NULL AFTER sale_product_ids_json`);
+    }
+    if (!columns.has("sale_ends_at")) {
+      await query(`ALTER TABLE ${storageTable} ADD COLUMN sale_ends_at DATETIME NULL AFTER sale_starts_at`);
     }
 
     await query(`UPDATE ${storageTable}

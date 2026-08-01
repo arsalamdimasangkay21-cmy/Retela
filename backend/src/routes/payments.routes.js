@@ -19,7 +19,7 @@ async function ensurePaymentColumns() {
     );
     const columns = new Set(rows.map((row) => row.COLUMN_NAME));
     await query("ALTER TABLE orders MODIFY status ENUM('pending','awaiting_payment','paid','approved','processing','ready','completed','cancelled','payment_failed') NOT NULL DEFAULT 'pending'");
-    await query("ALTER TABLE orders MODIFY payment_method ENUM('cod','gcash','debit','credit','maya') NOT NULL DEFAULT 'cod'");
+    await query("ALTER TABLE orders MODIFY payment_method ENUM('cod','cash','gcash','debit','credit','maya') NOT NULL DEFAULT 'cod'");
     if (!columns.has("payment_status")) await query("ALTER TABLE orders ADD COLUMN payment_status ENUM('unpaid','awaiting_payment','paid','failed','cancelled','refunded') NOT NULL DEFAULT 'unpaid' AFTER payment_method");
     if (!columns.has("payment_reference")) await query("ALTER TABLE orders ADD COLUMN payment_reference VARCHAR(160) NULL AFTER payment_status");
     if (!columns.has("transaction_id")) await query("ALTER TABLE orders ADD COLUMN transaction_id VARCHAR(160) NULL AFTER payment_reference");

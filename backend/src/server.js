@@ -5,6 +5,7 @@ import express from "express";
 import { Server } from "socket.io";
 
 import { createApp } from "./app.js";
+import { initializeDatabase } from "./config/db.js";
 import { configureSocket } from "./socket.js";
 
 dotenv.config();
@@ -31,6 +32,8 @@ const io = new Server(server, {
     credentials: true,
   },
 });
+
+await initializeDatabase();
 
 const app = createApp(io);
 

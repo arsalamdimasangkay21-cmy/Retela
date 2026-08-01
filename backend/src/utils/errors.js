@@ -17,19 +17,25 @@ export function asyncHandler(fn) {
 }
 
 export function errorHandler(err, req, res, next) {
+  const status = err.status || err.statusCode || 500;
   // ===== PRINT THE REAL ERROR TO RAILWAY LOGS =====
   console.error("========== SERVER ERROR ==========");
   console.error("Time:", new Date().toISOString());
-  console.error("URL:", req.method, req.originalUrl);
+  console.error("Route:", req.originalUrl);
+  console.error("Method:", req.method);
+  console.error("HTTP status:", status);
   console.error("Message:", err.message);
   console.error("Code:", err.code);
   console.error("SQL Message:", err.sqlMessage);
+  console.error("SQL:", err.sqlText || err.sql || "");
+  console.error("Parameters:", JSON.stringify(err.sqlParams || {}, null, 2));
   console.error("Stack:");
   console.error(err.stack);
   console.error("==================================");
 
   if (err instanceof SyntaxError && err.status === 400 && "body" in err) {
     return res.status(400).json({
+      success: false,
       message: "Invalid JSON syntax. Check the request body and try again."
     });
   }
@@ -37,6 +43,7 @@ export function errorHandler(err, req, res, next) {
   if (err?.name === "ZodError") {
     const first = err.issues?.[0];
     return res.status(400).json({
+      success: false,
       message: first?.message || "Invalid input."
     });
   }
@@ -66,12 +73,13 @@ export function errorHandler(err, req, res, next) {
 
   if (err?.code === "ER_PARSE_ERROR") {
     return res.status(500).json({
+      success: false,
       message: err.message,
       sql: err.sqlMessage
     });
   }
 
-  res.status(err.status || 500).json({
+  res.status(status).json({
     success: false,
     message: err.message || "Internal server error",
     code: err.code || null

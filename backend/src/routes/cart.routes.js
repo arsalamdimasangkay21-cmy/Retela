@@ -19,9 +19,7 @@ export async function ensureCartTable() {
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       UNIQUE KEY uq_cart_user_product (user_id, product_id),
-      INDEX idx_cart_user_active (user_id, checked_out_at),
-      CONSTRAINT fk_cart_items_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-      CONSTRAINT fk_cart_items_product FOREIGN KEY (product_id) REFERENCES apparel_items(id)
+      INDEX idx_cart_user_active (user_id, checked_out_at)
     )
   `).catch((error) => {
     cartTableReady = undefined;

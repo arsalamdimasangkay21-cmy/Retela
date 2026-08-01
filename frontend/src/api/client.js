@@ -22,3 +22,16 @@ api.interceptors.request.use((config) => {
   if (token) config.headers.Authorization = `Bearer ${token}`;
   return config;
 });
+
+api.interceptors.response.use((response) => {
+  const payload = response.data;
+  if (
+    payload &&
+    typeof payload === "object" &&
+    payload.success === true &&
+    Object.prototype.hasOwnProperty.call(payload, "data")
+  ) {
+    response.data = payload.data;
+  }
+  return response;
+});
