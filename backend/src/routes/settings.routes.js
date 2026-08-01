@@ -221,10 +221,44 @@ async function resetBusinessAutoIncrements() {
   );
   const hasApparelTable = tables.some((row) => row.TABLE_NAME === "apparel_items" && row.TABLE_TYPE === "BASE TABLE");
   const hasProductsTable = tables.some((row) => row.TABLE_NAME === "products" && row.TABLE_TYPE === "BASE TABLE");
-  if (hasApparelTable) await query("ALTER TABLE apparel_items AUTO_INCREMENT = 1");
-  if (!hasApparelTable && hasProductsTable) await query("ALTER TABLE products AUTO_INCREMENT = 1");
-  await query("ALTER TABLE orders AUTO_INCREMENT = 1").catch(() => {});
-  await query("ALTER TABLE returns AUTO_INCREMENT = 1").catch(() => {});
+  const resetIfSafe = async (tableName) => {
+    try {
+      const [idColumn] = await query(
+        `SELECT COLUMN_NAME, EXTRA
+         FROM INFORMATION_SCHEMA.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE()
+           AND TABLE_NAME = :tableName
+           AND COLUMN_NAME = 'id'
+         LIMIT 1`,
+        { tableName }
+      );
+      const primaryKeyRows = await query(
+        `SELECT kcu.COLUMN_NAME
+         FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc
+         JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE kcu
+           ON tc.CONSTRAINT_SCHEMA = kcu.CONSTRAINT_SCHEMA
+          AND tc.TABLE_NAME = kcu.TABLE_NAME
+          AND tc.CONSTRAINT_NAME = kcu.CONSTRAINT_NAME
+         WHERE tc.CONSTRAINT_SCHEMA = DATABASE()
+           AND tc.TABLE_NAME = :tableName
+           AND tc.CONSTRAINT_TYPE = 'PRIMARY KEY'
+         ORDER BY kcu.ORDINAL_POSITION`,
+        { tableName }
+      );
+      const primaryKeyColumns = primaryKeyRows.map((row) => row.COLUMN_NAME);
+      if (!idColumn || !String(idColumn.EXTRA || "").includes("auto_increment") || primaryKeyColumns.length !== 1 || primaryKeyColumns[0] !== "id") {
+        console.warn(`[schema reset] Skipping AUTO_INCREMENT reset on ${tableName}: id is not an AUTO_INCREMENT PRIMARY KEY`);
+        return;
+      }
+      await query(`ALTER TABLE \`${tableName}\` AUTO_INCREMENT = 1`);
+    } catch (error) {
+      console.warn(`[schema reset] Skipping AUTO_INCREMENT reset on ${tableName}: ${error.message}`);
+    }
+  };
+  if (hasApparelTable) await resetIfSafe("apparel_items");
+  if (!hasApparelTable && hasProductsTable) await resetIfSafe("products");
+  await resetIfSafe("orders");
+  await resetIfSafe("returns");
 }
 
 router.post("/clear-demo-data", asyncHandler(async (req, res) => {

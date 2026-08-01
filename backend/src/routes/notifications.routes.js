@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { query } from "../config/db.js";
+import { query, safeModifyColumn } from "../config/db.js";
 import { asyncHandler } from "../utils/errors.js";
 import { requireAuth } from "../middleware/auth.js";
 
@@ -101,7 +101,7 @@ async function ensureNotificationBroadcastSchema() {
       await query("ALTER TABLE notifications ADD COLUMN broadcast_id INT NULL AFTER product_id");
       await query("CREATE INDEX idx_notifications_broadcast ON notifications (broadcast_id)");
     }
-    await query("ALTER TABLE notifications MODIFY type ENUM('approval','customer_registration','order','message','refund','new_product','inventory','system','feedback','broadcast') NOT NULL");
+    await safeModifyColumn("notifications", "type", "type enum update", "ALTER TABLE notifications MODIFY type ENUM('approval','customer_registration','order','message','refund','new_product','inventory','system','feedback','broadcast') NOT NULL");
     const broadcastRows = await query(
       `SELECT COLUMN_NAME
        FROM INFORMATION_SCHEMA.COLUMNS

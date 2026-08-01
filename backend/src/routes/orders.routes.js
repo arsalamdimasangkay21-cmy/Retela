@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
-import { pool, query } from "../config/db.js";
+import { pool, query, safeModifyColumn } from "../config/db.js";
 import { asyncHandler, HttpError } from "../utils/errors.js";
 import { requireApproved, requireAuth, requireRole } from "../middleware/auth.js";
 import { ensureProductInventoryColumns } from "../utils/productInventory.js";
@@ -21,9 +21,9 @@ async function ensureOrderColumns() {
          AND COLUMN_NAME IN ('tracking_number', 'fulfillment_method', 'subtotal_amount', 'coupon_discount', 'sale_discount', 'shipping_fee', 'coupon_code', 'payment_status', 'payment_reference', 'transaction_id', 'paid_at', 'payment_provider', 'checkout_session_id', 'checkout_url', 'order_channel', 'cash_received', 'change_amount', 'pos_cashier_id')`
     );
     const columns = new Set(rows.map((row) => row.COLUMN_NAME));
-    await query("ALTER TABLE orders MODIFY status ENUM('pending','awaiting_payment','paid','approved','processing','ready','completed','cancelled','payment_failed') NOT NULL DEFAULT 'pending'");
-    await query("ALTER TABLE orders MODIFY user_id INT NULL");
-    await query("ALTER TABLE orders MODIFY payment_method ENUM('cod','cash','gcash','debit','credit','maya') NOT NULL DEFAULT 'cod'");
+    await safeModifyColumn("orders", "status", "status enum update", "ALTER TABLE orders MODIFY status ENUM('pending','awaiting_payment','paid','approved','processing','ready','completed','cancelled','payment_failed') NOT NULL DEFAULT 'pending'");
+    await safeModifyColumn("orders", "user_id", "user_id nullable update", "ALTER TABLE orders MODIFY user_id INT NULL");
+    await safeModifyColumn("orders", "payment_method", "payment_method enum update", "ALTER TABLE orders MODIFY payment_method ENUM('cod','cash','gcash','debit','credit','maya') NOT NULL DEFAULT 'cod'");
     if (!columns.has("order_channel")) await query("ALTER TABLE orders ADD COLUMN order_channel ENUM('online','pos') NOT NULL DEFAULT 'online' AFTER user_id");
     if (!columns.has("tracking_number")) {
       await query("ALTER TABLE orders ADD COLUMN tracking_number VARCHAR(120) NULL AFTER payment_method");

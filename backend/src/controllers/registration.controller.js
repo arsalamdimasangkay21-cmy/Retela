@@ -2,7 +2,7 @@ import fs from "fs/promises";
 import path from "path";
 import { fileURLToPath } from "url";
 import { z } from "zod";
-import { query, transaction } from "../config/db.js";
+import { query, safeModifyColumn, transaction } from "../config/db.js";
 import { createOtp, hashPassword } from "../utils/auth.js";
 import { sendEmail } from "../utils/email.js";
 import { asyncHandler, HttpError } from "../utils/errors.js";
@@ -168,8 +168,8 @@ async function saveBufferedUpload(file) {
 
 export async function ensureVerificationTables() {
   verificationTablesReady ||= (async () => {
-    await query("ALTER TABLE users MODIFY email VARCHAR(160) NULL");
-    await query("ALTER TABLE users MODIFY status ENUM('pending_otp','pending','approved','rejected','suspended') NOT NULL DEFAULT 'pending_otp'");
+    await safeModifyColumn("users", "email", "email nullable update", "ALTER TABLE users MODIFY email VARCHAR(160) NULL");
+    await safeModifyColumn("users", "status", "status enum update", "ALTER TABLE users MODIFY status ENUM('pending_otp','pending','approved','rejected','suspended') NOT NULL DEFAULT 'pending_otp'");
     const userRows = await query(
       `SELECT COLUMN_NAME
        FROM INFORMATION_SCHEMA.COLUMNS
@@ -208,15 +208,17 @@ export async function ensureVerificationTables() {
     );
 
     const indexes = await query(
-      `SELECT INDEX_NAME
+      `SELECT INDEX_NAME, GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX) AS COLUMNS
        FROM INFORMATION_SCHEMA.STATISTICS
        WHERE TABLE_SCHEMA = DATABASE()
          AND TABLE_NAME = 'identity_verifications'
-         AND INDEX_NAME = 'uq_identity_id_number'
-       LIMIT 1`
+       GROUP BY INDEX_NAME`
     );
-    if (!indexes.length) {
-      await query("ALTER TABLE identity_verifications ADD UNIQUE KEY uq_identity_id_number (id_number)");
+    const hasIdNumberIndex = indexes.some((row) => row.INDEX_NAME === "uq_identity_id_number" || row.COLUMNS === "id_number");
+    if (!hasIdNumberIndex) {
+      await query("ALTER TABLE identity_verifications ADD UNIQUE KEY uq_identity_id_number (id_number)").catch((error) => {
+        console.warn(`[schema bootstrap] Skipping identity_verifications id_number unique key: ${error.message}`);
+      });
     }
 
     await query(

@@ -2,6 +2,19 @@ import { query } from "../config/db.js";
 
 let productInventoryColumnsReady;
 
+function warnProductMigrationSkipped(action, reason) {
+  console.warn(`[product inventory schema] Skipping ${action}: ${reason}`);
+}
+
+async function safeProductMigration(action, callback) {
+  try {
+    return await callback();
+  } catch (error) {
+    warnProductMigrationSkipped(action, error.message);
+    return undefined;
+  }
+}
+
 export function productSkuForId(id) {
   return `RETELA-${String(Number(id || 0)).padStart(6, "0")}`;
 }
@@ -99,99 +112,110 @@ async function ensureProductsViewIncludesSku(storageTable) {
 
 export async function ensureProductInventoryColumns() {
   productInventoryColumnsReady ||= (async () => {
-    const storageTable = await getProductStorageTable();
-    const rows = await query(
+    const storageTable = await safeProductMigration("product table detection", getProductStorageTable);
+    if (!storageTable) return;
+    const rows = await safeProductMigration("product column inspection", () => query(
       `SELECT COLUMN_NAME, CHARACTER_MAXIMUM_LENGTH
        FROM INFORMATION_SCHEMA.COLUMNS
        WHERE TABLE_SCHEMA = DATABASE()
          AND TABLE_NAME = :storageTable
          AND COLUMN_NAME IN ('sku', 'brand', 'category', 'gender', 'size', 'color', 'description', 'status', 'is_active', 'is_deleted', 'deleted_at', 'deleted_by', 'sale_enabled', 'sale_discount_percent', 'sale_product_ids_json', 'sale_starts_at', 'sale_ends_at')`,
       { storageTable }
-    );
+    ));
+    if (!rows) return;
+    const constraints = await safeProductMigration("product constraint inspection", () => query(
+      `SELECT CONSTRAINT_NAME, CONSTRAINT_TYPE
+       FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS
+       WHERE CONSTRAINT_SCHEMA = DATABASE()
+         AND TABLE_NAME = :storageTable`,
+      { storageTable }
+    ));
+    if (!constraints) return;
     const columns = new Set(rows.map((row) => row.COLUMN_NAME));
     const columnLengths = new Map(rows.map((row) => [row.COLUMN_NAME, Number(row.CHARACTER_MAXIMUM_LENGTH || 0)]));
 
     if (!columns.has("sku")) {
-      await query(`ALTER TABLE ${storageTable} ADD COLUMN sku VARCHAR(32) NULL AFTER id`);
+      await safeProductMigration("sku column", () => query(`ALTER TABLE \`${storageTable}\` ADD COLUMN sku VARCHAR(32) NULL AFTER id`));
     }
     if (!columns.has("brand")) {
-      await query(`ALTER TABLE ${storageTable} ADD COLUMN brand VARCHAR(120) NOT NULL DEFAULT 'Other' AFTER name`);
+      await safeProductMigration("brand column", () => query(`ALTER TABLE \`${storageTable}\` ADD COLUMN brand VARCHAR(120) NOT NULL DEFAULT 'Other' AFTER name`));
     }
     if (!columns.has("category")) {
-      await query(`ALTER TABLE ${storageTable} ADD COLUMN category VARCHAR(80) NOT NULL DEFAULT 'T-Shirts' AFTER brand`);
+      await safeProductMigration("category column", () => query(`ALTER TABLE \`${storageTable}\` ADD COLUMN category VARCHAR(80) NOT NULL DEFAULT 'T-Shirts' AFTER brand`));
     } else if (columnLengths.get("category") && columnLengths.get("category") < 80) {
-      await query(`ALTER TABLE ${storageTable} MODIFY category VARCHAR(80) NOT NULL DEFAULT 'T-Shirts'`);
+      await safeProductMigration("category column length", () => query(`ALTER TABLE \`${storageTable}\` MODIFY category VARCHAR(80) NOT NULL DEFAULT 'T-Shirts'`));
     }
     if (!columns.has("gender")) {
-      await query(`ALTER TABLE ${storageTable} ADD COLUMN gender VARCHAR(80) DEFAULT 'Other' AFTER category`);
+      await safeProductMigration("gender column", () => query(`ALTER TABLE \`${storageTable}\` ADD COLUMN gender VARCHAR(80) DEFAULT 'Other' AFTER category`));
     } else if (columnLengths.get("gender") && columnLengths.get("gender") < 80) {
-      await query(`ALTER TABLE ${storageTable} MODIFY gender VARCHAR(80) DEFAULT 'Other'`);
+      await safeProductMigration("gender column length", () => query(`ALTER TABLE \`${storageTable}\` MODIFY gender VARCHAR(80) DEFAULT 'Other'`));
     }
     if (!columns.has("size")) {
-      await query(`ALTER TABLE ${storageTable} ADD COLUMN size VARCHAR(80) DEFAULT 'Free Size' AFTER gender`);
+      await safeProductMigration("size column", () => query(`ALTER TABLE \`${storageTable}\` ADD COLUMN size VARCHAR(80) DEFAULT 'Free Size' AFTER gender`));
     } else if (columnLengths.get("size") && columnLengths.get("size") < 80) {
-      await query(`ALTER TABLE ${storageTable} MODIFY size VARCHAR(80) DEFAULT 'Free Size'`);
+      await safeProductMigration("size column length", () => query(`ALTER TABLE \`${storageTable}\` MODIFY size VARCHAR(80) DEFAULT 'Free Size'`));
     }
     if (!columns.has("color")) {
-      await query(`ALTER TABLE ${storageTable} ADD COLUMN color VARCHAR(80) NOT NULL DEFAULT 'Other' AFTER size`);
+      await safeProductMigration("color column", () => query(`ALTER TABLE \`${storageTable}\` ADD COLUMN color VARCHAR(80) NOT NULL DEFAULT 'Other' AFTER size`));
     }
     if (!columns.has("description")) {
-      await query(`ALTER TABLE ${storageTable} ADD COLUMN description TEXT NULL AFTER \`condition\``);
+      await safeProductMigration("description column", () => query(`ALTER TABLE \`${storageTable}\` ADD COLUMN description TEXT NULL AFTER \`condition\``));
     }
     if (!columns.has("status")) {
-      await query(`ALTER TABLE ${storageTable} ADD COLUMN status VARCHAR(20) NOT NULL DEFAULT 'In Stock' AFTER stock`);
+      await safeProductMigration("status column", () => query(`ALTER TABLE \`${storageTable}\` ADD COLUMN status VARCHAR(20) NOT NULL DEFAULT 'In Stock' AFTER stock`));
     }
     if (!columns.has("is_active")) {
-      await query(`ALTER TABLE ${storageTable} ADD COLUMN is_active BOOLEAN NOT NULL DEFAULT TRUE AFTER description`);
+      await safeProductMigration("is_active column", () => query(`ALTER TABLE \`${storageTable}\` ADD COLUMN is_active BOOLEAN NOT NULL DEFAULT TRUE AFTER description`));
     }
     if (!columns.has("is_deleted")) {
-      await query(`ALTER TABLE ${storageTable} ADD COLUMN is_deleted BOOLEAN NOT NULL DEFAULT FALSE AFTER is_active`);
+      await safeProductMigration("is_deleted column", () => query(`ALTER TABLE \`${storageTable}\` ADD COLUMN is_deleted BOOLEAN NOT NULL DEFAULT FALSE AFTER is_active`));
     }
     if (!columns.has("deleted_at")) {
-      await query(`ALTER TABLE ${storageTable} ADD COLUMN deleted_at DATETIME NULL AFTER is_deleted`);
+      await safeProductMigration("deleted_at column", () => query(`ALTER TABLE \`${storageTable}\` ADD COLUMN deleted_at DATETIME NULL AFTER is_deleted`));
     }
     if (!columns.has("deleted_by")) {
-      await query(`ALTER TABLE ${storageTable} ADD COLUMN deleted_by INT NULL AFTER deleted_at`);
+      await safeProductMigration("deleted_by column", () => query(`ALTER TABLE \`${storageTable}\` ADD COLUMN deleted_by INT NULL AFTER deleted_at`));
     }
     if (!columns.has("sale_enabled")) {
-      await query(`ALTER TABLE ${storageTable} ADD COLUMN sale_enabled BOOLEAN NOT NULL DEFAULT FALSE AFTER deleted_by`);
+      await safeProductMigration("sale_enabled column", () => query(`ALTER TABLE \`${storageTable}\` ADD COLUMN sale_enabled BOOLEAN NOT NULL DEFAULT FALSE AFTER deleted_by`));
     }
     if (!columns.has("sale_discount_percent")) {
-      await query(`ALTER TABLE ${storageTable} ADD COLUMN sale_discount_percent DECIMAL(5,2) NOT NULL DEFAULT 0 AFTER sale_enabled`);
+      await safeProductMigration("sale_discount_percent column", () => query(`ALTER TABLE \`${storageTable}\` ADD COLUMN sale_discount_percent DECIMAL(5,2) NOT NULL DEFAULT 0 AFTER sale_enabled`));
     }
     if (!columns.has("sale_product_ids_json")) {
-      await query(`ALTER TABLE ${storageTable} ADD COLUMN sale_product_ids_json JSON NULL AFTER sale_discount_percent`);
+      await safeProductMigration("sale_product_ids_json column", () => query(`ALTER TABLE \`${storageTable}\` ADD COLUMN sale_product_ids_json JSON NULL AFTER sale_discount_percent`));
     }
     if (!columns.has("sale_starts_at")) {
-      await query(`ALTER TABLE ${storageTable} ADD COLUMN sale_starts_at DATETIME NULL AFTER sale_product_ids_json`);
+      await safeProductMigration("sale_starts_at column", () => query(`ALTER TABLE \`${storageTable}\` ADD COLUMN sale_starts_at DATETIME NULL AFTER sale_product_ids_json`));
     }
     if (!columns.has("sale_ends_at")) {
-      await query(`ALTER TABLE ${storageTable} ADD COLUMN sale_ends_at DATETIME NULL AFTER sale_starts_at`);
+      await safeProductMigration("sale_ends_at column", () => query(`ALTER TABLE \`${storageTable}\` ADD COLUMN sale_ends_at DATETIME NULL AFTER sale_starts_at`));
     }
 
-    await query(`UPDATE ${storageTable}
+    await safeProductMigration("product inventory defaults", () => query(`UPDATE \`${storageTable}\`
       SET status = ${inventoryStatusSql("stock")},
           is_active = COALESCE(is_active, TRUE),
           is_deleted = COALESCE(is_deleted, FALSE),
           sku = CASE WHEN sku IS NULL OR sku = '' THEN CONCAT('RETELA-', LPAD(id, 6, '0')) ELSE sku END,
-          deleted_at = CASE WHEN is_deleted = TRUE AND deleted_at IS NULL THEN NOW() ELSE deleted_at END`);
+          deleted_at = CASE WHEN is_deleted = TRUE AND deleted_at IS NULL THEN NOW() ELSE deleted_at END`));
 
-    const skuIndexes = await query(
-      `SELECT INDEX_NAME
+    const skuIndexes = await safeProductMigration("sku index inspection", () => query(
+      `SELECT INDEX_NAME, GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX) AS COLUMNS
        FROM INFORMATION_SCHEMA.STATISTICS
        WHERE TABLE_SCHEMA = DATABASE()
          AND TABLE_NAME = :storageTable
-         AND INDEX_NAME = :indexName`,
-      { storageTable, indexName: `idx_${storageTable}_sku` }
-    );
-    if (!skuIndexes.length) {
-      await query(`CREATE UNIQUE INDEX idx_${storageTable}_sku ON ${storageTable} (sku)`);
+       GROUP BY INDEX_NAME`,
+      { storageTable }
+    ));
+    const hasSkuIndex = skuIndexes?.some((row) => row.INDEX_NAME === `idx_${storageTable}_sku` || row.COLUMNS === "sku");
+    if (skuIndexes && !hasSkuIndex) {
+      await safeProductMigration("sku unique index", () => query(`CREATE UNIQUE INDEX idx_${storageTable}_sku ON \`${storageTable}\` (sku)`));
     }
 
     await ensureProductsViewIncludesSku(storageTable);
   })().catch((error) => {
     productInventoryColumnsReady = undefined;
-    throw error;
+    warnProductMigrationSkipped("product inventory bootstrap", error.message);
   });
 
   return productInventoryColumnsReady;

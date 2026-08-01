@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
-import { query } from "../config/db.js";
+import { query, safeModifyColumn } from "../config/db.js";
 import { asyncHandler, HttpError } from "../utils/errors.js";
 import { requireApproved, requireAuth, requireRole } from "../middleware/auth.js";
 import { upload } from "../middleware/upload.js";
@@ -23,7 +23,7 @@ async function ensureReturnColumns() {
          AND COLUMN_NAME IN ('customer_id', 'product_id', 'brand_id', 'brand_name', 'product_name', 'order_number', 'amount', 'shipping_fee', 'estimated_refund', 'reason_category', 'refund_type', 'proof_images')`
     );
     const columns = new Set(rows.map((row) => row.COLUMN_NAME));
-    await query("ALTER TABLE returns MODIFY status ENUM('pending','under_review','approved','rejected','refunded') NOT NULL DEFAULT 'pending'");
+    await safeModifyColumn("returns", "status", "status enum update", "ALTER TABLE returns MODIFY status ENUM('pending','under_review','approved','rejected','refunded') NOT NULL DEFAULT 'pending'");
     if (!columns.has("customer_id")) {
       await query("ALTER TABLE returns ADD COLUMN customer_id INT NULL AFTER user_id");
       await query("CREATE INDEX idx_returns_customer ON returns(customer_id)").catch(() => {});
@@ -70,7 +70,7 @@ async function ensureReturnColumns() {
 }
 
 async function ensureReturnNotificationTypes() {
-  returnNotificationTypesReady ||= query("ALTER TABLE notifications MODIFY type ENUM('approval','customer_registration','order','message','refund','new_product','inventory','system','feedback','broadcast') NOT NULL");
+  returnNotificationTypesReady ||= safeModifyColumn("notifications", "type", "type enum update", "ALTER TABLE notifications MODIFY type ENUM('approval','customer_registration','order','message','refund','new_product','inventory','system','feedback','broadcast') NOT NULL");
   return returnNotificationTypesReady;
 }
 

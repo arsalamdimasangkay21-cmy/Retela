@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
-import { query } from "../config/db.js";
+import { query, safeModifyColumn } from "../config/db.js";
 import { requireApproved, requireAuth, requireRole } from "../middleware/auth.js";
 import { upload } from "../middleware/upload.js";
 import { asyncHandler, HttpError } from "../utils/errors.js";
@@ -80,8 +80,8 @@ async function ensureBroadcastSchema() {
       )
     `);
 
-    await query("ALTER TABLE broadcasts MODIFY audience ENUM('all_customers','by_location','by_product_interest','active_customers','new_customers','customers_with_orders','vip_customers') NOT NULL DEFAULT 'all_customers'");
-    await query("ALTER TABLE broadcasts MODIFY broadcast_type ENUM('new_arrival','new_product_drop','promo_sale','flash_sale','restock_alert','holiday_promo','order_update','event_announcement','ai_marketing_campaign') NOT NULL DEFAULT 'promo_sale'");
+    await safeModifyColumn("broadcasts", "audience", "audience enum update", "ALTER TABLE broadcasts MODIFY audience ENUM('all_customers','by_location','by_product_interest','active_customers','new_customers','customers_with_orders','vip_customers') NOT NULL DEFAULT 'all_customers'");
+    await safeModifyColumn("broadcasts", "broadcast_type", "broadcast_type enum update", "ALTER TABLE broadcasts MODIFY broadcast_type ENUM('new_arrival','new_product_drop','promo_sale','flash_sale','restock_alert','holiday_promo','order_update','event_announcement','ai_marketing_campaign') NOT NULL DEFAULT 'promo_sale'");
     const broadcastColumns = await query(
       `SELECT COLUMN_NAME
        FROM INFORMATION_SCHEMA.COLUMNS
@@ -153,7 +153,7 @@ async function ensureBroadcastSchema() {
       await query("ALTER TABLE notifications ADD CONSTRAINT fk_notifications_broadcast FOREIGN KEY (broadcast_id) REFERENCES broadcasts(id) ON DELETE SET NULL");
       await query("CREATE INDEX idx_notifications_broadcast ON notifications (broadcast_id)");
     }
-    await query("ALTER TABLE notifications MODIFY type ENUM('approval','customer_registration','order','message','refund','new_product','inventory','system','feedback','broadcast') NOT NULL");
+    await safeModifyColumn("notifications", "type", "type enum update", "ALTER TABLE notifications MODIFY type ENUM('approval','customer_registration','order','message','refund','new_product','inventory','system','feedback','broadcast') NOT NULL");
   })().catch((error) => {
     broadcastSchemaReady = undefined;
     throw error;

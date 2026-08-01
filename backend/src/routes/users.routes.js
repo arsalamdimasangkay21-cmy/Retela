@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
-import { query } from "../config/db.js";
+import { query, safeModifyColumn } from "../config/db.js";
 import { comparePassword, hashPassword } from "../utils/auth.js";
 import { asyncHandler, HttpError } from "../utils/errors.js";
 import { requireAuth, requireRole } from "../middleware/auth.js";
@@ -74,9 +74,9 @@ async function ensureUserColumns() {
       await query("ALTER TABLE users ADD COLUMN is_verified BOOLEAN NOT NULL DEFAULT false AFTER status");
       await query("UPDATE users SET is_verified = true WHERE role IN ('admin','staff') OR status = 'approved'");
     }
-    await query("ALTER TABLE users MODIFY role ENUM('admin','staff','customer') NOT NULL DEFAULT 'customer'");
-    await query("ALTER TABLE users MODIFY email VARCHAR(160) NULL");
-    await query("ALTER TABLE users MODIFY status ENUM('pending_otp','pending','approved','rejected','suspended') NOT NULL DEFAULT 'pending_otp'");
+    await safeModifyColumn("users", "role", "role enum update", "ALTER TABLE users MODIFY role ENUM('admin','staff','customer') NOT NULL DEFAULT 'customer'");
+    await safeModifyColumn("users", "email", "email nullable update", "ALTER TABLE users MODIFY email VARCHAR(160) NULL");
+    await safeModifyColumn("users", "status", "status enum update", "ALTER TABLE users MODIFY status ENUM('pending_otp','pending','approved','rejected','suspended') NOT NULL DEFAULT 'pending_otp'");
   })().catch((error) => {
     userColumnsReady = undefined;
     throw error;

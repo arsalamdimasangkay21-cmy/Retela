@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
-import { query } from "../config/db.js";
+import { query, safeModifyColumn } from "../config/db.js";
 import { asyncHandler, HttpError } from "../utils/errors.js";
 import { requireApproved, requireAuth } from "../middleware/auth.js";
 import { upload } from "../middleware/upload.js";
@@ -12,7 +12,7 @@ let reviewColumnsReady;
 const feedbackCategories = ["Apparel Quality", "Delivery", "Customer Service", "Payment", "Overall Experience"];
 
 async function ensureNotificationTypes() {
-  notificationTypesReady ||= query("ALTER TABLE notifications MODIFY type ENUM('approval','customer_registration','order','message','refund','new_product','inventory','system','feedback','broadcast') NOT NULL");
+  notificationTypesReady ||= safeModifyColumn("notifications", "type", "type enum update", "ALTER TABLE notifications MODIFY type ENUM('approval','customer_registration','order','message','refund','new_product','inventory','system','feedback','broadcast') NOT NULL");
   return notificationTypesReady;
 }
 

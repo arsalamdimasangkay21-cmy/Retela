@@ -12,6 +12,11 @@ dotenv.config();
 
 const requestContext = new AsyncLocalStorage();
 
+function isSchemaMigrationSql(sql) {
+  const normalized = String(sql || "").trim().replace(/\s+/g, " ").toUpperCase();
+  return /^(ALTER TABLE|CREATE TABLE|CREATE VIEW|CREATE INDEX|CREATE UNIQUE INDEX|DROP VIEW|DROP TABLE)\b/.test(normalized);
+}
+
 export const pool = mysql.createPool({
   host: process.env.DB_HOST || "localhost",
   user: process.env.DB_USER || "root",
@@ -43,6 +48,12 @@ export async function query(sql, params = {}) {
     return rows;
   } catch (err) {
     attachSqlContext(err, sql, params);
+    if (isSchemaMigrationSql(sql)) {
+      console.warn(`[schema migration] Skipping failed schema statement: ${err.message}`);
+      console.warn("SQL:", sql);
+      console.warn("Parameters:", JSON.stringify(params, null, 2));
+      return [];
+    }
     const context = err.requestContext || {};
     console.error("======================================");
     console.error("DATABASE ERROR");
@@ -130,7 +141,7 @@ async function tableOrViewExists(name) {
 
 async function columnSet(tableName) {
   const rows = await query(
-    `SELECT COLUMN_NAME, EXTRA
+    `SELECT COLUMN_NAME, EXTRA, COLUMN_KEY, DATA_TYPE, COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT, CHARACTER_MAXIMUM_LENGTH
      FROM INFORMATION_SCHEMA.COLUMNS
      WHERE TABLE_SCHEMA = DATABASE()
        AND TABLE_NAME = :tableName`,
@@ -139,40 +150,140 @@ async function columnSet(tableName) {
   return new Map(rows.map((row) => [row.COLUMN_NAME, row]));
 }
 
+async function primaryKeyColumns(tableName) {
+  const rows = await query(
+    `SELECT kcu.COLUMN_NAME
+     FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc
+     JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE kcu
+       ON tc.CONSTRAINT_SCHEMA = kcu.CONSTRAINT_SCHEMA
+      AND tc.TABLE_NAME = kcu.TABLE_NAME
+      AND tc.CONSTRAINT_NAME = kcu.CONSTRAINT_NAME
+     WHERE tc.CONSTRAINT_SCHEMA = DATABASE()
+       AND tc.TABLE_NAME = :tableName
+       AND tc.CONSTRAINT_TYPE = 'PRIMARY KEY'
+     ORDER BY kcu.ORDINAL_POSITION`,
+    { tableName }
+  );
+  return rows.map((row) => row.COLUMN_NAME);
+}
+
+async function tableConstraints(tableName) {
+  return query(
+    `SELECT CONSTRAINT_NAME, CONSTRAINT_TYPE
+     FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS
+     WHERE CONSTRAINT_SCHEMA = DATABASE()
+       AND TABLE_NAME = :tableName`,
+    { tableName }
+  );
+}
+
+async function autoIncrementColumns(tableName) {
+  const rows = await query(
+    `SELECT COLUMN_NAME
+     FROM INFORMATION_SCHEMA.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE()
+       AND TABLE_NAME = :tableName
+       AND EXTRA LIKE '%auto_increment%'`,
+    { tableName }
+  );
+  return rows.map((row) => row.COLUMN_NAME);
+}
+
+function warnMigrationSkipped(tableName, action, reason) {
+  console.warn(`[schema bootstrap] Skipping ${action} on ${tableName}: ${reason}`);
+}
+
+async function runSchemaMigration(tableName, action, callback) {
+  try {
+    return await callback();
+  } catch (error) {
+    console.warn(`[schema bootstrap] Skipping ${action} on ${tableName}: ${error.message}`);
+    return undefined;
+  }
+}
+
 async function ensureTable(tableName, ddl) {
-  if (await tableOrViewExists(tableName)) return;
-  await query(ddl);
+  await runSchemaMigration(tableName, "table creation", async () => {
+    if (await tableOrViewExists(tableName)) return;
+    await query(ddl);
+  });
 }
 
 async function ensureColumn(tableName, columnName, definition) {
-  if (!(await baseTableExists(tableName))) return;
-  const columns = await columnSet(tableName);
-  if (!columns.has(columnName)) {
-    await query(`ALTER TABLE \`${tableName}\` ADD COLUMN ${definition}`);
-  }
+  await runSchemaMigration(tableName, `column ${columnName}`, async () => {
+    if (!(await baseTableExists(tableName))) return;
+    const columns = await columnSet(tableName);
+    if (!columns.has(columnName)) {
+      await query(`ALTER TABLE \`${tableName}\` ADD COLUMN ${definition}`);
+    }
+  });
 }
 
-async function ensureIndex(tableName, indexName, ddl) {
-  if (!(await baseTableExists(tableName))) return;
-  const rows = await query(
-    `SELECT INDEX_NAME
-     FROM INFORMATION_SCHEMA.STATISTICS
-     WHERE TABLE_SCHEMA = DATABASE()
-       AND TABLE_NAME = :tableName
-       AND INDEX_NAME = :indexName
-     LIMIT 1`,
-    { tableName, indexName }
-  );
-  if (!rows.length) await query(ddl);
+async function ensureIndex(tableName, indexName, ddl, expectedColumns = []) {
+  await runSchemaMigration(tableName, `index ${indexName}`, async () => {
+    if (!(await baseTableExists(tableName))) return;
+    const rows = await query(
+      `SELECT INDEX_NAME, NON_UNIQUE, GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX) AS COLUMNS
+       FROM INFORMATION_SCHEMA.STATISTICS
+       WHERE TABLE_SCHEMA = DATABASE()
+         AND TABLE_NAME = :tableName
+       GROUP BY INDEX_NAME, NON_UNIQUE`,
+      { tableName }
+    );
+    if (rows.some((row) => row.INDEX_NAME === indexName)) return;
+    if (expectedColumns.length) {
+      const expected = expectedColumns.join(",");
+      if (rows.some((row) => String(row.COLUMNS || "") === expected)) return;
+    }
+    await query(ddl);
+  });
+}
+
+export async function safeModifyColumn(tableName, columnName, action, sql) {
+  await runSchemaMigration(tableName, action, async () => {
+    if (!(await baseTableExists(tableName))) return;
+    const columns = await columnSet(tableName);
+    await tableConstraints(tableName);
+    if (!columns.has(columnName)) {
+      warnMigrationSkipped(tableName, action, `${columnName} column does not exist`);
+      return;
+    }
+    await query(sql);
+  });
+}
+
+async function safeDataMigration(tableName, action, sql, params = {}) {
+  await runSchemaMigration(tableName, action, async () => {
+    if (!(await baseTableExists(tableName))) return;
+    await query(sql, params);
+  });
 }
 
 async function ensureAutoIncrementId(tableName) {
-  if (!(await baseTableExists(tableName))) return;
-  const columns = await columnSet(tableName);
-  const id = columns.get("id");
-  if (id && !String(id.EXTRA || "").includes("auto_increment")) {
+  await runSchemaMigration(tableName, "id AUTO_INCREMENT", async () => {
+    if (!(await baseTableExists(tableName))) return;
+    const columns = await columnSet(tableName);
+    const id = columns.get("id");
+    if (!id) {
+      warnMigrationSkipped(tableName, "id AUTO_INCREMENT", "id column does not exist");
+      return;
+    }
+    if (String(id.EXTRA || "").includes("auto_increment")) return;
+
+    const pkColumns = await primaryKeyColumns(tableName);
+    if (pkColumns.length !== 1 || pkColumns[0] !== "id") {
+      warnMigrationSkipped(tableName, "id AUTO_INCREMENT", "id is not the single-column PRIMARY KEY");
+      return;
+    }
+
+    const autoColumns = await autoIncrementColumns(tableName);
+    if (autoColumns.length > 0) {
+      warnMigrationSkipped(tableName, "id AUTO_INCREMENT", `another AUTO_INCREMENT column exists: ${autoColumns.join(", ")}`);
+      return;
+    }
+
     await query(`ALTER TABLE \`${tableName}\` MODIFY id INT NOT NULL AUTO_INCREMENT`);
-  }
+  });
 }
 
 async function getProductStorageTable() {
@@ -185,39 +296,41 @@ async function getProductStorageTable() {
 }
 
 async function ensureProductAlias(storageTable) {
-  const productsInfo = await tableInfo("products");
-  if (productsInfo) return;
-  if (storageTable !== "apparel_items") return;
-  await query(`
-    CREATE VIEW products AS
-    SELECT
-      id,
-      sku,
-      name,
-      brand,
-      category,
-      gender,
-      size,
-      color,
-      price,
-      stock,
-      status,
-      image_url,
-      \`condition\`,
-      description,
-      is_active,
-      is_deleted,
-      deleted_at,
-      deleted_by,
-      sale_enabled,
-      sale_discount_percent,
-      sale_product_ids_json,
-      sale_starts_at,
-      sale_ends_at,
-      created_at,
-      updated_at
-    FROM apparel_items
-  `);
+  await runSchemaMigration("products", "products view creation", async () => {
+    const productsInfo = await tableInfo("products");
+    if (productsInfo) return;
+    if (storageTable !== "apparel_items") return;
+    await query(`
+      CREATE VIEW products AS
+      SELECT
+        id,
+        sku,
+        name,
+        brand,
+        category,
+        gender,
+        size,
+        color,
+        price,
+        stock,
+        status,
+        image_url,
+        \`condition\`,
+        description,
+        is_active,
+        is_deleted,
+        deleted_at,
+        deleted_by,
+        sale_enabled,
+        sale_discount_percent,
+        sale_product_ids_json,
+        sale_starts_at,
+        sale_ends_at,
+        created_at,
+        updated_at
+      FROM apparel_items
+    `);
+  });
 }
 
 async function ensureProductColumns(storageTable) {
@@ -244,13 +357,13 @@ async function ensureProductColumns(storageTable) {
   await ensureColumn(storageTable, "sale_starts_at", "sale_starts_at DATETIME NULL AFTER sale_product_ids_json");
   await ensureColumn(storageTable, "sale_ends_at", "sale_ends_at DATETIME NULL AFTER sale_starts_at");
   await ensureAutoIncrementId(storageTable);
-  await query(`UPDATE \`${storageTable}\`
+  await safeDataMigration(storageTable, "product inventory defaults", `UPDATE \`${storageTable}\`
     SET sku = CASE WHEN sku IS NULL OR sku = '' THEN CONCAT('RETELA-', LPAD(id, 6, '0')) ELSE sku END,
         is_active = COALESCE(is_active, TRUE),
         is_deleted = COALESCE(is_deleted, FALSE),
         status = CASE WHEN stock <= 0 THEN 'Out of Stock' WHEN stock <= 5 THEN 'Low Stock' ELSE 'In Stock' END`);
-  await ensureIndex(storageTable, `idx_${storageTable}_sku`, `CREATE UNIQUE INDEX idx_${storageTable}_sku ON \`${storageTable}\` (sku)`);
-  await ensureIndex(storageTable, `idx_${storageTable}_deleted`, `CREATE INDEX idx_${storageTable}_deleted ON \`${storageTable}\` (is_deleted)`);
+  await ensureIndex(storageTable, `idx_${storageTable}_sku`, `CREATE UNIQUE INDEX idx_${storageTable}_sku ON \`${storageTable}\` (sku)`, ["sku"]);
+  await ensureIndex(storageTable, `idx_${storageTable}_deleted`, `CREATE INDEX idx_${storageTable}_deleted ON \`${storageTable}\` (is_deleted)`, ["is_deleted"]);
 }
 
 async function ensureCoreTables() {
@@ -305,9 +418,9 @@ async function ensureCoreTables() {
   await ensureColumn("users", "password_reset_verified_until", "password_reset_verified_until DATETIME NULL AFTER password_reset_otp_expires_at");
   await ensureColumn("users", "preferences", "preferences JSON NULL AFTER password_reset_verified_until");
   await ensureColumn("users", "last_active_at", "last_active_at DATETIME NULL AFTER preferences");
-  await query("ALTER TABLE users MODIFY role ENUM('admin','staff','customer') NOT NULL DEFAULT 'customer'");
-  await query("ALTER TABLE users MODIFY email VARCHAR(160) NULL");
-  await query("ALTER TABLE users MODIFY status ENUM('pending_otp','pending','approved','rejected','suspended') NOT NULL DEFAULT 'pending_otp'");
+  await safeModifyColumn("users", "role", "role enum update", "ALTER TABLE users MODIFY role ENUM('admin','staff','customer') NOT NULL DEFAULT 'customer'");
+  await safeModifyColumn("users", "email", "email nullable update", "ALTER TABLE users MODIFY email VARCHAR(160) NULL");
+  await safeModifyColumn("users", "status", "status enum update", "ALTER TABLE users MODIFY status ENUM('pending_otp','pending','approved','rejected','suspended') NOT NULL DEFAULT 'pending_otp'");
 
   const storageTable = await getProductStorageTable();
   if (!(await baseTableExists(storageTable))) {
@@ -383,7 +496,7 @@ async function ensureCoreTables() {
       )
     `);
     await ensureAutoIncrementId(tableName);
-    await ensureIndex(tableName, `uq_${tableName}_name`, `CREATE UNIQUE INDEX uq_${tableName}_name ON \`${tableName}\` (name)`);
+    await ensureIndex(tableName, `uq_${tableName}_name`, `CREATE UNIQUE INDEX uq_${tableName}_name ON \`${tableName}\` (name)`, ["name"]);
   }
 
   await ensureTable("orders", `
@@ -419,8 +532,8 @@ async function ensureCoreTables() {
     )
   `);
   await ensureAutoIncrementId("orders");
-  await query("ALTER TABLE orders MODIFY status ENUM('pending','awaiting_payment','paid','approved','processing','ready','completed','cancelled','payment_failed') NOT NULL DEFAULT 'pending'");
-  await query("ALTER TABLE orders MODIFY payment_method ENUM('cod','cash','gcash','debit','credit','maya') NOT NULL DEFAULT 'cod'");
+  await safeModifyColumn("orders", "status", "status enum update", "ALTER TABLE orders MODIFY status ENUM('pending','awaiting_payment','paid','approved','processing','ready','completed','cancelled','payment_failed') NOT NULL DEFAULT 'pending'");
+  await safeModifyColumn("orders", "payment_method", "payment_method enum update", "ALTER TABLE orders MODIFY payment_method ENUM('cod','cash','gcash','debit','credit','maya') NOT NULL DEFAULT 'cod'");
   await ensureColumn("orders", "order_channel", "order_channel ENUM('online','pos') NOT NULL DEFAULT 'online' AFTER user_id");
   await ensureColumn("orders", "payment_status", "payment_status ENUM('unpaid','awaiting_payment','paid','failed','cancelled','refunded') NOT NULL DEFAULT 'unpaid' AFTER payment_method");
   await ensureColumn("orders", "payment_reference", "payment_reference VARCHAR(160) NULL AFTER payment_status");
@@ -458,7 +571,7 @@ async function ensureCoreTables() {
   await ensureAutoIncrementId("cart_items");
   await ensureColumn("cart_items", "selected", "selected BOOLEAN NOT NULL DEFAULT TRUE AFTER quantity");
   await ensureColumn("cart_items", "checked_out_at", "checked_out_at DATETIME NULL AFTER selected");
-  await ensureIndex("cart_items", "uq_cart_user_product", "CREATE UNIQUE INDEX uq_cart_user_product ON cart_items (user_id, product_id)");
+  await ensureIndex("cart_items", "uq_cart_user_product", "CREATE UNIQUE INDEX uq_cart_user_product ON cart_items (user_id, product_id)", ["user_id", "product_id"]);
 
   await ensureTable("order_items", `
     CREATE TABLE IF NOT EXISTS order_items (
@@ -507,7 +620,7 @@ async function ensureCommunicationTables() {
     )
   `);
   await ensureAutoIncrementId("identity_verifications");
-  await ensureIndex("identity_verifications", "uq_identity_id_number", "CREATE UNIQUE INDEX uq_identity_id_number ON identity_verifications (id_number)");
+  await ensureIndex("identity_verifications", "uq_identity_id_number", "CREATE UNIQUE INDEX uq_identity_id_number ON identity_verifications (id_number)", ["id_number"]);
 
   await ensureTable("otp_codes", `
     CREATE TABLE IF NOT EXISTS otp_codes (
@@ -648,8 +761,8 @@ async function ensureCommunicationTables() {
   `);
   await ensureAutoIncrementId("notifications");
   await ensureColumn("notifications", "broadcast_id", "broadcast_id INT NULL AFTER product_id");
-  await ensureIndex("notifications", "idx_notifications_broadcast", "CREATE INDEX idx_notifications_broadcast ON notifications (broadcast_id)");
-  await query("ALTER TABLE notifications MODIFY type ENUM('approval','customer_registration','order','message','refund','new_product','inventory','system','feedback','broadcast') NOT NULL");
+  await ensureIndex("notifications", "idx_notifications_broadcast", "CREATE INDEX idx_notifications_broadcast ON notifications (broadcast_id)", ["broadcast_id"]);
+  await safeModifyColumn("notifications", "type", "type enum update", "ALTER TABLE notifications MODIFY type ENUM('approval','customer_registration','order','message','refund','new_product','inventory','system','feedback','broadcast') NOT NULL");
 
   await ensureTable("broadcast_deliveries", `
     CREATE TABLE IF NOT EXISTS broadcast_deliveries (
@@ -727,7 +840,7 @@ async function ensureCommunicationTables() {
     )
   `);
   await ensureAutoIncrementId("returns");
-  await query("ALTER TABLE returns MODIFY status ENUM('pending','under_review','approved','rejected','refunded') NOT NULL DEFAULT 'pending'");
+  await safeModifyColumn("returns", "status", "status enum update", "ALTER TABLE returns MODIFY status ENUM('pending','under_review','approved','rejected','refunded') NOT NULL DEFAULT 'pending'");
 
   await ensureTable("pos_transaction_logs", `
     CREATE TABLE IF NOT EXISTS pos_transaction_logs (
@@ -760,7 +873,9 @@ async function seedMissingOptionData() {
   };
   for (const [tableName, names] of Object.entries(defaults)) {
     for (const name of names) {
-      await query(
+      await safeDataMigration(
+        tableName,
+        `default option seed "${name}"`,
         `INSERT INTO \`${tableName}\` (name)
          SELECT :name
          WHERE NOT EXISTS (
@@ -773,8 +888,8 @@ async function seedMissingOptionData() {
 }
 
 export async function initializeDatabase() {
-  await ensureCoreTables();
-  await ensureCommunicationTables();
-  await seedMissingOptionData();
+  await runSchemaMigration("startup", "core schema bootstrap", ensureCoreTables);
+  await runSchemaMigration("startup", "communication schema bootstrap", ensureCommunicationTables);
+  await runSchemaMigration("startup", "option seed bootstrap", seedMissingOptionData);
   console.log("Retela database bootstrap complete");
 }
