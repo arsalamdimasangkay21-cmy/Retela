@@ -1,8 +1,7 @@
-import transporter from "./mailer.js";
+import { sendEmail } from "./mailer.js";
 
 export const sendOTP = async (email, otp) => {
-  await transporter.sendMail({
-    from: process.env.EMAIL_USER,
+  await sendEmail({
     to: email,
     subject: "Retela OTP Verification",
     html: `

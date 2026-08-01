@@ -1,14 +1,12 @@
-import nodemailer from "nodemailer";
+import { Resend } from "resend";
 
-const transporter = nodemailer.createTransport({
-  host: "smtp.gmail.com",
-  port: 465,
-  secure: true,
-  family: 4,
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
-  },
-});
+const resend = new Resend(process.env.RESEND_API_KEY);
 
-export default transporter;
+export async function sendEmail({ to, subject, html }) {
+  return await resend.emails.send({
+    from: "Retela <onboarding@resend.dev>",
+    to,
+    subject,
+    html,
+  });
+}
