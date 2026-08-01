@@ -46,8 +46,7 @@ async function getProductStorageTable() {
 }
 
 async function ensureProductsViewIncludesSku(storageTable) {
-  // Railway already uses a real "products" table.
-  // Only create the view if apparel_items exists.
+  // If using the existing products table, don't create a view.
   if (storageTable !== "apparel_items") {
     return;
   }
