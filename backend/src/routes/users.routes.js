@@ -84,6 +84,24 @@ async function ensureUserColumns() {
   return userColumnsReady;
 }
 
+router.get("/admin/payment-profile", asyncHandler(async (req, res) => {
+  await ensureUserColumns();
+  const users = await query(
+    `SELECT username, display_name, phone_number, location, shop_description, gcash_number, debit_account_name, debit_account_number
+     FROM users WHERE role = 'admin' ORDER BY id ASC LIMIT 1`
+  );
+  res.json(users[0] || {
+    username: "Retela Admin",
+    display_name: "Retela Admin",
+    phone_number: null,
+    location: null,
+    shop_description: null,
+    gcash_number: null,
+    debit_account_name: null,
+    debit_account_number: null
+  });
+}));
+
 router.use(requireAuth);
 
 router.get("/me", asyncHandler(async (req, res) => {
@@ -193,24 +211,6 @@ router.get("/", asyncHandler(async (req, res) => {
      ORDER BY FIELD(status, 'pending', 'approved', 'rejected', 'suspended'), created_at DESC`
   );
   res.json(users);
-}));
-
-router.get("/admin/payment-profile", asyncHandler(async (req, res) => {
-  await ensureUserColumns();
-  const users = await query(
-    `SELECT username, display_name, phone_number, location, shop_description, gcash_number, debit_account_name, debit_account_number
-     FROM users WHERE role = 'admin' ORDER BY id ASC LIMIT 1`
-  );
-  res.json(users[0] || {
-    username: "Retela Admin",
-    display_name: "Retela Admin",
-    phone_number: null,
-    location: null,
-    shop_description: null,
-    gcash_number: null,
-    debit_account_name: null,
-    debit_account_number: null
-  });
 }));
 
 router.patch("/me/deactivate", asyncHandler(async (req, res) => {
