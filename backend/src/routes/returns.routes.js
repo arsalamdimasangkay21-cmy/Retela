@@ -82,79 +82,77 @@ router.get("/", requireAuth, asyncHandler(async (req, res) => {
     : "WHERE r.user_id = :userId";
 
   const rows = await query(
-    `SELECT
-        r.id,
-        r.order_id,
-        r.user_id,
-        r.customer_id,
-        r.product_id,
-        r.brand_id,
-        r.brand_name,
-        r.product_name,
-        r.order_number,
-        r.amount,
-        r.reason,
-        r.reason_category,
-        r.refund_type,
-        r.shipping_fee,
-        r.estimated_refund,
-        r.image_url,
-        r.proof_images,
-        r.status,
-        r.admin_note,
-        r.decided_at,
-        r.created_at,
-        u.username,
-        o.total_amount,
-        o.status AS order_status,
-        COALESCE(
-          NULLIF(
-            GROUP_CONCAT(DISTINCT p.name ORDER BY p.name SEPARATOR ', '),
-            ''
-          ),
-          CONCAT('Order #', r.order_id)
-        ) AS product_names,
-        SUBSTRING_INDEX(
+  `SELECT
+      r.id,
+      r.order_id,
+      r.user_id,
+      r.customer_id,
+      r.product_id,
+      r.brand_id,
+      r.brand_name,
+      r.product_name,
+      r.order_number,
+      r.amount,
+      r.reason,
+      r.reason_category,
+      r.refund_type,
+      r.shipping_fee,
+      r.estimated_refund,
+      r.image_url,
+      r.proof_images,
+      r.status,
+      r.admin_note,
+      r.decided_at,
+      r.created_at,
+
+      MAX(u.username) AS username,
+      MAX(o.total_amount) AS total_amount,
+      MAX(o.status) AS order_status,
+
+      GROUP_CONCAT(DISTINCT p.name ORDER BY p.name SEPARATOR ', ') AS product_names,
+
+      SUBSTRING_INDEX(
           GROUP_CONCAT(p.image_url ORDER BY oi.id SEPARATOR '||'),
           '||',
           1
-        ) AS product_image
-     FROM returns r
-     JOIN users u ON u.id = r.user_id
-     JOIN orders o ON o.id = r.order_id
-     LEFT JOIN order_items oi ON oi.order_id = o.id
-     LEFT JOIN products p ON p.id = oi.product_id
-     ${where}
-     GROUP BY
-        r.id,
-        r.order_id,
-        r.user_id,
-        r.customer_id,
-        r.product_id,
-        r.brand_id,
-        r.brand_name,
-        r.product_name,
-        r.order_number,
-        r.amount,
-        r.reason,
-        r.reason_category,
-        r.refund_type,
-        r.shipping_fee,
-        r.estimated_refund,
-        r.image_url,
-        r.proof_images,
-        r.status,
-        r.admin_note,
-        r.decided_at,
-        r.created_at,
-        u.username,
-        o.total_amount,
-        o.status
-     ORDER BY r.created_at DESC`,
-    {
-      userId: req.user.id,
-    }
-  );
+      ) AS product_image
+
+   FROM returns r
+   JOIN users u ON u.id = r.user_id
+   JOIN orders o ON o.id = r.order_id
+   LEFT JOIN order_items oi ON oi.order_id = o.id
+   LEFT JOIN products p ON p.id = oi.product_id
+
+   ${where}
+
+   GROUP BY
+      r.id,
+      r.order_id,
+      r.user_id,
+      r.customer_id,
+      r.product_id,
+      r.brand_id,
+      r.brand_name,
+      r.product_name,
+      r.order_number,
+      r.amount,
+      r.reason,
+      r.reason_category,
+      r.refund_type,
+      r.shipping_fee,
+      r.estimated_refund,
+      r.image_url,
+      r.proof_images,
+      r.status,
+      r.admin_note,
+      r.decided_at,
+      r.created_at
+
+   ORDER BY r.created_at DESC`,
+  {
+    userId: req.user.id,
+  }
+);
 
   res.json(rows);
 }));
