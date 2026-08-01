@@ -212,18 +212,18 @@ export default function AppLayout({ children, active, onChange }) {
     <div className={`premium-shell min-h-screen overflow-x-hidden text-slate-900 transition-colors duration-300 ${darkMode ? "retela-dark-shell" : ""}`}>
       <Sidebar active={active} collapsed={sidebarCollapsed} onChange={onChange} onToggleCollapsed={() => setSidebarCollapsed((value) => !value)} logoUrl={logoUrl} />
       <main className={`min-w-0 transition-[margin] duration-500 ${sidebarCollapsed ? "lg:ml-28" : "lg:ml-80"}`}>
-        <header className="sticky top-0 z-20 px-4 py-4 pl-20 sm:px-6 lg:px-8 lg:pl-0 lg:pr-8">
-          <div className="premium-topbar flex min-h-16 flex-wrap items-center justify-between gap-3 rounded-[22px] border border-slate-200 bg-white px-4 py-3 shadow-lg shadow-slate-200/70">
-          <div className="min-w-0">
+        <header className="sticky top-0 z-20 px-3 py-3 pl-20 sm:px-5 lg:px-8 lg:pl-0 lg:pr-8">
+          <div className="premium-topbar flex min-h-16 flex-wrap items-center justify-between gap-2 rounded-[22px] border border-slate-200 bg-white px-3 py-3 shadow-lg shadow-slate-200/70 sm:gap-3 sm:px-4">
+          <div className="min-w-0 flex-1">
             <div className="flex items-center gap-3">
-              <img src={logoUrl} className="h-10 w-10 rounded-xl border border-emerald-100 object-cover" alt="RETELA logo" />
+              <img src={logoUrl} className="h-10 w-10 shrink-0 rounded-xl border border-emerald-100 object-cover" alt="RETELA logo" />
               <div className="min-w-0">
-                <p className="text-xs font-bold uppercase tracking-[0.22em] text-emerald-700">Tela to Pera Thrift Shop</p>
-                <h2 className="break-words font-display text-xl font-bold text-slate-950 sm:text-2xl">{active}</h2>
+                <p className="truncate text-[10px] font-bold uppercase tracking-[0.16em] text-emerald-700 sm:text-xs sm:tracking-[0.22em]">Tela to Pera Thrift Shop</p>
+                <h2 className="break-words font-display text-[clamp(1.05rem,4.8vw,1.5rem)] font-bold leading-tight text-slate-950">{active}</h2>
               </div>
             </div>
           </div>
-          <div className="flex min-w-0 items-center gap-2">
+          <div className="flex min-w-0 shrink-0 flex-wrap items-center justify-end gap-2">
             <div className="hidden items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-600 sm:flex">
               <CalendarDays size={16} className="text-emerald-700" />
               {now.toLocaleDateString()} {now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
@@ -234,12 +234,12 @@ export default function AppLayout({ children, active, onChange }) {
               </IconButtonWithBadge>
             ) : null}
             {user?.role === "customer" ? (
-              <button type="button" onClick={() => onChange("Cart")} className="relative grid h-10 w-10 place-items-center rounded-2xl border border-slate-200 bg-white text-slate-600 transition hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700" aria-label="Open cart">
+              <button type="button" onClick={() => onChange("Cart")} className="relative grid h-11 w-11 place-items-center rounded-2xl border border-slate-200 bg-white text-slate-600 transition hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700 sm:h-10 sm:w-10" aria-label="Open cart">
                 <ShoppingCart size={18} />
               </button>
             ) : null}
             {user?.role !== "staff" ? (
-              <button type="button" onClick={openNotifications} className="relative grid h-10 w-10 place-items-center rounded-2xl border border-slate-200 bg-white text-slate-600 transition hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700" aria-label={`Notifications${notificationCount ? `, ${notificationCount} unread` : ""}`}>
+              <button type="button" onClick={openNotifications} className="relative grid h-11 w-11 place-items-center rounded-2xl border border-slate-200 bg-white text-slate-600 transition hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700 sm:h-10 sm:w-10" aria-label={`Notifications${notificationCount ? `, ${notificationCount} unread` : ""}`}>
                 <Bell size={18} />
                 {notificationCount ? (
                   <span className="absolute -right-1 -top-1 grid min-h-5 min-w-5 place-items-center rounded-full bg-rose-500 px-1.5 text-[11px] font-black leading-none text-white shadow-lg shadow-rose-950/40">
@@ -249,12 +249,12 @@ export default function AppLayout({ children, active, onChange }) {
               </button>
             ) : null}
             {user?.role === "customer" ? (
-              <button type="button" onClick={toggleCustomerTheme} className="grid h-10 w-10 place-items-center rounded-2xl border border-slate-200 bg-white text-slate-600 transition hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700" aria-label={darkMode ? "Switch to light mode" : "Switch to dark mode"} aria-pressed={darkMode}>
+              <button type="button" onClick={toggleCustomerTheme} className="grid h-11 w-11 place-items-center rounded-2xl border border-slate-200 bg-white text-slate-600 transition hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700 sm:h-10 sm:w-10" aria-label={darkMode ? "Switch to light mode" : "Switch to dark mode"} aria-pressed={darkMode}>
                 {darkMode ? <Moon size={18} /> : <Sun size={18} />}
               </button>
             ) : null}
             {user?.role !== "staff" ? (
-              <button type="button" onClick={() => onChange("Profile")} className="flex max-w-[170px] items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-slate-700 transition hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700">
+              <button type="button" onClick={() => onChange("Profile")} className="flex min-h-11 max-w-[44vw] items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-slate-700 transition hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700 sm:min-h-10 sm:max-w-[170px]">
                 <UserCircle size={18} className="shrink-0 text-emerald-700" />
                 <span className="truncate text-sm font-semibold">{profileName}</span>
               </button>
@@ -262,7 +262,7 @@ export default function AppLayout({ children, active, onChange }) {
           </div>
           </div>
         </header>
-        <div className="min-w-0 p-4 pt-2 sm:p-5 sm:pt-2 lg:p-8 lg:pt-3">{children}</div>
+        <div className="retela-page-content min-w-0 p-3 pt-2 sm:p-5 sm:pt-2 lg:p-8 lg:pt-3">{children}</div>
       </main>
       {toast ? (
         <div className="fixed inset-x-4 bottom-5 z-50 max-w-sm rounded-[20px] border border-emerald-100 bg-white p-4 text-slate-900 shadow-xl shadow-slate-200/80 sm:left-auto sm:right-5">
@@ -289,7 +289,7 @@ function toastTarget(type, role) {
 
 function IconButtonWithBadge({ count, label, onClick, children }) {
   return (
-    <button type="button" onClick={onClick} className="relative grid h-10 w-10 place-items-center rounded-2xl border border-slate-200 bg-white text-slate-600 transition hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700" aria-label={`${label}${count ? `, ${count} unread` : ""}`}>
+    <button type="button" onClick={onClick} className="relative grid h-11 w-11 place-items-center rounded-2xl border border-slate-200 bg-white text-slate-600 transition hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700 sm:h-10 sm:w-10" aria-label={`${label}${count ? `, ${count} unread` : ""}`}>
       {children}
       {count ? (
         <span className="absolute -right-1 -top-1 grid min-h-5 min-w-5 place-items-center rounded-full bg-rose-500 px-1.5 text-[11px] font-black leading-none text-white shadow-lg shadow-rose-950/40">

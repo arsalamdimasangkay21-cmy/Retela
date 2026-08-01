@@ -48,10 +48,10 @@ export default function Sidebar({ active, collapsed, onChange, onToggleCollapsed
 
   return (
     <>
-      <button className={`fixed left-4 top-4 z-50 grid h-11 w-11 place-items-center rounded-2xl border border-emerald-100 bg-white text-emerald-900 shadow-lg shadow-slate-200/80 transition lg:hidden ${open ? "pointer-events-none opacity-0" : "opacity-100"}`} onClick={() => setOpen(true)} aria-label="Open menu">
+      <button className={`fixed left-4 top-4 z-50 grid h-11 w-11 place-items-center rounded-2xl border border-emerald-100 bg-white text-emerald-900 shadow-lg shadow-slate-200/80 transition lg:hidden ${open ? "pointer-events-none opacity-0" : "opacity-100"}`} onClick={() => setOpen(true)} aria-label="Open menu" aria-controls="retela-sidebar" aria-expanded={open}>
         <Menu size={20} />
       </button>
-      <aside className={`premium-sidebar fixed inset-y-4 left-4 z-40 flex max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-[24px] border p-4 shadow-xl transition-[width,transform,opacity,padding,background-color,border-color,color,box-shadow] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-transform ${desktopCollapsed ? "lg:w-20 lg:p-3" : "lg:w-72"} ${open ? "w-72 translate-x-0 opacity-100" : "-translate-x-[calc(100%+2rem)] opacity-0 lg:translate-x-0 lg:opacity-100"}`}>
+      <aside id="retela-sidebar" className={`premium-sidebar fixed inset-y-4 left-4 z-40 flex w-[82vw] max-w-[320px] flex-col overflow-hidden rounded-[24px] border p-4 shadow-xl transition-[width,transform,opacity,padding,background-color,border-color,color,box-shadow] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-transform ${desktopCollapsed ? "lg:w-20 lg:p-3" : "lg:w-72"} ${open ? "translate-x-0 opacity-100" : "-translate-x-[calc(100%+2rem)] opacity-0 lg:translate-x-0 lg:opacity-100"}`} aria-hidden={!open ? undefined : false}>
         <div className={`flex items-center gap-3 overflow-hidden rounded-[20px] border border-[#14532D]/30 bg-[#14532D] text-white shadow-md shadow-emerald-950/20 ${desktopCollapsed ? "p-2 lg:flex-col lg:justify-center" : "p-4"}`}>
           <div className={`flex min-w-0 flex-1 items-center gap-3 ${desktopCollapsed ? "lg:flex-none lg:justify-center" : ""}`}>
             <img src={logoUrl} className="h-12 w-12 rounded-2xl border border-white/25 bg-white object-cover shadow-sm" alt="RETELA SYSTEM logo" />
@@ -89,7 +89,7 @@ export default function Sidebar({ active, collapsed, onChange, onToggleCollapsed
           <LogOut size={19} /> <span className={desktopCollapsed ? "lg:hidden" : ""}>Logout</span>
         </button>
       </aside>
-      {open ? <button aria-label="Close menu" className="fixed inset-0 z-30 bg-slate-900/30 backdrop-blur-sm lg:hidden" onClick={() => setOpen(false)} /> : null}
+      {open ? <button aria-label="Close menu" className="fixed inset-0 z-30 bg-slate-950/55 backdrop-blur-sm lg:hidden" onClick={() => setOpen(false)} /> : null}
     </>
   );
 }

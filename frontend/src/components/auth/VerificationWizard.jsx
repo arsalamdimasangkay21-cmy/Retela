@@ -7,17 +7,33 @@ import GovernmentIDStep from "./GovernmentIDStep";
 import OTPVerification from "./OTPVerification";
 import SelfieCaptureStep from "./SelfieCaptureStep";
 
-const steps = ["Government ID", "Selfie", "Gmail OTP"];
+const steps = ["Personal Info", "Selfie", "Government ID", "OTP", "Completed"];
 
 export default function VerificationWizard({ open, registration, onClose, onComplete }) {
-  const [step, setStep] = useState(0);
-  const [verification, setVerification] = useState({ idType: "", idNumber: "", idImage: null, idPreview: "", selfieImage: null, selfiePreview: "", faceMatchScore: 0 });
+  const [step, setStep] = useState(1);
+  const [verification, setVerification] = useState({
+    idType: "",
+    idNumber: "",
+    idImage: null,
+    idPreview: "",
+    idQualityVerified: false,
+    idLiveCapture: false,
+    selfieImage: null,
+    selfiePreview: "",
+    selfieBlinkVerified: false,
+    selfieLiveCapture: false,
+    faceMatchScore: 0
+  });
   const [otpEmail, setOtpEmail] = useState("");
+  const [otpMeta, setOtpMeta] = useState({ expiresInSeconds: 300, resendAfterSeconds: 60, maxAttempts: 5 });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  const sendOtpAfterSelfie = useCallback(async () => {
-    setVerification((value) => ({ ...value, faceMatchScore: 100 }));
+  const sendOtpAfterId = useCallback(async () => {
+    if (!verification.selfieImage || !verification.selfieBlinkVerified || !verification.selfieLiveCapture || !verification.idImage || !verification.idQualityVerified) {
+      setError("Complete selfie liveness and government ID capture before OTP verification.");
+      return;
+    }
     setLoading(true);
     setError("");
     try {
@@ -25,18 +41,27 @@ export default function VerificationWizard({ open, registration, onClose, onComp
         ...registration,
         idType: verification.idType,
         idNumber: verification.idNumber,
-        faceMatchScore: 100,
+        faceMatchScore: verification.faceMatchScore,
+        selfieBlinkVerified: verification.selfieBlinkVerified,
+        selfieLiveCapture: verification.selfieLiveCapture,
+        idQualityVerified: verification.idQualityVerified,
+        idLiveCapture: verification.idLiveCapture,
         idImage: verification.idImage,
         selfieImage: verification.selfieImage
       });
       setOtpEmail(data.email || registration.email);
-      setStep(2);
+      setOtpMeta({
+        expiresInSeconds: data.expiresInSeconds || 300,
+        resendAfterSeconds: data.resendAfterSeconds || 60,
+        maxAttempts: data.maxAttempts || 5
+      });
+      setStep(3);
     } catch (requestError) {
       setError(getApiErrorMessage(requestError, "Could not send OTP after registration review"));
     } finally {
       setLoading(false);
     }
-  }, [registration, verification.idImage, verification.idNumber, verification.idType, verification.selfieImage]);
+  }, [registration, verification.faceMatchScore, verification.idImage, verification.idLiveCapture, verification.idNumber, verification.idQualityVerified, verification.idType, verification.selfieBlinkVerified, verification.selfieImage, verification.selfieLiveCapture]);
 
   if (!open) return null;
 
@@ -63,30 +88,41 @@ export default function VerificationWizard({ open, registration, onClose, onComp
           ))}
         </div>
 
-        {step === 0 ? (
-          <GovernmentIDStep
-            data={verification}
-            onChange={setVerification}
-            onNext={() => setStep(1)}
-          />
-        ) : null}
-
         {step === 1 ? (
           <div className="retela-wizard-step">
             <SelfieCaptureStep
               selfie={verification.selfieImage}
               selfiePreview={verification.selfiePreview}
-              onBack={() => setStep(0)}
-              onCaptured={(file, preview) => setVerification((value) => ({ ...value, selfieImage: file, selfiePreview: preview }))}
-              onNext={sendOtpAfterSelfie}
+              livenessVerified={verification.selfieBlinkVerified}
+              onBack={onClose}
+              onCaptured={(file, preview, meta = {}) => setVerification((value) => ({
+                ...value,
+                selfieImage: file,
+                selfiePreview: preview,
+                selfieBlinkVerified: Boolean(meta.blinkVerified),
+                selfieLiveCapture: Boolean(meta.liveCapture),
+                faceMatchScore: meta.confidence ? Math.round(meta.confidence * 100) : value.faceMatchScore
+              }))}
+              onNext={() => setStep(2)}
             />
-            {loading ? <p className="text-sm font-semibold text-emerald-700"><Loader2 className="mr-2 inline animate-spin" size={16} />Sending Gmail OTP</p> : null}
-            {error ? <p className="retela-register-alert">{error}</p> : null}
           </div>
         ) : null}
 
         {step === 2 ? (
-          <OTPVerification email={otpEmail || registration.email} onVerified={onComplete} />
+          <GovernmentIDStep
+            data={verification}
+            onChange={setVerification}
+            onBack={() => setStep(1)}
+            onNext={sendOtpAfterId}
+            loading={loading}
+          />
+        ) : null}
+
+        {step === 2 && loading ? <p className="text-sm font-semibold text-emerald-700"><Loader2 className="mr-2 inline animate-spin" size={16} />Sending Gmail OTP</p> : null}
+        {step === 2 && error ? <p className="retela-register-alert">{error}</p> : null}
+
+        {step === 3 ? (
+          <OTPVerification email={otpEmail || registration.email} initialExpiresIn={otpMeta.expiresInSeconds} initialResendIn={otpMeta.resendAfterSeconds} maxAttempts={otpMeta.maxAttempts} onVerified={(data) => { setStep(4); onComplete(data); }} />
         ) : null}
       </section>
     </div>,

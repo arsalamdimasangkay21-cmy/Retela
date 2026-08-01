@@ -1,20 +1,94 @@
-import { useEffect, useRef, useState } from "react";
-import { Camera, RotateCcw, Upload } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Camera, CheckCircle2, Loader2, RotateCcw, ScanLine, TriangleAlert, Upload } from "lucide-react";
 import { checkRegistrationField } from "../../api/registration";
 import { Button } from "../ui";
-import { captureVideoFrame, compressImage } from "./imageTools";
+import { captureVideoFrame, compressImage, fileToImage } from "./imageTools";
 
 const idTypes = ["National ID", "Passport", "Driver's License", "PhilHealth ID", "UMID", "Postal ID", "PRC ID", "Voter's ID"];
+const stableDurationMs = 1000;
 
-export default function GovernmentIDStep({ data, onChange, onNext }) {
+function cameraErrorMessage(error) {
+  if (error?.name === "NotAllowedError" || error?.name === "SecurityError") return "Camera permission denied. Allow camera access to capture your ID.";
+  if (error?.name === "NotFoundError" || error?.name === "OverconstrainedError") return "No camera found. Connect or enable a camera and try again.";
+  return "Camera could not start. Check browser permissions and try again.";
+}
+
+function analyzeImageData(imageData) {
+  const { data, width, height } = imageData;
+  let brightness = 0;
+  let glarePixels = 0;
+  let edgeTotal = 0;
+  let samples = 0;
+
+  for (let y = 1; y < height - 1; y += 2) {
+    for (let x = 1; x < width - 1; x += 2) {
+      const index = (y * width + x) * 4;
+      const gray = (data[index] + data[index + 1] + data[index + 2]) / 3;
+      brightness += gray;
+      if (data[index] > 242 && data[index + 1] > 242 && data[index + 2] > 242) glarePixels += 1;
+      const left = ((y * width + x - 1) * 4);
+      const right = ((y * width + x + 1) * 4);
+      const top = (((y - 1) * width + x) * 4);
+      const bottom = (((y + 1) * width + x) * 4);
+      edgeTotal += Math.abs(((data[left] + data[left + 1] + data[left + 2]) / 3) - ((data[right] + data[right + 1] + data[right + 2]) / 3));
+      edgeTotal += Math.abs(((data[top] + data[top + 1] + data[top + 2]) / 3) - ((data[bottom] + data[bottom + 1] + data[bottom + 2]) / 3));
+      samples += 1;
+    }
+  }
+
+  const averageBrightness = brightness / Math.max(samples, 1);
+  const glareRatio = glarePixels / Math.max(samples, 1);
+  const edgeScore = edgeTotal / Math.max(samples, 1);
+  return { averageBrightness, glareRatio, edgeScore };
+}
+
+function qualityMessage(metrics, movement) {
+  if (!metrics) return "Place your ID inside the frame.";
+  if (movement > 9) return "Hold steady";
+  if (metrics.averageBrightness < 62) return "Improve lighting";
+  if (metrics.averageBrightness > 225) return "ID too bright";
+  if (metrics.glareRatio > 0.045) return "Reduce glare";
+  if (metrics.edgeScore < 14) return "ID blurry";
+  if (metrics.edgeScore < 18) return "Move closer";
+  return "";
+}
+
+async function analyzeStillFile(file) {
+  const image = await fileToImage(file);
+  const canvas = document.createElement("canvas");
+  const width = 420;
+  canvas.width = width;
+  canvas.height = Math.round((image.height / image.width) * width);
+  const context = canvas.getContext("2d");
+  context.drawImage(image, 0, 0, canvas.width, canvas.height);
+  return analyzeImageData(context.getImageData(0, 0, canvas.width, canvas.height));
+}
+
+export default function GovernmentIDStep({ data, onChange, onNext, onBack, loading = false }) {
   const videoRef = useRef(null);
   const streamRef = useRef(null);
+  const loopRef = useRef(0);
+  const stoppedRef = useRef(false);
+  const stableSinceRef = useRef(0);
+  const lastEdgeRef = useRef(null);
+  const capturedRef = useRef(false);
   const [cameraOpen, setCameraOpen] = useState(false);
+  const [status, setStatus] = useState("Camera Starting...");
+  const [quality, setQuality] = useState({ ok: false, message: "Place your ID inside the frame.", progress: 0 });
   const [error, setError] = useState("");
   const [idNumberError, setIdNumberError] = useState("");
   const [idNumberChecking, setIdNumberChecking] = useState(false);
 
-  useEffect(() => () => stopCamera(), []);
+  const stopCamera = useCallback(() => {
+    stoppedRef.current = true;
+    window.clearTimeout(loopRef.current);
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    streamRef.current = null;
+    if (videoRef.current) videoRef.current.srcObject = null;
+    setCameraOpen(false);
+  }, []);
+
+  useEffect(() => () => stopCamera(), [stopCamera]);
 
   useEffect(() => {
     const idNumber = data.idNumber?.trim();
@@ -38,86 +112,197 @@ export default function GovernmentIDStep({ data, onChange, onNext }) {
     };
   }, [data.idNumber]);
 
-  function stopCamera() {
-    streamRef.current?.getTracks().forEach((track) => track.stop());
-    streamRef.current = null;
-  }
-
-  async function openCamera() {
-    setError("");
+  const capture = useCallback(async (liveCapture = true) => {
+    if (!videoRef.current || capturedRef.current) return;
+    capturedRef.current = true;
+    setStatus("Capturing...");
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false });
+      const raw = captureVideoFrame(videoRef.current, "government-id.jpg");
+      const compressed = await compressImage(raw, 1800, 0.9);
+      onChange({
+        ...data,
+        idImage: compressed,
+        idPreview: URL.createObjectURL(compressed),
+        idQualityVerified: true,
+        idLiveCapture: liveCapture
+      });
+      stopCamera();
+      setStatus("ID captured");
+    } catch (captureError) {
+      capturedRef.current = false;
+      setError(captureError.message || "Capture failed. Please retake your ID.");
+    }
+  }, [data, onChange, stopCamera]);
+
+  const analyzeFrame = useCallback(() => {
+    if (stoppedRef.current || capturedRef.current) return;
+    const video = videoRef.current;
+    if (!video || video.readyState < 2 || !video.videoWidth) {
+      loopRef.current = window.setTimeout(analyzeFrame, 220);
+      return;
+    }
+
+    const canvas = document.createElement("canvas");
+    const width = 360;
+    const height = Math.round(width * (video.videoHeight / Math.max(video.videoWidth, 1)));
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d");
+    context.drawImage(video, 0, 0, width, height);
+    const frame = {
+      x: Math.round(width * 0.1),
+      y: Math.round(height * 0.2),
+      width: Math.round(width * 0.8),
+      height: Math.round(height * 0.52)
+    };
+    const metrics = analyzeImageData(context.getImageData(frame.x, frame.y, frame.width, frame.height));
+    const previousEdge = lastEdgeRef.current;
+    lastEdgeRef.current = metrics.edgeScore;
+    const movement = previousEdge === null ? 0 : Math.abs(metrics.edgeScore - previousEdge);
+    const message = qualityMessage(metrics, movement);
+
+    if (message) {
+      stableSinceRef.current = 0;
+      setQuality({ ok: false, message, progress: 0 });
+      setStatus(message);
+    } else {
+      const now = Date.now();
+      if (!stableSinceRef.current) stableSinceRef.current = now;
+      const progress = Math.min(1, (now - stableSinceRef.current) / stableDurationMs);
+      setQuality({ ok: progress >= 1, message: "Hold steady", progress });
+      setStatus(progress >= 1 ? "ID quality verified" : "Hold steady");
+      if (progress >= 1) {
+        capture(true);
+        return;
+      }
+    }
+
+    loopRef.current = window.setTimeout(analyzeFrame, 220);
+  }, [capture]);
+
+  const openCamera = useCallback(async () => {
+    setError("");
+    setStatus("Camera Starting...");
+    setQuality({ ok: false, message: "Place your ID inside the frame.", progress: 0 });
+    stoppedRef.current = false;
+    capturedRef.current = false;
+    stableSinceRef.current = 0;
+    lastEdgeRef.current = null;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: { ideal: "environment" },
+          width: { ideal: 1920 },
+          height: { ideal: 1080 }
+        },
+        audio: false
+      });
       streamRef.current = stream;
       setCameraOpen(true);
-      window.setTimeout(() => {
-        if (videoRef.current) videoRef.current.srcObject = stream;
-      }, 0);
-    } catch {
-      setError("Camera access is required to capture your ID.");
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play();
+      }
+      setStatus("Place your ID inside the frame.");
+      analyzeFrame();
+    } catch (cameraError) {
+      setError(cameraErrorMessage(cameraError));
+      setStatus("Camera unavailable");
     }
-  }
+  }, [analyzeFrame]);
+
+  useEffect(() => {
+    if (!data.idPreview) openCamera();
+    // Camera auto-start is intentionally mount-scoped; recapture/restart is explicit.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function selectFile(event) {
     const file = event.target.files?.[0];
     if (!file) return;
-    const compressed = await compressImage(file);
-    onChange({ ...data, idImage: compressed, idPreview: URL.createObjectURL(compressed) });
+    setError("");
+    try {
+      const metrics = await analyzeStillFile(file);
+      const message = qualityMessage(metrics, 0);
+      if (message) {
+        setError(message === "ID blurry" ? "ID blurry. Retake a sharper image." : `${message}. Retake or upload a clearer ID image.`);
+        return;
+      }
+      const compressed = await compressImage(file, 1800, 0.9);
+      onChange({ ...data, idImage: compressed, idPreview: URL.createObjectURL(compressed), idQualityVerified: true, idLiveCapture: false });
+      stopCamera();
+    } catch {
+      setError("Capture failed. Choose a clear JPG, PNG, or WebP image.");
+    }
   }
 
-  async function capture() {
-    if (!videoRef.current) return;
-    const raw = captureVideoFrame(videoRef.current, "government-id.jpg");
-    const compressed = await compressImage(raw);
-    onChange({ ...data, idImage: compressed, idPreview: URL.createObjectURL(compressed) });
-    stopCamera();
-    setCameraOpen(false);
+  function recapture() {
+    if (data.idPreview) URL.revokeObjectURL(data.idPreview);
+    onChange({ ...data, idImage: null, idPreview: "", idQualityVerified: false, idLiveCapture: false });
+    openCamera();
   }
 
-  const canContinue = data.idType && data.idNumber?.trim() && data.idImage && !idNumberError && !idNumberChecking;
+  const canContinue = data.idType && data.idNumber?.trim() && data.idImage && data.idQualityVerified && !idNumberError && !idNumberChecking && !loading;
 
   return (
     <div className="retela-wizard-step">
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="grid gap-2 text-sm font-semibold text-slate-700">
           Government ID
-          <select className="retela-register-input" value={data.idType || ""} onChange={(event) => onChange({ ...data, idType: event.target.value })}>
+          <select className="retela-register-input" value={data.idType || ""} onChange={(event) => onChange({ ...data, idType: event.target.value })} aria-label="Government ID type">
             <option value="">Select Government ID</option>
             {idTypes.map((type) => <option key={type} value={type}>{type}</option>)}
           </select>
         </label>
         <label className="grid gap-2 text-sm font-semibold text-slate-700">
           ID Number
-          <input className={`retela-register-input ${idNumberError ? "retela-register-invalid" : ""}`} value={data.idNumber || ""} onChange={(event) => onChange({ ...data, idNumber: event.target.value })} placeholder="Enter ID number" />
+          <input className={`retela-register-input ${idNumberError ? "retela-register-invalid" : ""}`} value={data.idNumber || ""} onChange={(event) => onChange({ ...data, idNumber: event.target.value })} placeholder="Enter ID number" aria-invalid={Boolean(idNumberError)} />
           {idNumberChecking ? <span className="retela-register-hint">Checking...</span> : null}
           {idNumberError ? <span className="retela-register-error">{idNumberError}</span> : null}
         </label>
       </div>
 
+      <div className="retela-guidance-panel" aria-live="polite">
+        <span><ScanLine size={16} /> Place your ID inside the frame.</span>
+        <span>Hold steady.</span>
+        <span>Improve lighting if needed.</span>
+      </div>
+
       <div className="retela-upload-panel">
-        {data.idPreview ? <img src={data.idPreview} alt="Government ID preview" className="retela-id-preview" /> : <div className="retela-empty-preview">No ID image selected</div>}
-        {cameraOpen ? (
-          <div className="grid gap-3">
-            <video ref={videoRef} autoPlay playsInline muted className="retela-camera-preview" />
-            <div className="flex flex-wrap gap-2">
-              <Button type="button" onClick={capture}><Camera size={16} /> Capture ID</Button>
-              <Button type="button" variant="secondary" onClick={() => { stopCamera(); setCameraOpen(false); }}><RotateCcw size={16} /> Cancel</Button>
+        {data.idPreview ? (
+          <img src={data.idPreview} alt="Government ID preview" className="retela-id-preview" />
+        ) : (
+          <div className="retela-id-camera-wrap">
+            <video ref={videoRef} autoPlay playsInline muted className="retela-camera-preview" aria-label="Live government ID camera" />
+            <div className="retela-id-outline" aria-hidden="true">
+              <span />
             </div>
           </div>
-        ) : (
-          <div className="flex flex-wrap gap-2">
-            <label className="retela-file-button">
-              <Upload size={16} />
-              Upload Image
-              <input type="file" accept="image/*" onChange={selectFile} />
-            </label>
-            <Button type="button" variant="secondary" onClick={openCamera}><Camera size={16} /> Open Camera</Button>
-            {data.idPreview ? <Button type="button" variant="secondary" onClick={() => onChange({ ...data, idImage: null, idPreview: "" })}><RotateCcw size={16} /> Retake</Button> : null}
-          </div>
         )}
+
+        <div className={`retela-live-status ${data.idQualityVerified ? "retela-live-status-ok" : ""}`} role="status" aria-live="polite">
+          {cameraOpen && !data.idPreview ? <Loader2 className="animate-spin" size={16} /> : data.idQualityVerified ? <CheckCircle2 size={17} /> : <Camera size={17} />}
+          <span>{data.idQualityVerified ? "Government ID verified" : status}</span>
+          {!data.idQualityVerified && quality.progress ? <strong>{Math.round(quality.progress * 100)}%</strong> : null}
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          <label className="retela-file-button">
+            <Upload size={16} />
+            Upload Image
+            <input type="file" accept="image/jpeg,image/png,image/webp" onChange={selectFile} />
+          </label>
+          <Button type="button" variant="secondary" onClick={openCamera}><Camera size={16} /> Open Camera</Button>
+          {data.idPreview ? <Button type="button" variant="secondary" onClick={recapture}><RotateCcw size={16} /> Recapture</Button> : null}
+        </div>
       </div>
-      {error ? <p className="retela-register-alert">{error}</p> : null}
+
+      {error ? <p className="retela-register-alert"><TriangleAlert size={16} /> {error}</p> : null}
       <div className="retela-wizard-actions">
-        <Button type="button" disabled={!canContinue} onClick={onNext}>Continue</Button>
+        <Button type="button" variant="secondary" onClick={onBack}>Back</Button>
+        <Button type="button" disabled={!canContinue} onClick={onNext}>
+          {loading ? <><Loader2 className="animate-spin" size={16} /> Sending OTP</> : "Continue"}
+        </Button>
       </div>
     </div>
   );

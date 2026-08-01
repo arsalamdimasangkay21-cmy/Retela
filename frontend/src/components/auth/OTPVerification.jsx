@@ -4,13 +4,21 @@ import { completeRegistrationOtp, resendRegistrationOtp } from "../../api/regist
 import { getApiErrorMessage } from "../../api/client";
 import { Button, Field } from "../ui";
 
-export default function OTPVerification({ email, onVerified }) {
+export default function OTPVerification({ email, initialExpiresIn = 300, initialResendIn = 60, maxAttempts = 5, onVerified }) {
   const [otp, setOtp] = useState("");
   const [attempts, setAttempts] = useState(0);
-  const [expiresIn, setExpiresIn] = useState(300);
-  const [resendIn, setResendIn] = useState(60);
+  const [expiresIn, setExpiresIn] = useState(initialExpiresIn);
+  const [resendIn, setResendIn] = useState(initialResendIn);
   const [loading, setLoading] = useState("");
   const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    setExpiresIn(initialExpiresIn);
+    setResendIn(initialResendIn);
+    setAttempts(0);
+    setOtp("");
+    setMessage("");
+  }, [email, initialExpiresIn, initialResendIn]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -28,7 +36,7 @@ export default function OTPVerification({ email, onVerified }) {
 
   async function verify(event) {
     event.preventDefault();
-    if (attempts >= 5) return;
+    if (attempts >= maxAttempts) return;
     setLoading("verify");
     setMessage("");
     try {
@@ -49,7 +57,7 @@ export default function OTPVerification({ email, onVerified }) {
       const { data } = await resendRegistrationOtp(email);
       setOtp("");
       setAttempts(0);
-      setExpiresIn(300);
+      setExpiresIn(data.expiresInSeconds || initialExpiresIn);
       setResendIn(data.resendAfterSeconds || 60);
       setMessage(data.message || "OTP resent.");
     } catch (error) {
@@ -59,7 +67,7 @@ export default function OTPVerification({ email, onVerified }) {
     }
   }
 
-  const locked = attempts >= 5;
+  const locked = attempts >= maxAttempts;
 
   return (
     <form className="retela-wizard-step" onSubmit={verify}>
@@ -69,7 +77,7 @@ export default function OTPVerification({ email, onVerified }) {
         <p className="mt-1 text-sm text-slate-500">Enter the 6-digit OTP sent to {email}. Expires in {timeLabel}.</p>
       </div>
       <Field icon={KeyRound} inputMode="numeric" maxLength={6} autoComplete="one-time-code" placeholder="6-digit OTP" value={otp} onChange={(event) => setOtp(event.target.value.replace(/\D/g, ""))} />
-      <p className="text-xs font-semibold text-slate-500">{Math.max(0, 5 - attempts)} attempts remaining</p>
+      <p className="text-xs font-semibold text-slate-500">{Math.max(0, maxAttempts - attempts)} attempts remaining</p>
       {message ? <p className="retela-register-alert">{message}</p> : null}
       <div className="retela-wizard-actions">
         <Button type="button" variant="secondary" disabled={loading === "resend" || resendIn > 0} onClick={resend}>
