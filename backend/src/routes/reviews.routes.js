@@ -62,20 +62,71 @@ async function ensureReviewColumns() {
 router.get("/", requireAuth, asyncHandler(async (req, res) => {
   await ensureReviewColumns();
   const where = req.user.role === "admin" ? "" : "WHERE r.user_id = :userId";
-  const rows = await query(
-    `SELECT r.*, u.username, p.name AS product_name, o.total_amount, o.status AS order_status,
-       GROUP_CONCAT(DISTINCT op.name ORDER BY op.name SEPARATOR ', ') AS order_products
-     FROM reviews r
-     JOIN users u ON u.id = r.user_id
-     LEFT JOIN products p ON p.id = r.product_id
-     LEFT JOIN orders o ON o.id = r.order_id
-     LEFT JOIN order_items oi ON oi.order_id = o.id
-     LEFT JOIN products op ON op.id = oi.product_id
-     ${where}
-     GROUP BY r.id
-     ORDER BY r.created_at DESC`,
-    { userId: req.user.id }
-  );
+ const rows = await query(
+`SELECT
+    r.id,
+    r.user_id,
+    r.customer_id,
+    r.order_id,
+    r.product_id,
+    r.brand_id,
+    r.brand_name,
+    r.product_name,
+    r.order_number,
+    r.amount_paid,
+    r.rating,
+    r.category,
+    r.comment,
+    r.image_url,
+    r.created_at,
+
+    MAX(u.username) AS username,
+    MAX(p.name) AS product_name,
+    MAX(o.total_amount) AS total_amount,
+    MAX(o.status) AS order_status,
+
+    GROUP_CONCAT(
+        DISTINCT op.name
+        ORDER BY op.name
+        SEPARATOR ', '
+    ) AS order_products
+
+FROM reviews r
+JOIN users u
+    ON u.id = r.user_id
+LEFT JOIN products p
+    ON p.id = r.product_id
+LEFT JOIN orders o
+    ON o.id = r.order_id
+LEFT JOIN order_items oi
+    ON oi.order_id = o.id
+LEFT JOIN products op
+    ON op.id = oi.product_id
+
+${where}
+
+GROUP BY
+    r.id,
+    r.user_id,
+    r.customer_id,
+    r.order_id,
+    r.product_id,
+    r.brand_id,
+    r.brand_name,
+    r.product_name,
+    r.order_number,
+    r.amount_paid,
+    r.rating,
+    r.category,
+    r.comment,
+    r.image_url,
+    r.created_at
+
+ORDER BY r.created_at DESC`,
+{
+    userId: req.user.id,
+}
+);
   res.json(rows);
 }));
 
