@@ -46,32 +46,43 @@ async function getProductStorageTable() {
 }
 
 async function ensureProductsViewIncludesSku(storageTable) {
-  if (storageTable !== "apparel_items") return;
-  await query(`
-    CREATE OR REPLACE VIEW products AS
-    SELECT
-      id,
-      sku,
-      name,
-      brand,
-      category,
-      gender,
-      size,
-      color,
-      price,
-      stock,
-      status,
-      image_url,
-      \`condition\`,
-      description,
-      is_active,
-      is_deleted,
-      deleted_at,
-      deleted_by,
-      created_at,
-      updated_at
-    FROM apparel_items
-  `);
+  // Railway already uses a real "products" table.
+  // Only create the view if apparel_items exists.
+  if (storageTable !== "apparel_items") {
+    return;
+  }
+
+  try {
+    await query("DROP VIEW IF EXISTS products");
+
+    await query(`
+      CREATE VIEW products AS
+      SELECT
+        id,
+        sku,
+        name,
+        brand,
+        category,
+        gender,
+        size,
+        color,
+        price,
+        stock,
+        status,
+        image_url,
+        \`condition\`,
+        description,
+        is_active,
+        is_deleted,
+        deleted_at,
+        deleted_by,
+        created_at,
+        updated_at
+      FROM apparel_items
+    `);
+  } catch (err) {
+    console.log("Skipping products view creation:", err.message);
+  }
 }
 
 export async function ensureProductInventoryColumns() {
