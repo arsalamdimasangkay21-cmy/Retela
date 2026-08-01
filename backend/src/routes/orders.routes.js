@@ -57,21 +57,85 @@ router.get("/", requireAuth, requireApproved, asyncHandler(async (req, res) => {
   await ensureOrderColumns();
   const where = req.user.role === "admin" ? "" : "WHERE o.user_id = :userId";
   const orders = await query(
-    `SELECT o.*, u.username, u.location, u.phone_number,
-       COUNT(oi.id) AS item_count,
-       GROUP_CONCAT(DISTINCT p.brand ORDER BY p.brand SEPARATOR ', ') AS brands,
-       GROUP_CONCAT(DISTINCT p.name ORDER BY p.name SEPARATOR ', ') AS product_names,
-       SUBSTRING_INDEX(GROUP_CONCAT(p.name ORDER BY oi.id SEPARATOR '||'), '||', 1) AS first_product_name,
-       SUBSTRING_INDEX(GROUP_CONCAT(p.image_url ORDER BY oi.id SEPARATOR '||'), '||', 1) AS first_product_image
-     FROM orders o
-     LEFT JOIN users u ON u.id = o.user_id
-     LEFT JOIN order_items oi ON oi.order_id = o.id
-     LEFT JOIN products p ON p.id = oi.product_id
-     ${where}
-     GROUP BY o.id
-     ORDER BY o.created_at DESC`,
-    { userId: req.user.id }
-  );
+`SELECT
+    o.id,
+    o.user_id,
+    o.order_channel,
+    o.status,
+    o.payment_method,
+    o.payment_status,
+    o.payment_reference,
+    o.transaction_id,
+    o.paid_at,
+    o.cash_received,
+    o.change_amount,
+    o.tracking_number,
+    o.fulfillment_method,
+    o.subtotal_amount,
+    o.coupon_discount,
+    o.sale_discount,
+    o.shipping_fee,
+    o.coupon_code,
+    o.total_amount,
+    o.checkout_url,
+    o.created_at,
+
+    MAX(u.username) AS username,
+    MAX(u.location) AS location,
+    MAX(u.phone_number) AS phone_number,
+
+    COUNT(oi.id) AS item_count,
+
+    GROUP_CONCAT(DISTINCT p.brand ORDER BY p.brand SEPARATOR ', ') AS brands,
+
+    GROUP_CONCAT(DISTINCT p.name ORDER BY p.name SEPARATOR ', ') AS product_names,
+
+    SUBSTRING_INDEX(
+        GROUP_CONCAT(p.name ORDER BY oi.id SEPARATOR '||'),
+        '||',
+        1
+    ) AS first_product_name,
+
+    SUBSTRING_INDEX(
+        GROUP_CONCAT(p.image_url ORDER BY oi.id SEPARATOR '||'),
+        '||',
+        1
+    ) AS first_product_image
+
+FROM orders o
+LEFT JOIN users u ON u.id = o.user_id
+LEFT JOIN order_items oi ON oi.order_id = o.id
+LEFT JOIN products p ON p.id = oi.product_id
+
+${where}
+
+GROUP BY
+    o.id,
+    o.user_id,
+    o.order_channel,
+    o.status,
+    o.payment_method,
+    o.payment_status,
+    o.payment_reference,
+    o.transaction_id,
+    o.paid_at,
+    o.cash_received,
+    o.change_amount,
+    o.tracking_number,
+    o.fulfillment_method,
+    o.subtotal_amount,
+    o.coupon_discount,
+    o.sale_discount,
+    o.shipping_fee,
+    o.coupon_code,
+    o.total_amount,
+    o.checkout_url,
+    o.created_at
+
+ORDER BY o.created_at DESC`,
+{
+    userId: req.user.id,
+});
   res.json(orders);
 }));
 
