@@ -91,6 +91,37 @@ export function createRequireAuth({
 
 export const requireAuth = createRequireAuth();
 
+export function createOptionalAuth({
+  queryFn = query,
+  ensureColumns = ensureAuthUserColumns,
+  verifyToken = (token) => jwt.verify(token, getJwtSecret()),
+  logger = console
+} = {}) {
+  return async function optionalAuth(req, res, next) {
+    const header = req.headers.authorization || "";
+    if (!header) return next();
+
+    try {
+      const token = bearerTokenFromHeader(header);
+      const payload = verifyBearerToken(token, verifyToken);
+      await ensureColumns();
+      const users = await queryFn(
+        "SELECT id, username, display_name, email, role, status, is_verified, is_verified AS isVerified FROM users WHERE id = :id",
+        { id: payload.id }
+      );
+      if (users.length) req.user = users[0];
+    } catch (error) {
+      authDebug(req, "Optional authentication ignored", {
+        reason: error?.message || "Invalid optional token"
+      }, logger);
+    }
+
+    next();
+  };
+}
+
+export const optionalAuth = createOptionalAuth();
+
 export function requireRole(...roles) {
   return (req, res, next) => {
     if (!roles.includes(req.user?.role)) return next(new HttpError(403, "Forbidden"));

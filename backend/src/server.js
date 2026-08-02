@@ -14,19 +14,19 @@ if (!process.env.PAYMONGO_SECRET_KEY && !globalThis.__RETELA_PAYMONGO_WARNING_LO
 
 const port = process.env.PORT || 5000;
 
-async function initializeDatabaseWithRetry(delayMs = 15000) {
+async function initializeDatabaseOrExit() {
   try {
     await initializeDatabase();
   } catch (error) {
-    console.error("[database] Bootstrap failed. API will stay online and retry.", {
+    console.error("[database] Startup failed. API will not start with a broken database connection.", {
       code: error.code || null,
       message: error.message
     });
-    setTimeout(() => initializeDatabaseWithRetry(delayMs), delayMs).unref?.();
+    process.exit(1);
   }
 }
 
-await initializeDatabaseWithRetry();
+await initializeDatabaseOrExit();
 
 const app = createApp();
 const httpServer = createServer(app);
@@ -43,6 +43,15 @@ const io = new Server(httpServer, {
 
 app.set("io", io);
 configureSocket(io);
+
+httpServer.on("error", (error) => {
+  console.error("[server] Unable to start HTTP server.", {
+    code: error.code || null,
+    message: error.message,
+    port
+  });
+  process.exit(1);
+});
 
 httpServer.listen(port, () => {
   console.log(`Retela API running on port ${port}`);

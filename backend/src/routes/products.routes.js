@@ -334,11 +334,12 @@ router.put("/:id", requireAuth, requireRole("admin"), upload.single("image"), as
   const input = productSchema.parse(normalizeProductInput({ ...req.body, image_url: req.file ? `/uploads/${req.file.filename}` : req.body.image_url }));
   await ensureProductOptionValues(input);
   const status = productStatusForStock(input.stock);
-  await query(
+  const result = await query(
     `UPDATE \`${table}\` SET name=:name, brand=:brand, category=:category, gender=:gender, size=:size, color=:color, price=:price,
      stock=:stock, status=:status, image_url=:image_url, \`condition\`=:condition, description=:description WHERE id=:id AND ${nonDeletedProductWhere()}`,
     { ...input, status, id: productId }
   );
+  if (!result.affectedRows) throw new HttpError(404, "Apparel item not found");
   const apparel = { id: productId, ...input, status };
   req.app.get("io")?.emit("inventory:update", { type: "inventory", action: "updated", apparel });
   req.app.get("io")?.emit("product:update", apparel);
@@ -376,7 +377,7 @@ router.delete("/:id", requireAuth, requireRole("admin"), asyncHandler(async (req
   const productId = parseProductId(req.params.id);
   const existing = await query("SELECT id FROM products WHERE id = :id AND is_deleted = FALSE", { id: productId });
   if (!existing.length) throw new HttpError(404, "Apparel item not found");
-  await query(
+  const result = await query(
     `UPDATE \`${table}\`
      SET is_deleted = TRUE,
          deleted_at = NOW(),
@@ -385,6 +386,7 @@ router.delete("/:id", requireAuth, requireRole("admin"), asyncHandler(async (req
      WHERE id = :id`,
     { id: productId, deletedBy: req.user.id }
   );
+  if (!result.affectedRows) throw new HttpError(404, "Apparel item not found");
   req.app.get("io")?.emit("inventory:update", { type: "inventory", action: "archived", id: productId });
   res.json({ message: "Apparel item archived", isDeleted: true, deletedAt: new Date().toISOString() });
 }));

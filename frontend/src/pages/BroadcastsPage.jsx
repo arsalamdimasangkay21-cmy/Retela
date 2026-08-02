@@ -133,6 +133,17 @@ function titleCase(value) {
   return String(value || "").replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
+function parseJson(value, fallback) {
+  if (!value) return fallback;
+  if (typeof value !== "string") return value;
+  try {
+    return JSON.parse(value);
+  } catch (error) {
+    if (import.meta.env.DEV) console.warn("Unable to parse broadcast JSON field", error);
+    return fallback;
+  }
+}
+
 export default function BroadcastsPage() {
   const [form, setForm] = useState(emptyForm);
   const [history, setHistory] = useState([]);

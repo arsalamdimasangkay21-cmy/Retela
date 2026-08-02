@@ -97,10 +97,11 @@ export function createApp(io) {
       checkedAt: new Date().toISOString(),
       error: error.code || "database_unavailable"
     }));
-    res.json({
+    res.status(database.connected ? 200 : 503).json({
+      success: database.connected,
       status: "ok",
-      service: "retela-api",
-      database
+      database: database.connected ? "connected" : "unavailable",
+      checkedAt: database.checkedAt
     });
   });
 

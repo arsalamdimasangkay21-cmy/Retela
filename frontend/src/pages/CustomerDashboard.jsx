@@ -14,6 +14,7 @@ import { ChangePasswordForm } from "../components/ChangePasswordForm";
 import { Button, Card, Field } from "../components/ui";
 import { resolveAssetUrl } from "../config/branding";
 import { useAuth } from "../context/AuthContext";
+import { emitUserThemeChange, readUserTheme, saveUserTheme } from "../utils/userTheme";
 
 const assetUrl = (url) => resolveAssetUrl(url) || (!url ? "" : `${API_URL.replace(/\/api$/, "")}${url}`);
 const productCategories = ["T-Shirts", "Jackets", "Caps"];

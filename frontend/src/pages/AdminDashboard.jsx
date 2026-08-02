@@ -161,6 +161,8 @@ export default function AdminDashboard({ active, onChange }) {
   const [productToast, setProductToast] = useState(null);
   const [apparelOptions, setApparelOptions] = useState({ brands: [], categories: [], types: [], sizes: [], conditions: [] });
   const [deletingProductIds, setDeletingProductIds] = useState([]);
+  const [productSaving, setProductSaving] = useState(false);
+  const [busyAction, setBusyAction] = useState("");
   const mountedRef = useRef(true);
   const refreshTimerRef = useRef(null);
 
@@ -348,6 +350,14 @@ export default function AdminDashboard({ active, onChange }) {
 
   async function saveProduct(event, resolvedForm = form) {
     event.preventDefault();
+    if (productSaving) return;
+    const price = Number(resolvedForm.price);
+    const stock = Number(resolvedForm.stock);
+    if (!resolvedForm.name?.trim() || !Number.isFinite(price) || price <= 0 || !Number.isInteger(stock) || stock < 0) {
+      showProductToast("Enter a valid apparel name, positive price, and non-negative stock.", "error");
+      return;
+    }
+    setProductSaving(true);
     try {
       const payload = new FormData();
       Object.entries(resolvedForm).forEach(([key, value]) => payload.append(key, value ?? ""));
@@ -366,6 +376,8 @@ export default function AdminDashboard({ active, onChange }) {
       showProductToast(response?.data?.message || (editingProductId ? "Apparel item updated successfully." : "Apparel item saved successfully."));
     } catch (error) {
       showProductToast(getApiErrorMessage(error, "Could not save this apparel item."), "error");
+    } finally {
+      setProductSaving(false);
     }
   }
 
@@ -415,16 +427,40 @@ export default function AdminDashboard({ active, onChange }) {
 
   async function updateStock(id, change) {
     if (String(id).startsWith("sample-")) return;
-    await api.patch(`/products/${id}/stock`, { delta: change });
-    await refreshProductLists();
-    showProductToast(change > 0 ? "Apparel item restocked successfully." : "Stock updated successfully.");
+    const productId = validProductId(id);
+    if (!productId) {
+      showProductToast("Cannot update stock because the product ID is missing.", "error");
+      return;
+    }
+    const actionKey = `stock-${productId}`;
+    if (busyAction === actionKey) return;
+    setBusyAction(actionKey);
+    try {
+      await api.patch(`/products/${productId}/stock`, { delta: change });
+      await refreshProductLists();
+      showProductToast(change > 0 ? "Apparel item restocked successfully." : "Stock updated successfully.");
+    } catch (error) {
+      showProductToast(getApiErrorMessage(error, "Could not update stock."), "error");
+    } finally {
+      setBusyAction("");
+    }
   }
 
   async function updateOrder(id, status) {
-    await api.patch(`/orders/${id}/status`, { status });
-    clearGetCache("/orders");
-    clearGetCache("/reports/summary");
-    await Promise.all([loadOrdersData({ force: true }), loadSummaryData({ force: true })]);
+    const actionKey = `order-${id}`;
+    if (busyAction === actionKey) return;
+    setBusyAction(actionKey);
+    try {
+      await api.patch(`/orders/${id}/status`, { status });
+      clearGetCache("/orders");
+      clearGetCache("/reports/summary");
+      await Promise.all([loadOrdersData({ force: true }), loadSummaryData({ force: true })]);
+      showProductToast("Order updated successfully.");
+    } catch (error) {
+      showProductToast(getApiErrorMessage(error, "Could not update order."), "error");
+    } finally {
+      setBusyAction("");
+    }
   }
 
   async function approveUser(id, status) {
@@ -443,32 +479,63 @@ export default function AdminDashboard({ active, onChange }) {
   }
 
   async function removeCustomer(id) {
-    setRejectingUserIds((ids) => [...ids, id]);
-    await api.delete(`/users/${id}`);
-    clearGetCache("/users");
-    await loadCustomersData({ force: true });
-    setRejectingUserIds((ids) => ids.filter((userId) => userId !== id));
+    const customerId = Number(id);
+    if (!Number.isInteger(customerId) || customerId <= 0) {
+      showProductToast("Cannot remove customer because the customer ID is invalid.", "error");
+      return;
+    }
+    if (!window.confirm("Remove this customer account?")) return;
+    setRejectingUserIds((ids) => ids.includes(customerId) ? ids : [...ids, customerId]);
+    try {
+      await api.delete(`/users/${customerId}`);
+      clearGetCache("/users");
+      await loadCustomersData({ force: true });
+      showProductToast("Customer removed successfully.");
+    } catch (error) {
+      showProductToast(getApiErrorMessage(error, "Could not remove customer."), "error");
+    } finally {
+      setRejectingUserIds((ids) => ids.filter((userId) => userId !== customerId));
+    }
   }
 
   async function decideReturn(id, status) {
-    await api.patch(`/returns/${id}/decision`, { status });
-    clearGetCache("/returns");
-    clearGetCache("/orders");
-    clearGetCache("/notifications");
-    await loadReturnsData({ force: true });
+    const actionKey = `return-${id}`;
+    if (busyAction === actionKey) return;
+    setBusyAction(actionKey);
+    try {
+      await api.patch(`/returns/${id}/decision`, { status });
+      clearGetCache("/returns");
+      clearGetCache("/orders");
+      clearGetCache("/notifications");
+      await loadReturnsData({ force: true });
+      showProductToast("Return request updated.");
+    } catch (error) {
+      showProductToast(getApiErrorMessage(error, "Could not update return request."), "error");
+    } finally {
+      setBusyAction("");
+    }
   }
 
   async function saveProfile(event) {
     event.preventDefault();
-    const payload = new FormData();
-    Object.entries(profile).forEach(([key, value]) => payload.append(key, value ?? ""));
-    if (profilePhoto) payload.append("profilePhoto", profilePhoto);
-    const { data } = await api.patch("/users/me", payload, { headers: { "Content-Type": "multipart/form-data" } });
-    localStorage.setItem("retela_user", JSON.stringify({ ...user, ...data }));
-    setUser({ ...user, ...data });
-    setProfile(data);
-    setProfilePhoto(null);
-    clearGetCache("/users/me");
+    if (busyAction === "profile-save") return;
+    setBusyAction("profile-save");
+    try {
+      const payload = new FormData();
+      Object.entries(profile || {}).forEach(([key, value]) => payload.append(key, value ?? ""));
+      if (profilePhoto) payload.append("profilePhoto", profilePhoto);
+      const { data } = await api.patch("/users/me", payload, { headers: { "Content-Type": "multipart/form-data" } });
+      localStorage.setItem("retela_user", JSON.stringify({ ...user, ...data }));
+      setUser({ ...user, ...data });
+      setProfile(data);
+      setProfilePhoto(null);
+      clearGetCache("/users/me");
+      showProductToast("Profile saved successfully.");
+    } catch (error) {
+      showProductToast(getApiErrorMessage(error, "Could not save profile."), "error");
+    } finally {
+      setBusyAction("");
+    }
   }
 
   if (active === "Dashboard") {
@@ -531,6 +598,7 @@ export default function AdminDashboard({ active, onChange }) {
         productImage={productImage}
         setProductImage={setProductImage}
         saveProduct={saveProduct}
+        productSaving={productSaving}
         optionValues={optionValues}
         refreshApparelOptions={loadApparelOptions}
         showProductToast={showProductToast}
@@ -559,14 +627,14 @@ export default function AdminDashboard({ active, onChange }) {
             {approvedCustomers.map((customer) => (
               <span key={customer.id} className="inline-flex shrink-0 items-center gap-2 rounded-full bg-blue-50 px-3 py-2 text-sm font-bold text-bluebrand">
                 <PresenceDot status={customer.presence_status} />{customer.username} - {presenceLabel(customer.presence_status)}
-                <button type="button" onClick={() => removeCustomer(customer.id)} className="grid h-7 w-7 place-items-center rounded-full bg-rose-50 text-rose-600 transition hover:bg-rose-100" aria-label={`Remove ${customer.username}`}>
+                <button type="button" disabled={rejectingUserIds.includes(customer.id)} onClick={() => removeCustomer(customer.id)} className="grid h-7 w-7 place-items-center rounded-full bg-rose-50 text-rose-600 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50" aria-label={`Remove ${customer.username}`}>
                   <Trash2 size={14} />
                 </button>
               </span>
             ))}
           </div>
         </Card>
-        <TableCard rows={visibleCustomers} columns={["id", "username", "display_name", "email", "phone_number", "location", "status", "birthday", "gender"]} rowClassName={(row) => rejectingUserIds.includes(row.id) ? "trash-vanish" : ""} actions={(row) => <><span className={`rounded-lg px-3 py-2 text-xs font-bold ${row.status === "approved" ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>{row.status === "pending_otp" ? "Awaiting email OTP" : registrationStatusLabel(row.status)}</span><button onClick={() => setSelectedDocumentCustomerId(row.id)} title="View Verification Documents" className="grid h-9 w-9 place-items-center rounded-lg bg-[#3b82f6] text-white shadow transition hover:scale-[1.02] hover:bg-blue-600" aria-label={`View verification documents for ${row.username}`}><Eye size={17} /></button><button onClick={() => removeCustomer(row.id)} className="grid h-9 w-9 place-items-center rounded-lg bg-rose-50 text-rose-600 shadow" aria-label={`Remove ${row.username}`}><Trash2 size={17} /></button></>} />
+        <TableCard rows={visibleCustomers} columns={["id", "username", "display_name", "email", "phone_number", "location", "status", "birthday", "gender"]} rowClassName={(row) => rejectingUserIds.includes(row.id) ? "trash-vanish" : ""} actions={(row) => <><span className={`rounded-lg px-3 py-2 text-xs font-bold ${row.status === "approved" ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>{row.status === "pending_otp" ? "Awaiting email OTP" : registrationStatusLabel(row.status)}</span><button type="button" onClick={() => setSelectedDocumentCustomerId(row.id)} title="View Verification Documents" className="grid h-9 w-9 place-items-center rounded-lg bg-[#3b82f6] text-white shadow transition hover:scale-[1.02] hover:bg-blue-600" aria-label={`View verification documents for ${row.username}`}><Eye size={17} /></button><button type="button" disabled={rejectingUserIds.includes(row.id)} onClick={() => removeCustomer(row.id)} className="grid h-9 w-9 place-items-center rounded-lg bg-rose-50 text-rose-600 shadow disabled:cursor-not-allowed disabled:opacity-50" aria-label={`Remove ${row.username}`}><Trash2 size={17} /></button></>} />
         <CustomerDocumentsModal customerId={selectedDocumentCustomerId} open={Boolean(selectedDocumentCustomerId)} onClose={() => setSelectedDocumentCustomerId(null)} />
       </div>
     );
@@ -920,6 +988,7 @@ function PremiumInventoryPage({
   productImage,
   setProductImage,
   saveProduct,
+  productSaving = false,
   optionValues,
   refreshApparelOptions,
   showProductToast,
@@ -1189,6 +1258,7 @@ function PremiumInventoryPage({
           productImage={productImage}
           setProductImage={setProductImage}
           saveProduct={saveProduct}
+          productSaving={productSaving}
           optionValues={optionValues}
           refreshApparelOptions={refreshApparelOptions}
           showProductToast={showProductToast}
@@ -1339,7 +1409,7 @@ function AdminToast({ toast, onClose }) {
   );
 }
 
-function ProductEditorModal({ editingProductId, form, setForm, productImage, setProductImage, saveProduct, optionValues, refreshApparelOptions, showProductToast, onClose }) {
+function ProductEditorModal({ editingProductId, form, setForm, productImage, setProductImage, saveProduct, productSaving = false, optionValues, refreshApparelOptions, showProductToast, onClose }) {
   const inputClass = "rounded-2xl border border-slate-300 bg-white/90 p-3 text-sm font-semibold text-slate-950 outline-none transition placeholder:text-slate-500 focus:border-[#22C55E] focus:ring-4 focus:ring-[#DCFCE7]";
   const secondaryButtonClass = "inline-flex items-center justify-center rounded-2xl border border-slate-300 bg-white px-5 py-3 text-sm font-bold text-slate-800 shadow-sm transition hover:bg-[#F3F4F6] active:scale-95";
   const primaryButtonClass = "inline-flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-[#16A34A] via-[#22C55E] to-[#15803D] px-5 py-3 text-sm font-bold text-white shadow-lg shadow-emerald-700/20 transition hover:-translate-y-0.5 hover:shadow-xl hover:shadow-emerald-700/25 active:translate-y-0 active:scale-95";
@@ -1447,7 +1517,7 @@ function ProductEditorModal({ editingProductId, form, setForm, productImage, set
             <p className="text-xs font-bold uppercase tracking-[0.18em] text-emerald-700">Apparel Item</p>
             <h3 className="mt-2 font-display text-2xl font-bold text-slate-950">{editingProductId ? "Edit Apparel Item" : "Add Apparel Item"}</h3>
           </div>
-          <button type="button" onClick={onClose} className="rounded-xl border border-slate-300 bg-white/80 px-3 py-2 text-sm font-bold text-slate-700 transition hover:bg-[#F3F4F6] hover:text-slate-950">Close</button>
+          <button type="button" disabled={productSaving} onClick={onClose} className="rounded-xl border border-slate-300 bg-white/80 px-3 py-2 text-sm font-bold text-slate-700 transition hover:bg-[#F3F4F6] hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60">Close</button>
         </div>
         <form onSubmit={handleSubmit} className="mt-5 grid gap-3 md:grid-cols-2">
           <input className={inputClass} placeholder="Apparel Name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
@@ -1581,8 +1651,11 @@ function ProductEditorModal({ editingProductId, form, setForm, productImage, set
           </label>
           <textarea className={`${inputClass} min-h-28 resize-y md:col-span-2`} placeholder="Apparel description, fit notes, flaws, fabric, or styling details" value={form.description || ""} onChange={(e) => setForm({ ...form, description: e.target.value })} />
           <div className="flex flex-col-reverse gap-3 border-t border-slate-200/80 pt-4 md:col-span-2 sm:flex-row sm:justify-end">
-            <button type="button" className={secondaryButtonClass} onClick={onClose}>Cancel</button>
-            <button type="submit" className={primaryButtonClass}>{editingProductId ? <Save size={17} /> : <PackagePlus size={17} />} {editingProductId ? "Save Apparel Item" : "Add Apparel Item"}</button>
+            <button type="button" disabled={productSaving} className={`${secondaryButtonClass} disabled:cursor-not-allowed disabled:opacity-60`} onClick={onClose}>Cancel</button>
+            <button type="submit" disabled={productSaving} className={`${primaryButtonClass} disabled:cursor-not-allowed disabled:opacity-60`}>
+              {productSaving ? <Loader2 className="animate-spin" size={17} /> : editingProductId ? <Save size={17} /> : <PackagePlus size={17} />}
+              {productSaving ? "Saving..." : editingProductId ? "Save Apparel Item" : "Add Apparel Item"}
+            </button>
           </div>
         </form>
         {optionModal ? (

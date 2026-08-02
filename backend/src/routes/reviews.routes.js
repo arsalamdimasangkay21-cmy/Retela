@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { query, safeModifyColumn } from "../config/db.js";
 import { asyncHandler, HttpError } from "../utils/errors.js";
-import { requireApproved, requireAuth } from "../middleware/auth.js";
+import { optionalAuth, requireApproved, requireAuth } from "../middleware/auth.js";
 import { upload } from "../middleware/upload.js";
 
 const router = Router();
@@ -59,9 +59,9 @@ async function ensureReviewColumns() {
   return reviewColumnsReady;
 }
 
-router.get("/", requireAuth, asyncHandler(async (req, res) => {
+router.get("/", optionalAuth, asyncHandler(async (req, res) => {
   await ensureReviewColumns();
-  const where = req.user.role === "admin" ? "" : "WHERE r.user_id = :userId";
+  const where = !req.user || req.user.role === "admin" ? "" : "WHERE r.user_id = :userId";
  const rows = await query(
 `SELECT
     r.id,
@@ -124,7 +124,7 @@ GROUP BY
 
 ORDER BY r.created_at DESC`,
 {
-    userId: req.user.id,
+    userId: req.user?.id || null,
 }
 );
   res.json(rows);

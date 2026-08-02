@@ -8,7 +8,8 @@
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",
     "lint": "node --check src/server.js",
-    "test": "node --test"
+    "test": "node --test",
+    "check:production": "node scripts/production-check.mjs"
   },
   "dependencies": {
     "axios": "^1.16.1",

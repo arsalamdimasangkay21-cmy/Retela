@@ -41,6 +41,15 @@ export function AuthProvider({ children }) {
     };
   }, [token]);
 
+  useEffect(() => {
+    function handleAuthExpired() {
+      setToken(null);
+      setUser(null);
+    }
+    window.addEventListener("retela:auth-expired", handleAuthExpired);
+    return () => window.removeEventListener("retela:auth-expired", handleAuthExpired);
+  }, []);
+
   async function login(credentials) {
     const { data } = await api.post("/auth/login", credentials);
     localStorage.setItem("retela_token", data.token);

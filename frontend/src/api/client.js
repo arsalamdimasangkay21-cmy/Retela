@@ -1,18 +1,28 @@
 import axios from "axios";
 
 function stripTrailingSlash(value) {
-  return String(value || "").replace(/\/$/, "");
+  return String(value || "").replace(/\/+$/, "");
 }
 
 function socketUrlFromApiUrl(apiUrl) {
   return stripTrailingSlash(apiUrl).replace(/\/api$/, "");
 }
 
-export const API_URL = stripTrailingSlash(import.meta.env.VITE_API_URL || "http://localhost:5000/api");
+function normalizeApiUrl(value) {
+  const raw = stripTrailingSlash(value || "http://localhost:5000");
+  return `${raw.replace(/(\/api)+$/, "")}/api`;
+}
+
+export const API_URL = normalizeApiUrl(import.meta.env.VITE_API_URL);
 export const SOCKET_URL = socketUrlFromApiUrl(import.meta.env.VITE_SOCKET_URL || API_URL);
 
 export const api = axios.create({
-  baseURL: API_URL
+  baseURL: API_URL,
+  timeout: 20000,
+  withCredentials: true,
+  headers: {
+    "Content-Type": "application/json"
+  }
 });
 
 const DEFAULT_GET_CACHE_MS = 8000;
@@ -126,4 +136,14 @@ api.interceptors.response.use((response) => {
     response.data = payload.data;
   }
   return response;
+}, (error) => {
+  const status = error?.response?.status;
+  if (status === 401) {
+    localStorage.removeItem("retela_token");
+    localStorage.removeItem("retela_user");
+    window.dispatchEvent(new CustomEvent("retela:auth-expired"));
+  }
+  return Promise.reject(error);
 });
+
+export default api;

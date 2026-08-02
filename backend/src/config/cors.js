@@ -1,7 +1,9 @@
-const defaultOrigins = [
+const productionOrigins = [
   "https://retela.shop",
-  "https://www.retela.shop",
-  "https://retela-ix3c.vercel.app",
+  "https://www.retela.shop"
+];
+
+const developmentOrigins = [
   "http://localhost:5173",
   "http://localhost:5174",
   "http://localhost:5175",
@@ -13,9 +15,14 @@ const defaultOrigins = [
 ];
 
 function configuredOrigins() {
-  return [
-    ...defaultOrigins,
+  const envOrigins = [
+    process.env.FRONTEND_URL,
     ...(process.env.CLIENT_URL || "").split(",")
+  ];
+  return [
+    ...productionOrigins,
+    ...envOrigins,
+    ...(process.env.NODE_ENV === "production" ? [] : developmentOrigins)
   ]
     .map((origin) => origin.trim().replace(/\/$/, ""))
     .filter(Boolean)
@@ -29,7 +36,7 @@ function isLocalhostOrigin(origin) {
 export function isAllowedOrigin(origin) {
   if (!origin) return true;
   const normalized = String(origin).trim().replace(/\/$/, "");
-  return configuredOrigins().includes(normalized) || isLocalhostOrigin(normalized);
+  return configuredOrigins().includes(normalized) || (process.env.NODE_ENV !== "production" && isLocalhostOrigin(normalized));
 }
 
 export function corsOrigin(origin, callback) {

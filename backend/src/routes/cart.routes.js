@@ -54,6 +54,9 @@ async function readCart(userId) {
 }
 
 async function getProductForCart(productId) {
+  if (!Number.isInteger(productId) || productId <= 0) {
+    throw new HttpError(400, "A valid product ID is required");
+  }
   const rows = await query(
     "SELECT id, stock FROM products WHERE id = :productId AND is_deleted = FALSE LIMIT 1",
     { productId }
@@ -135,6 +138,7 @@ router.patch("/items/:productId", asyncHandler(async (req, res) => {
   });
   const input = schema.parse(req.body);
   const productId = Number(req.params.productId);
+  if (!Number.isInteger(productId) || productId <= 0) throw new HttpError(400, "A valid product ID is required");
   const product = await getProductForCart(productId);
   const updates = [];
   const params = { userId: req.user.id, productId };
@@ -149,7 +153,7 @@ router.patch("/items/:productId", asyncHandler(async (req, res) => {
   }
   if (!updates.length) throw new HttpError(400, "No cart changes supplied.");
   await ensureCartTable();
-  await query(
+  const result = await query(
     `UPDATE cart_items
      SET ${updates.join(", ")}
      WHERE user_id = :userId
@@ -157,6 +161,7 @@ router.patch("/items/:productId", asyncHandler(async (req, res) => {
        AND checked_out_at IS NULL`,
     params
   );
+  if (!result.affectedRows) throw new HttpError(404, "Cart item not found");
   res.json(await readCart(req.user.id));
 }));
 
@@ -192,13 +197,16 @@ router.patch("/selection", asyncHandler(async (req, res) => {
 
 router.delete("/items/:productId", asyncHandler(async (req, res) => {
   await ensureCartTable();
-  await query(
+  const productId = Number(req.params.productId);
+  if (!Number.isInteger(productId) || productId <= 0) throw new HttpError(400, "A valid product ID is required");
+  const result = await query(
     `DELETE FROM cart_items
      WHERE user_id = :userId
        AND product_id = :productId
        AND checked_out_at IS NULL`,
-    { userId: req.user.id, productId: Number(req.params.productId) }
+    { userId: req.user.id, productId }
   );
+  if (!result.affectedRows) throw new HttpError(404, "Cart item not found");
   res.json(await readCart(req.user.id));
 }));
 
