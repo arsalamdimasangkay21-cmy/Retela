@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { CheckCircle2, KeyRound, Loader2, Mail, MapPin, Phone, RotateCcw, ShieldCheck, User } from "lucide-react";
-import { api, getApiErrorMessage } from "../../api/client";
+import { api, cachedGet, getApiErrorMessage } from "../../api/client";
 import { logoFromSettings, RETELA_LOGO_URL } from "../../config/branding";
 import { useAuth } from "../../context/AuthContext";
 import { getPasswordBlueprint, getPasswordStrength, PasswordBlueprint } from "../PasswordBlueprint";
@@ -32,15 +32,20 @@ export default function AuthPage() {
   const resetPasswordStrong = resetPasswordBlueprint.every((item) => item.met);
 
   useEffect(() => {
+    let cancelled = false;
     document.documentElement.classList.remove("retela-dark");
     document.documentElement.style.colorScheme = "light";
-    api.get("/settings/public")
+    cachedGet("/settings/public", {}, { cacheMs: 10000, retries: 1 })
       .then(({ data }) => {
+        if (cancelled) return;
         const nextLogo = logoFromSettings(data);
         setLogoUrl(nextLogo);
         localStorage.setItem("retela_logo_url", nextLogo);
       })
       .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   function normalizePhoneInput(value) {

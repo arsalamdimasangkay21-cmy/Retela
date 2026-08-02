@@ -1,4 +1,4 @@
-import { api } from "./client";
+import { api, cachedGet, clearGetCache } from "./client";
 
 const endpoints = {
   brands: "/brands",
@@ -10,11 +10,11 @@ const endpoints = {
 
 export async function fetchApparelOptions() {
   const [brands, categories, types, sizes, conditions] = await Promise.all([
-    api.get(endpoints.brands),
-    api.get(endpoints.categories),
-    api.get(endpoints.types),
-    api.get(endpoints.sizes),
-    api.get(endpoints.conditions)
+    cachedGet(endpoints.brands, {}, { cacheMs: 10000, retries: 1 }),
+    cachedGet(endpoints.categories, {}, { cacheMs: 10000, retries: 1 }),
+    cachedGet(endpoints.types, {}, { cacheMs: 10000, retries: 1 }),
+    cachedGet(endpoints.sizes, {}, { cacheMs: 10000, retries: 1 }),
+    cachedGet(endpoints.conditions, {}, { cacheMs: 10000, retries: 1 })
   ]);
 
   return {
@@ -29,5 +29,6 @@ export async function fetchApparelOptions() {
 export async function createApparelOption(kind, name) {
   if (!endpoints[kind]) throw new Error("Invalid apparel option type.");
   const response = await api.post(endpoints[kind], { name });
+  clearGetCache(endpoints[kind]);
   return response.data;
 }

@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { Bar, Doughnut, Line, Pie } from "react-chartjs-2";
 import { Chart as ChartJS, ArcElement, BarElement, CategoryScale, Filler, LinearScale, LineElement, PointElement, Tooltip, Legend } from "chart.js";
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip as RechartsTooltip, XAxis, YAxis } from "recharts";
 import { Activity, Archive, Barcode, Bot, Check, ChevronLeft, ChevronRight, Download, Edit3, Eye, FileSpreadsheet, Loader2, MapPin, Megaphone, MessageSquare, MoreHorizontal, PackageCheck, PackagePlus, Plus, Printer, ReceiptText, RotateCcw, Save, Search, Send, Shirt, ShoppingBag, SlidersHorizontal, Sparkles, Star, Tags, Trash2, TrendingUp, Upload, WalletCards, X, Zap } from "lucide-react";
-import { api, API_URL } from "../api/client";
+import { api, API_URL, cachedGet, clearGetCache } from "../api/client";
 import { createApparelOption, fetchApparelOptions } from "../api/apparelOptions";
 import { ChangePasswordForm } from "../components/ChangePasswordForm";
 import CustomerDocumentsModal from "../components/CustomerDocumentsModal";
@@ -128,6 +128,8 @@ export default function AdminDashboard({ active, onChange }) {
   const [selectedDocumentCustomerId, setSelectedDocumentCustomerId] = useState(null);
   const [productToast, setProductToast] = useState(null);
   const [apparelOptions, setApparelOptions] = useState({ brands: [], categories: [], types: [], sizes: [], conditions: [] });
+  const mountedRef = useRef(true);
+  const refreshTimerRef = useRef(null);
 
   const optionValues = useMemo(() => ({
     brands: optionNames(apparelOptions.brands, fallbackApparelOptions.brands),
@@ -158,55 +160,158 @@ export default function AdminDashboard({ active, onChange }) {
     showProductToast.timer = window.setTimeout(() => setProductToast(null), 2800);
   }
 
-  async function load() {
-    const [reportRes, productRes, inventoryRes, orderRes, userRes, notificationRes, returnRes, reviewRes, profileRes] = await Promise.all([
-      api.get("/reports/summary"),
-      api.get("/products"),
-      api.get("/products/inventory"),
-      api.get("/orders"),
-      api.get("/users"),
-      api.get("/notifications"),
-      api.get("/returns"),
-      api.get("/reviews"),
-      api.get("/users/me")
+  const canUpdate = useCallback((cancelled) => mountedRef.current && !cancelled?.(), []);
+
+  const getShared = useCallback((url, config = {}, options = {}) => (
+    cachedGet(url, config, { cacheMs: 8000, retries: 1, ...options })
+  ), []);
+
+  const loadApparelOptions = useCallback(async ({ cancelled } = {}) => {
+    const options = await fetchApparelOptions();
+    if (canUpdate(cancelled)) setApparelOptions(options);
+    return options;
+  }, [canUpdate]);
+
+  const loadDashboardData = useCallback(async ({ cancelled, force = false } = {}) => {
+    const [reportRes, inventoryRes, orderRes, userRes, notificationRes] = await Promise.all([
+      getShared("/reports/summary", {}, { force }),
+      getShared("/products/inventory", {}, { force }),
+      getShared("/orders", {}, { force }),
+      getShared("/users", {}, { force }),
+      getShared("/notifications", {}, { force })
     ]);
+    if (!canUpdate(cancelled)) return;
     setSummary(reportRes.data);
-    setProducts(productRes.data);
     setInventoryProducts(inventoryRes.data);
     setOrders(orderRes.data);
     setUsers(userRes.data);
     setNotifications(notificationRes.data);
-    setReturns(returnRes.data);
-    setReviews(reviewRes.data);
-    setProfile(profileRes.data);
-  }
+  }, [canUpdate, getShared]);
 
-  async function loadApparelOptions() {
-    const options = await fetchApparelOptions();
-    setApparelOptions(options);
-    return options;
-  }
+  const loadCatalogData = useCallback(async ({ cancelled, force = false } = {}) => {
+    const [productRes] = await Promise.all([
+      getShared("/products", {}, { force }),
+      loadApparelOptions({ cancelled })
+    ]);
+    if (!canUpdate(cancelled)) return;
+    setProducts(productRes.data);
+  }, [canUpdate, getShared, loadApparelOptions]);
+
+  const loadInventoryData = useCallback(async ({ cancelled, force = false } = {}) => {
+    const [inventoryRes] = await Promise.all([
+      getShared("/products/inventory", {}, { force }),
+      loadApparelOptions({ cancelled })
+    ]);
+    if (!canUpdate(cancelled)) return;
+    setInventoryProducts(inventoryRes.data);
+  }, [canUpdate, getShared, loadApparelOptions]);
+
+  const loadOrdersData = useCallback(async ({ cancelled, force = false } = {}) => {
+    const { data } = await getShared("/orders", {}, { force });
+    if (canUpdate(cancelled)) setOrders(data);
+  }, [canUpdate, getShared]);
+
+  const loadCustomersData = useCallback(async ({ cancelled, force = false } = {}) => {
+    const { data } = await getShared("/users", {}, { force });
+    if (canUpdate(cancelled)) setUsers(data);
+  }, [canUpdate, getShared]);
+
+  const loadNotificationsData = useCallback(async ({ cancelled, force = false } = {}) => {
+    const [notificationRes, userRes] = await Promise.all([
+      getShared("/notifications", {}, { force }),
+      getShared("/users", {}, { force })
+    ]);
+    if (!canUpdate(cancelled)) return;
+    setNotifications(notificationRes.data);
+    setUsers(userRes.data);
+  }, [canUpdate, getShared]);
+
+  const loadReviewsData = useCallback(async ({ cancelled, force = false } = {}) => {
+    const { data } = await getShared("/reviews", {}, { force });
+    if (canUpdate(cancelled)) setReviews(data);
+  }, [canUpdate, getShared]);
+
+  const loadReturnsData = useCallback(async ({ cancelled, force = false } = {}) => {
+    const { data } = await getShared("/returns", {}, { force });
+    if (canUpdate(cancelled)) setReturns(data);
+  }, [canUpdate, getShared]);
+
+  const loadProfileData = useCallback(async ({ cancelled, force = false } = {}) => {
+    const { data } = await getShared("/users/me", {}, { force });
+    if (canUpdate(cancelled)) setProfile(data);
+  }, [canUpdate, getShared]);
+
+  const loadSummaryData = useCallback(async ({ cancelled, force = false } = {}) => {
+    const { data } = await getShared("/reports/summary", {}, { force });
+    if (canUpdate(cancelled)) setSummary(data);
+  }, [canUpdate, getShared]);
+
+  const loadActiveData = useCallback((page = active, options = {}) => {
+    if (page === "Dashboard") return loadDashboardData(options);
+    if (page === "Apparel") return loadCatalogData(options);
+    if (page === "Inventory") return loadInventoryData(options);
+    if (page === "Orders") return loadOrdersData(options);
+    if (page === "Customers" || page === "Locations") return loadCustomersData(options);
+    if (page === "Notifications") return loadNotificationsData(options);
+    if (page === "Feedback") return loadReviewsData(options);
+    if (page === "Returns") return loadReturnsData(options);
+    if (page === "Profile") return loadProfileData(options);
+    if (page === "Reports" || page === "Sales Analytics" || page === "Sales") return loadSummaryData(options);
+    return Promise.resolve();
+  }, [active, loadCatalogData, loadCustomersData, loadDashboardData, loadInventoryData, loadNotificationsData, loadOrdersData, loadProfileData, loadReturnsData, loadReviewsData, loadSummaryData]);
 
   useEffect(() => {
-    load().catch(() => {});
-    loadApparelOptions().catch(() => {});
-    const timer = setInterval(() => load().catch(() => {}), 30000);
-    return () => clearInterval(timer);
-  }, []);
-
-  useEffect(() => {
-    function refreshAdminNotifications() {
-      load().catch(() => {});
-    }
-    window.addEventListener("retela:data-change", refreshAdminNotifications);
-    window.addEventListener("retela:notification-new", refreshAdminNotifications);
-    window.addEventListener("retela:user-status", refreshAdminNotifications);
     return () => {
-      window.removeEventListener("retela:data-change", refreshAdminNotifications);
-      window.removeEventListener("retela:notification-new", refreshAdminNotifications);
-      window.removeEventListener("retela:user-status", refreshAdminNotifications);
+      mountedRef.current = false;
+      window.clearTimeout(refreshTimerRef.current);
     };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    loadActiveData(active, { cancelled: () => cancelled }).catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [active, loadActiveData]);
+
+  const shouldRefreshActivePage = useCallback((page, eventName, detail = {}) => {
+    const type = detail.type || detail.payload?.type || detail.notification?.type || detail.data?.type;
+    if (eventName === "retela:user-status") return ["Dashboard", "Customers", "Locations"].includes(page);
+    if (eventName === "retela:notification-new") return ["Dashboard", "Notifications"].includes(page);
+    if (["order", "shipping", "refund", "return"].includes(type)) return ["Dashboard", "Orders", "Returns", "Reports", "Sales Analytics", "Sales"].includes(page);
+    if (["inventory", "product", "new_product"].includes(type)) return ["Dashboard", "Apparel", "Inventory"].includes(page);
+    return page === "Dashboard";
+  }, []);
+
+  useEffect(() => {
+    function scheduleActiveRefresh(event) {
+      if (!shouldRefreshActivePage(active, event.type, event.detail || {})) return;
+      window.clearTimeout(refreshTimerRef.current);
+      refreshTimerRef.current = window.setTimeout(() => {
+        loadActiveData(active, { force: true }).catch(() => {});
+      }, 400);
+    }
+    window.addEventListener("retela:data-change", scheduleActiveRefresh);
+    window.addEventListener("retela:notification-new", scheduleActiveRefresh);
+    window.addEventListener("retela:user-status", scheduleActiveRefresh);
+    return () => {
+      window.clearTimeout(refreshTimerRef.current);
+      window.removeEventListener("retela:data-change", scheduleActiveRefresh);
+      window.removeEventListener("retela:notification-new", scheduleActiveRefresh);
+      window.removeEventListener("retela:user-status", scheduleActiveRefresh);
+    };
+  }, [active, loadActiveData, shouldRefreshActivePage]);
+
+  const refreshProductLists = useCallback(async () => {
+    clearGetCache("/products");
+    await Promise.all([
+      loadCatalogData({ force: true }),
+      loadInventoryData({ force: true })
+    ]);
+  }, [loadCatalogData, loadInventoryData]);
+
+  const refreshActiveData = useCallback(() => loadActiveData(active, { force: true }), [active, loadActiveData]);
 
   async function saveProduct(event, resolvedForm = form) {
     event.preventDefault();
@@ -223,7 +328,7 @@ export default function AdminDashboard({ active, onChange }) {
     setProductImage(null);
     setEditingProductId(null);
     setInventoryModalOpen(false);
-    await Promise.all([load(), loadApparelOptions()]);
+    await refreshProductLists();
     showProductToast(response?.data?.message || (editingProductId ? "Apparel item updated successfully." : "Apparel item saved successfully."));
   }
 
@@ -256,20 +361,22 @@ export default function AdminDashboard({ active, onChange }) {
       return;
     }
     await api.delete(`/products/${productId}`);
-    await load();
+    await refreshProductLists();
     showProductToast("Apparel item moved to Trash Bin.");
   }
 
   async function updateStock(id, change) {
     if (String(id).startsWith("sample-")) return;
     await api.patch(`/products/${id}/stock`, { delta: change });
-    await load();
+    await refreshProductLists();
     showProductToast(change > 0 ? "Apparel item restocked successfully." : "Stock updated successfully.");
   }
 
   async function updateOrder(id, status) {
     await api.patch(`/orders/${id}/status`, { status });
-    await load();
+    clearGetCache("/orders");
+    clearGetCache("/reports/summary");
+    await Promise.all([loadOrdersData({ force: true }), loadSummaryData({ force: true })]);
   }
 
   async function approveUser(id, status) {
@@ -279,7 +386,9 @@ export default function AdminDashboard({ active, onChange }) {
         await new Promise((resolve) => setTimeout(resolve, 760));
       }
       await api.patch(`/users/${id}/status`, { status });
-      await load();
+      clearGetCache("/users");
+      clearGetCache("/notifications");
+      await loadNotificationsData({ force: true });
     } finally {
       setRejectingUserIds((ids) => ids.filter((userId) => userId !== id));
     }
@@ -288,13 +397,17 @@ export default function AdminDashboard({ active, onChange }) {
   async function removeCustomer(id) {
     setRejectingUserIds((ids) => [...ids, id]);
     await api.delete(`/users/${id}`);
-    await load();
+    clearGetCache("/users");
+    await loadCustomersData({ force: true });
     setRejectingUserIds((ids) => ids.filter((userId) => userId !== id));
   }
 
   async function decideReturn(id, status) {
     await api.patch(`/returns/${id}/decision`, { status });
-    await load();
+    clearGetCache("/returns");
+    clearGetCache("/orders");
+    clearGetCache("/notifications");
+    await loadReturnsData({ force: true });
   }
 
   async function saveProfile(event) {
@@ -307,6 +420,7 @@ export default function AdminDashboard({ active, onChange }) {
     setUser({ ...user, ...data });
     setProfile(data);
     setProfilePhoto(null);
+    clearGetCache("/users/me");
   }
 
   if (active === "Dashboard") {
@@ -419,8 +533,8 @@ export default function AdminDashboard({ active, onChange }) {
   if (active === "Notifications") return <AdminNotifications rows={notifications} users={users} rejectingUserIds={rejectingUserIds} selectedRegistration={selectedRegistration} setSelectedRegistration={setSelectedRegistration} approveUser={approveUser} onChange={onChange} />;
   if (active === "Feedback") return <AdminFeedback reviews={reviews} />;
   if (active === "Returns") return <AdminReturns rows={returns} decideReturn={decideReturn} />;
-  if (active === "Archive") return <ArchivePage onChanged={load} />;
-  if (active === "Trash Bin") return <TrashBinPage onChanged={load} />;
+  if (active === "Archive") return <ArchivePage onChanged={refreshActiveData} />;
+  if (active === "Trash Bin") return <TrashBinPage onChanged={refreshActiveData} />;
   if (active === "Messages") return <AdminConversationsPage />;
   if (active === "Locations") return <AdminLocations users={users} />;
   if (active === "Profile") return <AdminProfile profile={profile} setProfile={setProfile} profilePhoto={profilePhoto} setProfilePhoto={setProfilePhoto} saveProfile={saveProfile} />;
@@ -433,20 +547,29 @@ function ArchivePage({ onChanged }) {
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState("");
 
-  async function loadArchive() {
-    const { data } = await api.get("/messages/archive");
-    setConversations(data);
-  }
+  const loadArchive = useCallback(async ({ cancelled, force = false } = {}) => {
+    const { data } = await cachedGet("/messages/archive", {}, { cacheMs: 8000, retries: 1, force });
+    if (!cancelled?.()) setConversations(data);
+  }, []);
 
   useEffect(() => {
-    loadArchive().catch(() => {}).finally(() => setLoading(false));
-  }, []);
+    let cancelled = false;
+    loadArchive({ cancelled: () => cancelled })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [loadArchive]);
 
   async function restoreConversation(id) {
     setBusyId(`restore-${id}`);
     try {
       await api.patch(`/messages/${id}/restore`);
-      await loadArchive();
+      clearGetCache("/messages/archive");
+      await loadArchive({ force: true });
       await onChanged?.();
     } finally {
       setBusyId("");
@@ -457,7 +580,8 @@ function ArchivePage({ onChanged }) {
     setBusyId(`trash-${id}`);
     try {
       await api.patch(`/messages/${id}/trash`);
-      await loadArchive();
+      clearGetCache("/messages/archive");
+      await loadArchive({ force: true });
       await onChanged?.();
     } finally {
       setBusyId("");
@@ -502,26 +626,36 @@ function TrashBinPage({ onChanged }) {
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState("");
 
-  async function loadTrash() {
+  const loadTrash = useCallback(async ({ cancelled, force = false } = {}) => {
     const [apparelRes, conversationRes, broadcastRes] = await Promise.all([
-      api.get("/products/archived"),
-      api.get("/messages/trash"),
-      api.get("/broadcasts/trash")
+      cachedGet("/products/archived", {}, { cacheMs: 8000, retries: 1, force }),
+      cachedGet("/messages/trash", {}, { cacheMs: 8000, retries: 1, force }),
+      cachedGet("/broadcasts/trash", {}, { cacheMs: 8000, retries: 1, force })
     ]);
+    if (cancelled?.()) return;
     setApparel(apparelRes.data);
     setConversations(conversationRes.data);
     setBroadcasts(broadcastRes.data);
-  }
+  }, []);
 
   useEffect(() => {
-    loadTrash().catch(() => {}).finally(() => setLoading(false));
-  }, []);
+    let cancelled = false;
+    loadTrash({ cancelled: () => cancelled })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [loadTrash]);
 
   async function restoreApparel(id) {
     setBusyId(`apparel-restore-${id}`);
     try {
       await api.patch(`/products/${id}/restore`);
-      await loadTrash();
+      clearGetCache("/products");
+      await loadTrash({ force: true });
       await onChanged?.();
     } finally {
       setBusyId("");
@@ -533,7 +667,8 @@ function TrashBinPage({ onChanged }) {
     setBusyId(`apparel-delete-${id}`);
     try {
       await api.delete(`/products/${id}/permanent`);
-      await loadTrash();
+      clearGetCache("/products");
+      await loadTrash({ force: true });
       await onChanged?.();
     } finally {
       setBusyId("");
@@ -544,7 +679,8 @@ function TrashBinPage({ onChanged }) {
     setBusyId(`conversation-restore-${id}`);
     try {
       await api.patch(`/messages/${id}/restore`);
-      await loadTrash();
+      clearGetCache("/messages/trash");
+      await loadTrash({ force: true });
       await onChanged?.();
     } finally {
       setBusyId("");
@@ -556,7 +692,8 @@ function TrashBinPage({ onChanged }) {
     setBusyId(`conversation-delete-${id}`);
     try {
       await api.delete(`/messages/${id}/permanent`);
-      await loadTrash();
+      clearGetCache("/messages/trash");
+      await loadTrash({ force: true });
       await onChanged?.();
     } finally {
       setBusyId("");
@@ -567,7 +704,8 @@ function TrashBinPage({ onChanged }) {
     setBusyId(`broadcast-restore-${id}`);
     try {
       await api.patch(`/broadcasts/${id}/restore`);
-      await loadTrash();
+      clearGetCache("/broadcasts/trash");
+      await loadTrash({ force: true });
       await onChanged?.();
     } finally {
       setBusyId("");
@@ -579,7 +717,8 @@ function TrashBinPage({ onChanged }) {
     setBusyId(`broadcast-delete-${id}`);
     try {
       await api.delete(`/broadcasts/${id}/permanent`);
-      await loadTrash();
+      clearGetCache("/broadcasts/trash");
+      await loadTrash({ force: true });
       await onChanged?.();
     } finally {
       setBusyId("");
@@ -1832,16 +1971,24 @@ function SalesAnalytics({ summary }) {
   const scannedSalesProduct = useMemo(() => findProductByBarcode(barcodeProducts.map(normalizeInventoryProduct), salesBarcodeQuery), [barcodeProducts, salesBarcodeQuery]);
 
   useEffect(() => {
-    api.get("/products/inventory")
-      .then(({ data }) => setBarcodeProducts(data))
-      .catch(() => setBarcodeProducts([]));
+    let cancelled = false;
+    cachedGet("/products/inventory", {}, { cacheMs: 8000, retries: 1 })
+      .then(({ data }) => {
+        if (!cancelled) setBarcodeProducts(data);
+      })
+      .catch(() => {
+        if (!cancelled) setBarcodeProducts([]);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
     let alive = true;
     setAnalyticsLoading(true);
     setAnalyticsError("");
-    api.get("/reports/summary", { params: reportOptionsParams({ ...defaultReportOptions, ...appliedDateOptions }) })
+    cachedGet("/reports/summary", { params: reportOptionsParams({ ...defaultReportOptions, ...appliedDateOptions }) }, { cacheMs: 8000, retries: 1 })
       .then(({ data }) => {
         if (alive) setAnalyticsSummary(data);
       })
@@ -1861,7 +2008,7 @@ function SalesAnalytics({ summary }) {
       startDate: appliedDateOptions.startDate || "",
       endDate: appliedDateOptions.endDate || ""
     }));
-  }, [appliedDateOptions]);
+  }, [appliedDateOptions.dateRange, appliedDateOptions.startDate, appliedDateOptions.endDate]);
 
   function handleDateRangeChange(value) {
     setReportRange(value);

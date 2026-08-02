@@ -29,7 +29,7 @@ import {
   Users,
   WalletCards
 } from "lucide-react";
-import { api, API_URL, getApiErrorMessage } from "../api/client";
+import { api, API_URL, cachedGet, clearGetCache, getApiErrorMessage } from "../api/client";
 import { ChangePasswordForm } from "../components/ChangePasswordForm";
 import { useAuth } from "../context/AuthContext";
 import { emitUserThemeChange, readUserTheme, saveUserTheme } from "../utils/userTheme";
@@ -267,16 +267,25 @@ export default function AdminSettingsPage({ onChange }) {
   const gcashQrPreview = useMemo(() => files.gcashQr ? URL.createObjectURL(files.gcashQr) : assetUrl(settings.payment.gcashQrUrl), [files.gcashQr, settings.payment.gcashQrUrl]);
 
   useEffect(() => {
-    api.get("/settings")
+    let cancelled = false;
+    cachedGet("/settings", {}, { cacheMs: 10000, retries: 1 })
       .then(({ data }) => {
+        if (cancelled) return;
         const hydrated = withDefaults(data);
         setSettings(hydrated);
         localStorage.setItem("retela_sidebar_collapsed", String(hydrated.appearance.sidebarCollapse));
         window.dispatchEvent(new CustomEvent("retela:appearance-settings", { detail: { sidebarCollapse: hydrated.appearance.sidebarCollapse } }));
         window.dispatchEvent(new CustomEvent("retela:branding-settings", { detail: hydrated }));
       })
-      .catch((error) => pushToast("error", getApiErrorMessage(error, "Could not load settings.")))
-      .finally(() => setLoading(false));
+      .catch((error) => {
+        if (!cancelled) pushToast("error", getApiErrorMessage(error, "Could not load settings."));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -374,6 +383,7 @@ export default function AdminSettingsPage({ onChange }) {
     setSaving(scope);
     try {
       const { data } = await api.put("/settings", buildPayload(scope), { headers: { "Content-Type": "multipart/form-data" } });
+      clearGetCache("/settings");
       const hydrated = withDefaults(data.settings);
       setSettings(hydrated);
       setFiles((current) => ({
@@ -395,6 +405,7 @@ export default function AdminSettingsPage({ onChange }) {
     setSaving("reset");
     try {
       const { data } = await api.post("/settings/reset");
+      clearGetCache("/settings");
       const hydrated = withDefaults(data.settings);
       setSettings(hydrated);
       setFiles({ shopLogo: null, gcashQr: null });
@@ -430,6 +441,7 @@ export default function AdminSettingsPage({ onChange }) {
     try {
       const backup = JSON.parse(await file.text());
       const { data } = await api.post("/settings/restore", { backup });
+      clearGetCache("/settings");
       const hydrated = withDefaults(data.settings);
       setSettings(hydrated);
       localStorage.setItem("retela_sidebar_collapsed", String(hydrated.appearance.sidebarCollapse));
@@ -461,6 +473,7 @@ export default function AdminSettingsPage({ onChange }) {
     setSaving("clearDemoData");
     try {
       const { data } = await api.post("/settings/clear-demo-data");
+      clearGetCache("/settings");
       window.dispatchEvent(new CustomEvent("retela:data-change", { detail: { type: "demo-data-cleared" } }));
       setClearConfirmOpen(false);
       pushToast("success", data.message || "Demo data cleared successfully. System is ready for client deployment.");

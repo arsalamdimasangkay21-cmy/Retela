@@ -15,6 +15,90 @@ export const api = axios.create({
   baseURL: API_URL
 });
 
+const DEFAULT_GET_CACHE_MS = 8000;
+const DEFAULT_GET_RETRIES = 1;
+const RETRY_DELAY_MS = 450;
+const inFlightGetRequests = new Map();
+const getResponseCache = new Map();
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function stableSerialize(value) {
+  if (value == null) return "";
+  if (Array.isArray(value)) return `[${value.map(stableSerialize).join(",")}]`;
+  if (typeof value === "object") {
+    return `{${Object.keys(value).sort().map((key) => `${key}:${stableSerialize(value[key])}`).join(",")}}`;
+  }
+  return String(value);
+}
+
+function getRequestKey(url, config = {}) {
+  return `${url}?${stableSerialize(config.params || {})}`;
+}
+
+function isCancelledRequest(error) {
+  return axios.isCancel?.(error) || error?.code === "ERR_CANCELED";
+}
+
+function shouldRetryGet(error, attempt, maxRetries) {
+  if (attempt >= maxRetries || isCancelledRequest(error)) return false;
+  const status = error?.response?.status;
+  if (status >= 400 && status < 500) return false;
+  return !error?.response || error?.code === "ERR_NETWORK" || error?.code === "ECONNABORTED" || error?.code === "ETIMEDOUT";
+}
+
+export function clearGetCache(urlPrefix = "") {
+  const prefix = String(urlPrefix || "");
+  for (const key of [...getResponseCache.keys()]) {
+    if (!prefix || key.startsWith(prefix)) getResponseCache.delete(key);
+  }
+  for (const key of [...inFlightGetRequests.keys()]) {
+    if (!prefix || key.startsWith(prefix)) inFlightGetRequests.delete(key);
+  }
+}
+
+export function cachedGet(url, config = {}, options = {}) {
+  const cacheMs = Number.isFinite(options.cacheMs) ? options.cacheMs : DEFAULT_GET_CACHE_MS;
+  const retries = Number.isFinite(options.retries) ? options.retries : DEFAULT_GET_RETRIES;
+  const force = Boolean(options.force);
+  const key = getRequestKey(url, config);
+  const cached = getResponseCache.get(key);
+  const now = Date.now();
+
+  if (!force && cached && cached.expiresAt > now) {
+    return Promise.resolve({ ...cached.response, data: cached.response.data });
+  }
+
+  if (!force && inFlightGetRequests.has(key)) {
+    return inFlightGetRequests.get(key);
+  }
+
+  const request = async () => {
+    let attempt = 0;
+    while (true) {
+      try {
+        const response = await api.get(url, config);
+        if (cacheMs > 0) {
+          getResponseCache.set(key, { response, expiresAt: Date.now() + cacheMs });
+        }
+        return response;
+      } catch (error) {
+        if (!shouldRetryGet(error, attempt, retries)) throw error;
+        attempt += 1;
+        await sleep(RETRY_DELAY_MS * attempt);
+      }
+    }
+  };
+
+  const promise = request().finally(() => {
+    inFlightGetRequests.delete(key);
+  });
+  inFlightGetRequests.set(key, promise);
+  return promise;
+}
+
 export function getApiErrorMessage(error, fallback = "Something went wrong. Please try again.") {
   if (error?.response?.data?.message) return error.response.data.message;
   if (error?.response?.status === 400) return "Invalid details. Please check your input and try again.";

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   AlertCircle,
@@ -29,7 +29,7 @@ import {
   Users,
   Wand2
 } from "lucide-react";
-import { api, API_URL, getApiErrorMessage } from "../api/client";
+import { api, API_URL, cachedGet, clearGetCache, getApiErrorMessage } from "../api/client";
 import { acquireSocket, releaseSocket } from "../api/socket";
 import { RETELA_LOGO_URL } from "../config/branding";
 import { Button, Card, Field } from "../components/ui";
@@ -182,10 +182,31 @@ export default function BroadcastsPage() {
     return assetUrl(form.image_url);
   }, [imageFile, form.image_url]);
 
-  useEffect(() => {
-    loadBroadcasts().finally(() => setLoading(false));
-    api.get("/products/inventory").then(({ data }) => setProducts(data)).catch(() => setProducts([]));
+  const loadBroadcasts = useCallback(async ({ cancelled, force = false } = {}) => {
+    try {
+      const { data } = await cachedGet("/broadcasts", {}, { cacheMs: 8000, retries: 1, force });
+      if (!cancelled?.()) hydrateResponse(data);
+    } catch (error) {
+      if (!cancelled?.()) pushToast("error", getApiErrorMessage(error, "Could not load broadcasts."));
+    }
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    loadBroadcasts({ cancelled: () => cancelled }).finally(() => {
+      if (!cancelled) setLoading(false);
+    });
+    cachedGet("/products/inventory", {}, { cacheMs: 8000, retries: 1 })
+      .then(({ data }) => {
+        if (!cancelled) setProducts(data);
+      })
+      .catch(() => {
+        if (!cancelled) setProducts([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [loadBroadcasts]);
 
   useEffect(() => {
     submittingActionRef.current = submittingAction;
@@ -222,15 +243,6 @@ export default function BroadcastsPage() {
     setToast({ type, message });
     window.clearTimeout(pushToast.timer);
     pushToast.timer = window.setTimeout(() => setToast(null), 3600);
-  }
-
-  async function loadBroadcasts() {
-    try {
-      const { data } = await api.get("/broadcasts");
-      hydrateResponse(data);
-    } catch (error) {
-      pushToast("error", getApiErrorMessage(error, "Could not load broadcasts."));
-    }
   }
 
   function hydrateResponse(data) {
@@ -315,6 +327,7 @@ export default function BroadcastsPage() {
       const { data } = editingId
         ? await api.put(`/broadcasts/${editingId}`, payload, { headers: { "Content-Type": "multipart/form-data" } })
         : await api.post("/broadcasts", payload, { headers: { "Content-Type": "multipart/form-data" } });
+      clearGetCache("/broadcasts");
       hydrateResponse(data);
       if (action === "send") setSubmitProgress(100);
       pushToast("success", data.message || "Broadcast saved.");
@@ -382,6 +395,7 @@ export default function BroadcastsPage() {
     setBusyId(`resend-${item.id}`);
     try {
       const { data } = await api.post(`/broadcasts/${item.id}/resend`);
+      clearGetCache("/broadcasts");
       hydrateResponse(data);
       pushToast("success", data.message || "Broadcast resent.");
     } catch (error) {
@@ -395,6 +409,7 @@ export default function BroadcastsPage() {
     setBusyId(`duplicate-${item.id}`);
     try {
       const { data } = await api.post(`/broadcasts/${item.id}/duplicate`);
+      clearGetCache("/broadcasts");
       hydrateResponse(data);
       pushToast("success", data.message || "Campaign duplicated.");
     } catch (error) {
@@ -448,6 +463,7 @@ export default function BroadcastsPage() {
     setBusyId(`delete-${item.id}`);
     try {
       const { data } = await api.delete(`/broadcasts/${item.id}`);
+      clearGetCache("/broadcasts");
       hydrateResponse(data);
       if (editingId === item.id) resetForm();
       pushToast("success", data.message || "Broadcast deleted.");
@@ -853,7 +869,7 @@ export default function BroadcastsPage() {
             <p className="text-xs font-bold uppercase tracking-[0.18em] text-emerald-200/70">Broadcast History</p>
             <h2 className="mt-2 font-display text-2xl font-bold text-white">Campaign Log</h2>
           </div>
-          <button type="button" onClick={loadBroadcasts} className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-2 text-sm font-bold text-white/70 transition hover:border-emerald-300/40 hover:text-emerald-200">
+          <button type="button" onClick={() => loadBroadcasts({ force: true })} className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-2 text-sm font-bold text-white/70 transition hover:border-emerald-300/40 hover:text-emerald-200">
             <RefreshCcw size={16} />
             Refresh
           </button>

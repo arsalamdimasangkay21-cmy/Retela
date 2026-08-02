@@ -1,5 +1,5 @@
-import { api } from "./client";
+import { cachedGet } from "./client";
 
-export function fetchFeaturedApparel() {
-  return api.get("/customer/featured-apparel");
+export function fetchFeaturedApparel(options = {}) {
+  return cachedGet("/customer/featured-apparel", {}, { cacheMs: 10000, retries: 1, ...options });
 }

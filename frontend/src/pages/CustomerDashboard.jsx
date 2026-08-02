@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { AlertCircle, BadgeCheck, Bell, Bot, CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, Clock3, Copy, CreditCard, Edit3, Eye, EyeOff, FileImage, Globe2, Loader2, Mail, MapPin, Megaphone, MessageCircle, Minus, PackageCheck, Phone, Plus, RotateCcw, Save, Search, Send, ShieldCheck, ShoppingCart, Star, Tag, Trash2, Upload, User, Users, WalletCards, X } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
@@ -8,7 +8,7 @@ import "swiper/css";
 import "swiper/css/effect-fade";
 import "swiper/css/navigation";
 import "swiper/css/pagination";
-import { api, API_URL } from "../api/client";
+import { api, API_URL, cachedGet, clearGetCache } from "../api/client";
 import { fetchFeaturedApparel } from "../api/customer";
 import { ChangePasswordForm } from "../components/ChangePasswordForm";
 import { Button, Card, Field } from "../components/ui";
@@ -102,6 +102,17 @@ export default function CustomerDashboard({ active, onChange }) {
   const [profilePhoto, setProfilePhoto] = useState(null);
   const [profileToast, setProfileToast] = useState(null);
   const [deactivating, setDeactivating] = useState(false);
+  const filtersRef = useRef(filters);
+  const cartRef = useRef(cart);
+  const stockRefreshTimerRef = useRef(null);
+
+  useEffect(() => {
+    filtersRef.current = filters;
+  }, [filters]);
+
+  useEffect(() => {
+    cartRef.current = cart;
+  }, [cart]);
 
   const visibleProducts = useMemo(() => products.filter((item) => Number(item.stock || 0) > 0), [products]);
   const filteredProducts = useMemo(() => {
@@ -125,25 +136,27 @@ export default function CustomerDashboard({ active, onChange }) {
     onChange("Shop");
   }
 
-  async function load(options = filters) {
+  const load = useCallback(async (options = filtersRef.current, { cancelled, force = false } = {}) => {
     const params = new URLSearchParams();
     Object.entries(options).forEach(([key, value]) => {
       if (value !== "" && value !== "all" && value !== undefined && value !== null) params.set(key, value);
       if (key === "stock" && value === "all") params.set(key, value);
       if (key === "sortBy") params.set(key, value);
     });
+    const productParams = Object.fromEntries(params.entries());
     const [productRes, filterRes, orderRes, notificationRes, shopInfoRes, profileRes, reviewRes, returnRes, cartRes, promotionsRes] = await Promise.all([
-      api.get(`/products${params.toString() ? `?${params.toString()}` : ""}`),
-      api.get("/products/filters"),
-      api.get("/orders"),
-      api.get("/notifications"),
-      api.get("/settings/public").catch(() => api.get("/users/admin/payment-profile")),
-      api.get("/users/me"),
-      api.get("/reviews"),
-      api.get("/returns"),
-      api.get("/cart"),
-      api.get("/settings/promotions")
+      cachedGet("/products", { params: productParams }, { cacheMs: 8000, retries: 1, force }),
+      cachedGet("/products/filters", {}, { cacheMs: 10000, retries: 1, force }),
+      cachedGet("/orders", {}, { cacheMs: 8000, retries: 1, force }),
+      cachedGet("/notifications", {}, { cacheMs: 8000, retries: 1, force }),
+      cachedGet("/settings/public", {}, { cacheMs: 10000, retries: 1, force }).catch(() => cachedGet("/users/admin/payment-profile", {}, { cacheMs: 10000, retries: 1, force })),
+      cachedGet("/users/me", {}, { cacheMs: 10000, retries: 1, force }),
+      cachedGet("/reviews", {}, { cacheMs: 8000, retries: 1, force }),
+      cachedGet("/returns", {}, { cacheMs: 8000, retries: 1, force }),
+      cachedGet("/cart", {}, { cacheMs: 5000, retries: 1, force }),
+      cachedGet("/settings/promotions", {}, { cacheMs: 10000, retries: 1, force })
     ]);
+    if (cancelled?.()) return;
     setProducts(productRes.data.filter((item) => Number(item.stock || 0) > 0));
     setFilterOptions(filterRes.data);
     setOrders(orderRes.data);
@@ -155,7 +168,7 @@ export default function CustomerDashboard({ active, onChange }) {
     setReturnRequests(returnRes.data);
     replaceCart(cartRes.data);
     setPromotions(promotionsRes.data);
-  }
+  }, []);
 
   function replaceCart(rows) {
     const nextCart = normalizeCartRows(rows);
@@ -163,29 +176,50 @@ export default function CustomerDashboard({ active, onChange }) {
     setSelectedCartIds(nextCart.filter((item) => item.selected).map((item) => Number(item.product_id)));
   }
 
-  async function loadFeaturedApparel() {
+  const loadFeaturedApparel = useCallback(async ({ cancelled, force = false } = {}) => {
     setFeaturedLoading(true);
     try {
-      const { data } = await fetchFeaturedApparel();
-      setFeaturedApparel(Array.isArray(data) ? data : []);
+      const { data } = await fetchFeaturedApparel({ force });
+      if (!cancelled?.()) setFeaturedApparel(Array.isArray(data) ? data : []);
     } finally {
-      setFeaturedLoading(false);
+      if (!cancelled?.()) setFeaturedLoading(false);
     }
-  }
-
-  useEffect(() => { load(filters).catch(() => {}); }, [filters]);
-
-  useEffect(() => { loadFeaturedApparel().catch(() => setFeaturedLoading(false)); }, []);
+  }, []);
 
   useEffect(() => {
-    function refreshStock() {
-      load(filters).catch(() => {});
-      loadFeaturedApparel().catch(() => setFeaturedLoading(false));
-      if (cart.length) recheckCartStock().catch(() => {});
+    let cancelled = false;
+    load(filters, { cancelled: () => cancelled }).catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [filters, load]);
+
+  useEffect(() => {
+    let cancelled = false;
+    loadFeaturedApparel({ cancelled: () => cancelled }).catch(() => {
+      if (!cancelled) setFeaturedLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [loadFeaturedApparel]);
+
+  useEffect(() => {
+    function refreshStock(event) {
+      if (event.detail?.type === "shipping") return;
+      window.clearTimeout(stockRefreshTimerRef.current);
+      stockRefreshTimerRef.current = window.setTimeout(() => {
+        load(filtersRef.current, { force: true }).catch(() => {});
+        loadFeaturedApparel({ force: true }).catch(() => setFeaturedLoading(false));
+        if (cartRef.current.length) recheckCartStock({ silent: true }).catch(() => {});
+      }, 400);
     }
     window.addEventListener("retela:data-change", refreshStock);
-    return () => window.removeEventListener("retela:data-change", refreshStock);
-  }, [filters, cart]);
+    return () => {
+      window.clearTimeout(stockRefreshTimerRef.current);
+      window.removeEventListener("retela:data-change", refreshStock);
+    };
+  }, [load, loadFeaturedApparel]);
 
   useEffect(() => {
     if (active !== "Cart") return;
@@ -216,6 +250,7 @@ export default function CustomerDashboard({ active, onChange }) {
     }
     try {
       const { data } = await api.post("/cart/items", { product_id: product.id, quantity: 1, selected: true });
+      clearGetCache("/cart");
       replaceCart(data);
       notifyCart(successMessage);
     } catch (error) {
@@ -233,6 +268,7 @@ export default function CustomerDashboard({ active, onChange }) {
       await api.post("/cart/items", { product_id: product.id, quantity: 1, selected: true });
       await api.patch("/cart/selection", { selected: false });
       const { data } = await api.patch(`/cart/items/${product.id}`, { selected: true });
+      clearGetCache("/cart");
       replaceCart(data);
       onChange("Cart");
     } catch (error) {
@@ -246,6 +282,7 @@ export default function CustomerDashboard({ active, onChange }) {
     const quantity = Math.max(1, Math.min(Number(current.stock || 1), Number(current.quantity || 1) + delta));
     try {
       const { data } = await api.patch(`/cart/items/${productId}`, { quantity });
+      clearGetCache("/cart");
       replaceCart(data);
       notifyCart("Quantity updated");
     } catch (error) {
@@ -256,6 +293,7 @@ export default function CustomerDashboard({ active, onChange }) {
   async function removeCartItem(productId) {
     try {
       const { data } = await api.delete(`/cart/items/${productId}`);
+      clearGetCache("/cart");
       replaceCart(data);
       notifyCart("Item removed");
     } catch (error) {
@@ -267,19 +305,26 @@ export default function CustomerDashboard({ active, onChange }) {
     setSelectedCartIds((ids) => ids.filter((id) => cart.some((item) => Number(item.product_id) === id)));
   }, [cart]);
 
-  async function loadPromotions() {
-    const { data } = await api.get("/settings/promotions");
+  const loadPromotions = useCallback(async ({ cancelled, force = false } = {}) => {
+    const { data } = await cachedGet("/settings/promotions", {}, { cacheMs: 10000, retries: 1, force });
+    if (cancelled?.()) return;
     setPromotions(data);
-  }
+  }, []);
 
   useEffect(() => {
+    let cancelled = false;
     function refreshShipping() {
-      loadPromotions().catch(() => setPromotions({ shipping: { type: "fixed", fee: 0 }, coupons: [], sales: [] }));
+      loadPromotions({ cancelled: () => cancelled, force: true })
+        .catch(() => {
+          if (!cancelled) setPromotions({ shipping: { type: "fixed", fee: 0 }, coupons: [], sales: [] });
+        });
     }
-    refreshShipping();
     window.addEventListener("retela:shipping-change", refreshShipping);
-    return () => window.removeEventListener("retela:shipping-change", refreshShipping);
-  }, []);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("retela:shipping-change", refreshShipping);
+    };
+  }, [loadPromotions]);
 
   async function toggleCartSelection(productId) {
     const id = Number(productId);
@@ -288,6 +333,7 @@ export default function CustomerDashboard({ active, onChange }) {
     setCouponError("");
     try {
       const { data } = await api.patch(`/cart/items/${id}`, { selected });
+      clearGetCache("/cart");
       replaceCart(data);
     } catch {
       setSelectedCartIds((ids) => selected ? ids.filter((value) => value !== id) : [...ids, id]);
@@ -299,9 +345,10 @@ export default function CustomerDashboard({ active, onChange }) {
     setCouponError("");
     try {
       const { data } = await api.patch("/cart/selection", { selected });
+      clearGetCache("/cart");
       replaceCart(data);
     } catch {
-      load().catch(() => {});
+      load(filtersRef.current, { force: true }).catch(() => {});
     }
   }
 
@@ -333,14 +380,15 @@ export default function CustomerDashboard({ active, onChange }) {
   }
 
   async function recheckCartStock({ silent = false, productIds = null } = {}) {
-    if (!cart.length) return true;
+    const currentCart = cartRef.current;
+    if (!currentCart.length) return true;
     const validationSet = Array.isArray(productIds) ? new Set(productIds.map(Number)) : null;
-    const { data } = await api.get("/products?stock=all");
+    const { data } = await cachedGet("/products", { params: { stock: "all" } }, { cacheMs: 5000, retries: 1 });
     const inventory = new Map(data.map((item) => [Number(item.id), item]));
     let ok = true;
     let message = "";
     const nextCart = [];
-    for (const item of cart) {
+    for (const item of currentCart) {
       const itemId = Number(item.product_id);
       const shouldValidate = !validationSet || validationSet.has(itemId);
       const current = inventory.get(Number(item.product_id));
@@ -415,6 +463,10 @@ export default function CustomerDashboard({ active, onChange }) {
         coupon_code: appliedCoupon?.code || "",
         items: selectedCartItems.map(({ product_id, quantity }) => ({ product_id, quantity }))
       });
+      clearGetCache("/orders");
+      clearGetCache("/cart");
+      clearGetCache("/products");
+      clearGetCache("/notifications");
       const cartRes = await api.get("/cart");
       replaceCart(cartRes.data);
       setCheckoutSummaryOpen(false);
@@ -428,7 +480,7 @@ export default function CustomerDashboard({ active, onChange }) {
         return;
       }
       notifyCart("Checkout submitted.");
-      await load();
+      await load(filtersRef.current, { force: true });
     } catch (error) {
       notifyCart(error?.response?.data?.message || "Checkout failed. Please try again.");
     } finally {
@@ -455,6 +507,7 @@ export default function CustomerDashboard({ active, onChange }) {
     if (profilePhoto) payload.append("profilePhoto", profilePhoto);
     try {
       const { data } = await api.patch("/users/me", payload, { headers: { "Content-Type": "multipart/form-data" } });
+      clearGetCache("/users/me");
       localStorage.setItem("retela_user", JSON.stringify({ ...user, ...data }));
       setUser({ ...user, ...data });
       setProfile(data);
@@ -646,8 +699,8 @@ export default function CustomerDashboard({ active, onChange }) {
     );
   }
   if (active === "About") return <AboutShop shop={shopInfo} />;
-  if (active === "Feedback") return <Feedback orders={orders} reviews={reviews} onSaved={load} />;
-  if (active === "Returns") return <ReturnForm orders={orders} returnRequests={returnRequests} onSaved={load} />;
+  if (active === "Feedback") return <Feedback orders={orders} reviews={reviews} onSaved={() => load(filtersRef.current, { force: true })} />;
+  if (active === "Returns") return <ReturnForm orders={orders} returnRequests={returnRequests} onSaved={() => load(filtersRef.current, { force: true })} />;
   return (
     <>
       <Profile profile={profile} setProfile={setProfile} profilePhoto={profilePhoto} setProfilePhoto={setProfilePhoto} saveProfile={saveProfile} onReset={resetProfile} onDeactivate={deactivateAccount} deactivating={deactivating} />
@@ -2125,6 +2178,7 @@ function Feedback({ orders, reviews, onSaved }) {
     setSubmitting(true);
     try {
       await api.post("/reviews", payload, { headers: { "Content-Type": "multipart/form-data" } });
+      clearGetCache("/reviews");
       showToast("success", "Feedback submitted successfully.");
       setForm({ order_id: "", rating: 0, category: "", comment: "" });
       setImage(null);
@@ -2255,6 +2309,8 @@ function ReturnForm({ orders, returnRequests, onSaved }) {
     setSubmitting(true);
     try {
       await api.post("/returns", payload, { headers: { "Content-Type": "multipart/form-data" } });
+      clearGetCache("/returns");
+      clearGetCache("/orders");
       showToast("success", "Return request submitted successfully.");
       setForm({ order_id: "", reason_category: "", refund_type: "", description: "" });
       setImages([]);

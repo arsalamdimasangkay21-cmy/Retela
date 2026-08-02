@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
-import { api } from "../api/client";
+import { api, cachedGet } from "../api/client";
 
 const AuthContext = createContext(null);
 
@@ -22,17 +22,23 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     if (!token) return;
-    api.get("/users/me")
+    let cancelled = false;
+    cachedGet("/users/me", {}, { cacheMs: 10000, retries: 1 })
       .then(({ data }) => {
+        if (cancelled) return;
         localStorage.setItem("retela_user", JSON.stringify(data));
         setUser(data);
       })
       .catch(() => {
+        if (cancelled) return;
         localStorage.removeItem("retela_token");
         localStorage.removeItem("retela_user");
         setToken(null);
         setUser(null);
       });
+    return () => {
+      cancelled = true;
+    };
   }, [token]);
 
   async function login(credentials) {

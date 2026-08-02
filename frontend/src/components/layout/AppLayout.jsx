@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Bell, CalendarDays, MessageCircle, Moon, ShoppingCart, Sun, UserCircle } from "lucide-react";
-import { api } from "../../api/client";
+import { api, cachedGet } from "../../api/client";
 import { acquireSocket, releaseSocket } from "../../api/socket";
 import { logoFromSettings, RETELA_LOGO_URL } from "../../config/branding";
 import { useAuth } from "../../context/AuthContext";
@@ -23,6 +23,7 @@ export default function AppLayout({ children, active, onChange }) {
   const [logoUrl, setLogoUrl] = useState(savedLogoUrl);
   const [darkMode, setDarkMode] = useState(false);
   const [socket, setSocket] = useState(null);
+  const lastActivityEmitRef = useRef(0);
 
   useEffect(() => {
     if (!token) {
@@ -97,14 +98,20 @@ export default function AppLayout({ children, active, onChange }) {
 
   useEffect(() => {
     if (!socket || !user?.id) return undefined;
-    const markActivity = () => socket.emit("user:activity");
+    const markActivity = (force = false) => {
+      const nowMs = Date.now();
+      if (!force && nowMs - lastActivityEmitRef.current < 15000) return;
+      lastActivityEmitRef.current = nowMs;
+      socket.emit("user:activity");
+    };
+    const handleActivity = () => markActivity();
     const timer = setInterval(markActivity, 60000);
     const events = ["click", "keydown", "mousemove", "touchstart"];
-    events.forEach((eventName) => window.addEventListener(eventName, markActivity, { passive: true }));
-    markActivity();
+    events.forEach((eventName) => window.addEventListener(eventName, handleActivity, { passive: true }));
+    markActivity(true);
     return () => {
       clearInterval(timer);
-      events.forEach((eventName) => window.removeEventListener(eventName, markActivity));
+      events.forEach((eventName) => window.removeEventListener(eventName, handleActivity));
     };
   }, [socket, user?.id]);
 
@@ -114,8 +121,10 @@ export default function AppLayout({ children, active, onChange }) {
       setMessageCount(0);
       return;
     }
-    api.get("/notifications")
+    let cancelled = false;
+    cachedGet("/notifications", {}, { cacheMs: 8000, retries: 1 })
       .then(({ data }) => {
+        if (cancelled) return;
         const unread = data.filter((row) => !row.is_read);
         if (user?.role === "admin") {
           setMessageCount(unread.filter((row) => row.type === "message").length);
@@ -126,9 +135,13 @@ export default function AppLayout({ children, active, onChange }) {
         }
       })
       .catch(() => {
+        if (cancelled) return;
         setNotificationCount(0);
         setMessageCount(0);
       });
+    return () => {
+      cancelled = true;
+    };
   }, [token, user?.role]);
 
   useEffect(() => {
@@ -178,13 +191,18 @@ export default function AppLayout({ children, active, onChange }) {
   }, [user]);
 
   useEffect(() => {
-    api.get("/settings/public")
+    let cancelled = false;
+    cachedGet("/settings/public", {}, { cacheMs: 10000, retries: 1 })
       .then(({ data }) => {
+        if (cancelled) return;
         const nextLogo = logoFromSettings(data);
         setLogoUrl(nextLogo);
         localStorage.setItem("retela_logo_url", nextLogo);
       })
       .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
