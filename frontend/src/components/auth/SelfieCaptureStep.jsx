@@ -4,7 +4,7 @@ import { Button } from "../ui";
 import { captureVideoFrame, compressImage } from "./imageTools";
 
 const MODEL_URL = "/models/face-api";
-const DETECTION_INTERVAL_MS = 180;
+const DETECTION_INTERVAL_MS = 50;
 const STABLE_CAPTURE_MS = 1500;
 const COUNTDOWN_SECONDS = 3;
 const CAMERA_RESTART_LIMIT = 1;
@@ -16,9 +16,27 @@ const HEAD_TILT_MAX_DEGREES = 10;
 const MIN_BRIGHTNESS = 55;
 const MIN_BLUR_SCORE = 4.5;
 const GUIDE_BOUNDS = { left: 0.18, top: 0.12, right: 0.82, bottom: 0.88 };
+const CALIBRATION_DURATION_MS = 650;
+const MIN_CALIBRATION_SAMPLES = 8;
+const BLINK_THRESHOLD_RATIO = 0.72;
+const BLINK_THRESHOLD_MIN = 0.15;
+const BLINK_THRESHOLD_MAX = 0.26;
+const BLINK_OPEN_MARGIN = 0.025;
+const BLINK_MIN_CLOSED_FRAMES = 2;
+const BLINK_MIN_DURATION_MS = 100;
+const BLINK_MAX_DURATION_MS = 900;
+const BLINK_REOPEN_TIMEOUT_MS = 900;
+const BLINK_STATES = {
+  CALIBRATING: "CALIBRATING",
+  WAITING_OPEN: "WAITING_OPEN",
+  WAITING_CLOSE: "WAITING_CLOSE",
+  WAITING_REOPEN: "WAITING_REOPEN",
+  BLINK_CONFIRMED: "BLINK_CONFIRMED"
+};
 
 let faceapiModule;
 let modelPromise;
+let detectorOptions;
 
 async function loadLivenessModels() {
   faceapiModule ||= await import("face-api.js");
@@ -32,7 +50,8 @@ async function loadLivenessModels() {
 }
 
 function faceOptions(faceapi) {
-  return new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.45 });
+  detectorOptions ||= new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.45 });
+  return detectorOptions;
 }
 
 function pointDistance(a, b) {
@@ -50,11 +69,72 @@ function eyeAspectRatio(points = []) {
   return (pointDistance(points[1], points[5]) + pointDistance(points[2], points[4])) / (2 * Math.max(pointDistance(points[0], points[3]), 1));
 }
 
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function average(values = []) {
+  if (!values.length) return 0;
+  return values.reduce((total, value) => total + value, 0) / values.length;
+}
+
+function createBlinkState(detected = false) {
+  return {
+    state: detected ? BLINK_STATES.BLINK_CONFIRMED : BLINK_STATES.CALIBRATING,
+    calibrationStartedAt: 0,
+    samples: [],
+    leftSamples: [],
+    rightSamples: [],
+    baselineEar: 0,
+    leftBaselineEar: 0,
+    rightBaselineEar: 0,
+    closeThreshold: 0,
+    openThreshold: 0,
+    leftCloseThreshold: 0,
+    rightCloseThreshold: 0,
+    leftOpenThreshold: 0,
+    rightOpenThreshold: 0,
+    closedFrameCount: 0,
+    closedStartedAt: 0,
+    detected,
+    lastBlinkDuration: 0,
+    lastDebug: null
+  };
+}
+
 function cameraErrorMessage(error) {
   if (error?.name === "NotAllowedError" || error?.name === "SecurityError") return "Camera permission is required.";
   if (error?.name === "NotFoundError" || error?.name === "OverconstrainedError") return "No camera detected.";
   if (error?.name === "NotReadableError") return "Camera is currently being used by another application.";
   return "Unable to start camera.";
+}
+
+function waitForVideoMetadata(video) {
+  if (video.readyState >= 2 && video.videoWidth && video.videoHeight) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const timeout = window.setTimeout(() => {
+      cleanup();
+      reject(new Error("Camera initialization timed out."));
+    }, 5000);
+    const cleanup = () => {
+      window.clearTimeout(timeout);
+      video.removeEventListener("loadedmetadata", handleLoaded);
+      video.removeEventListener("canplay", handleLoaded);
+      video.removeEventListener("error", handleError);
+    };
+    const handleLoaded = () => {
+      if (!video.videoWidth || !video.videoHeight) return;
+      cleanup();
+      resolve();
+    };
+    const handleError = () => {
+      cleanup();
+      reject(new Error("Unable to start camera."));
+    };
+    video.addEventListener("loadedmetadata", handleLoaded);
+    video.addEventListener("canplay", handleLoaded);
+    video.addEventListener("error", handleError);
+  });
 }
 
 function isMeaningfullyDifferent(previous, next) {
@@ -130,7 +210,8 @@ function buildFaceQuality(video, detection, previousFrame) {
   );
   const centered = Math.abs(faceCenterX - 0.5) <= CENTER_TOLERANCE_X && Math.abs(faceCenterY - 0.5) <= CENTER_TOLERANCE_Y;
   const lookingForward = Math.abs(noseTip.x - eyeMidpoint.x) / Math.max(box.width, 1) <= 0.16;
-  const eyesVisible = leftEye.length >= 6 && rightEye.length >= 6 && eyeDistance / Math.max(box.width, 1) > 0.22 && ear > 0.09;
+  const eyeLandmarksAvailable = leftEye.length >= 6 && rightEye.length >= 6 && leftEar > 0 && rightEar > 0;
+  const eyesVisible = eyeLandmarksAvailable && eyeDistance / Math.max(box.width, 1) > 0.22;
   const partiallyHidden = (
     mouthCenter.y <= noseTip.y ||
     box.x < 2 ||
@@ -148,6 +229,9 @@ function buildFaceQuality(video, detection, previousFrame) {
     centerX: faceCenterX,
     centerY: faceCenterY,
     ear,
+    leftEar,
+    rightEar,
+    eyeLandmarksAvailable,
     eyesVisible,
     faceRatio,
     headStraight: eyeAngle <= HEAD_TILT_MAX_DEGREES,
@@ -161,35 +245,128 @@ function buildFaceQuality(video, detection, previousFrame) {
   };
 }
 
-function resetBlink(blinkRef) {
-  blinkRef.current = {
-    baseline: 0,
-    openFrames: 0,
-    closedSeen: false,
-    detected: false
+function resetBlink(blinkRef, detected = false) {
+  blinkRef.current = createBlinkState(detected);
+}
+
+function applyBlinkCalibration(blink) {
+  blink.baselineEar = average(blink.samples);
+  blink.leftBaselineEar = average(blink.leftSamples);
+  blink.rightBaselineEar = average(blink.rightSamples);
+  blink.closeThreshold = clamp(blink.baselineEar * BLINK_THRESHOLD_RATIO, BLINK_THRESHOLD_MIN, BLINK_THRESHOLD_MAX);
+  blink.openThreshold = blink.closeThreshold + BLINK_OPEN_MARGIN;
+  blink.leftCloseThreshold = clamp(blink.leftBaselineEar * BLINK_THRESHOLD_RATIO, BLINK_THRESHOLD_MIN, BLINK_THRESHOLD_MAX);
+  blink.rightCloseThreshold = clamp(blink.rightBaselineEar * BLINK_THRESHOLD_RATIO, BLINK_THRESHOLD_MIN, BLINK_THRESHOLD_MAX);
+  blink.leftOpenThreshold = blink.leftCloseThreshold + BLINK_OPEN_MARGIN;
+  blink.rightOpenThreshold = blink.rightCloseThreshold + BLINK_OPEN_MARGIN;
+  blink.state = BLINK_STATES.WAITING_OPEN;
+}
+
+function blinkDebug(blink, quality, timestamp) {
+  return {
+    leftEar: Number(quality.leftEar.toFixed(3)),
+    rightEar: Number(quality.rightEar.toFixed(3)),
+    averageEar: Number(quality.ear.toFixed(3)),
+    baselineEar: Number((blink.baselineEar || 0).toFixed(3)),
+    closeThreshold: Number((blink.closeThreshold || 0).toFixed(3)),
+    openThreshold: Number((blink.openThreshold || 0).toFixed(3)),
+    blinkState: blink.state,
+    closedFrameCount: blink.closedFrameCount,
+    blinkDuration: blink.closedStartedAt ? Math.round(timestamp - blink.closedStartedAt) : 0
   };
 }
 
-function updateBlinkState(blinkRef, ear) {
+function updateBlinkState(blinkRef, quality, timestamp) {
   const blink = blinkRef.current;
-  if (ear > 0.22) {
-    blink.openFrames += 1;
-    blink.baseline = blink.baseline ? (blink.baseline * 0.82) + (ear * 0.18) : ear;
+  if (blink.detected) {
+    blink.lastDebug = blinkDebug(blink, quality, timestamp);
+    return { detected: true, instruction: "Blink detected", state: blink.state };
   }
 
-  if (blink.openFrames < 3 || !blink.baseline) return blink.detected;
+  const openEnoughForBaseline = quality.ear >= BLINK_THRESHOLD_MIN + BLINK_OPEN_MARGIN && quality.leftEar >= 0.12 && quality.rightEar >= 0.12;
 
-  const closedThreshold = Math.min(0.2, blink.baseline * 0.72);
-  const reopenedThreshold = blink.baseline * 0.88;
+  // Calibration observes the user's normal open-eye EAR before asking for a blink.
+  if (blink.state === BLINK_STATES.CALIBRATING) {
+    if (!blink.calibrationStartedAt) blink.calibrationStartedAt = timestamp;
+    if (openEnoughForBaseline) {
+      blink.samples.push(quality.ear);
+      blink.leftSamples.push(quality.leftEar);
+      blink.rightSamples.push(quality.rightEar);
+      if (blink.samples.length > 18) {
+        blink.samples.shift();
+        blink.leftSamples.shift();
+        blink.rightSamples.shift();
+      }
+    }
 
-  // Blink detection watches for a normal open, closed, open sequence after the face is already aligned.
-  if (!blink.closedSeen && ear < closedThreshold) {
-    blink.closedSeen = true;
-  } else if (blink.closedSeen && ear > reopenedThreshold) {
-    blink.detected = true;
+    const elapsed = timestamp - blink.calibrationStartedAt;
+    if (elapsed >= CALIBRATION_DURATION_MS && blink.samples.length >= MIN_CALIBRATION_SAMPLES) {
+      applyBlinkCalibration(blink);
+    } else {
+      blink.lastDebug = blinkDebug(blink, quality, timestamp);
+      return { detected: false, instruction: "Open your eyes normally", state: blink.state };
+    }
   }
 
-  return blink.detected;
+  if (!blink.closeThreshold || !blink.openThreshold) {
+    resetBlink(blinkRef);
+    blinkRef.current.lastDebug = blinkDebug(blinkRef.current, quality, timestamp);
+    return { detected: false, instruction: "Open your eyes normally", state: BLINK_STATES.CALIBRATING };
+  }
+
+  const leftClosed = quality.leftEar <= blink.leftCloseThreshold + 0.015;
+  const rightClosed = quality.rightEar <= blink.rightCloseThreshold + 0.015;
+  const bothEyesClosed = leftClosed && rightClosed;
+  const closedEnough = (quality.ear <= blink.closeThreshold && bothEyesClosed) || (quality.leftEar <= blink.leftCloseThreshold && quality.rightEar <= blink.rightCloseThreshold);
+  const leftOpen = quality.leftEar >= blink.leftOpenThreshold - 0.01;
+  const rightOpen = quality.rightEar >= blink.rightOpenThreshold - 0.01;
+  const openEnough = quality.ear >= blink.openThreshold && leftOpen && rightOpen;
+
+  if (blink.state === BLINK_STATES.WAITING_OPEN) {
+    blink.closedFrameCount = 0;
+    blink.closedStartedAt = 0;
+    if (openEnough) blink.state = BLINK_STATES.WAITING_CLOSE;
+    blink.lastDebug = blinkDebug(blink, quality, timestamp);
+    return { detected: false, instruction: openEnough ? "Blink once" : "Open your eyes normally", state: blink.state };
+  }
+
+  if (blink.state === BLINK_STATES.WAITING_CLOSE) {
+    if (closedEnough) {
+      blink.closedFrameCount += 1;
+      if (!blink.closedStartedAt) blink.closedStartedAt = timestamp;
+      if (blink.closedFrameCount >= BLINK_MIN_CLOSED_FRAMES) blink.state = BLINK_STATES.WAITING_REOPEN;
+    } else {
+      blink.closedFrameCount = 0;
+      blink.closedStartedAt = 0;
+    }
+    blink.lastDebug = blinkDebug(blink, quality, timestamp);
+    return { detected: false, instruction: blink.state === BLINK_STATES.WAITING_REOPEN ? "Open your eyes normally" : "Blink once", state: blink.state };
+  }
+
+  if (blink.state === BLINK_STATES.WAITING_REOPEN) {
+    const blinkDuration = timestamp - blink.closedStartedAt;
+    if (blinkDuration > BLINK_REOPEN_TIMEOUT_MS || blinkDuration > BLINK_MAX_DURATION_MS) {
+      blink.state = BLINK_STATES.WAITING_OPEN;
+      blink.closedFrameCount = 0;
+      blink.closedStartedAt = 0;
+      blink.lastDebug = blinkDebug(blink, quality, timestamp);
+      return { detected: false, instruction: "Open your eyes normally", state: blink.state };
+    }
+
+    if (openEnough && blinkDuration >= BLINK_MIN_DURATION_MS) {
+      blink.state = BLINK_STATES.BLINK_CONFIRMED;
+      blink.detected = true;
+      blink.lastBlinkDuration = blinkDuration;
+      blink.lastDebug = blinkDebug(blink, quality, timestamp);
+      return { detected: true, instruction: "Blink detected", state: blink.state };
+    }
+
+    blink.lastDebug = blinkDebug(blink, quality, timestamp);
+    return { detected: false, instruction: "Open your eyes normally", state: blink.state };
+  }
+
+  blink.lastDebug = blinkDebug(blink, quality, timestamp);
+  return { detected: blink.detected, instruction: blink.detected ? "Blink detected" : "Blink once", state: blink.state };
 }
 
 const progressSteps = ["Personal Info", "Selfie", "Government ID", "OTP", "Completed"];
@@ -216,12 +393,7 @@ export default function SelfieCaptureStep({ selfie, selfiePreview, livenessVerif
   const openCameraRef = useRef(null);
   const analyzeFrameRef = useRef(null);
   const hasVerifiedPreview = Boolean(selfiePreview && livenessVerified);
-  const blinkRef = useRef({
-    baseline: 0,
-    openFrames: 0,
-    closedSeen: false,
-    detected: Boolean(livenessVerified)
-  });
+  const blinkRef = useRef(createBlinkState(Boolean(livenessVerified)));
   const [ui, setUi] = useState({
     phase: hasVerifiedPreview ? "success" : "starting",
     instruction: hasVerifiedPreview ? "Verification Successful" : selfiePreview ? "Recapture your selfie" : "Starting camera",
@@ -230,7 +402,8 @@ export default function SelfieCaptureStep({ selfie, selfiePreview, livenessVerif
     confidence: 0,
     busy: !selfiePreview,
     error: "",
-    restartable: false
+    restartable: false,
+    debug: null
   });
 
   const publishUi = useCallback((updates) => {
@@ -414,8 +587,8 @@ export default function SelfieCaptureStep({ selfie, selfiePreview, livenessVerif
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
           facingMode: { ideal: "user" },
-          width: { ideal: 1280 },
-          height: { ideal: 960 }
+          width: { ideal: 720 },
+          height: { ideal: 540 }
         },
         audio: false
       });
@@ -423,6 +596,7 @@ export default function SelfieCaptureStep({ selfie, selfiePreview, livenessVerif
       stream.getVideoTracks().forEach((track) => track.addEventListener("ended", handleTrackEnded, { once: true }));
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
+        await waitForVideoMetadata(videoRef.current);
         await videoRef.current.play();
       }
       publishUi({ phase: "scanning", instruction: "Center your face", guideState: "scanning", busy: false });
@@ -473,43 +647,68 @@ export default function SelfieCaptureStep({ selfie, selfiePreview, livenessVerif
         previousFrameRef.current = quality;
         latestConfidenceRef.current = quality.score;
         const metrics = getFrameMetrics(video, metricsCanvasRef.current);
-        const facePositionValid = quality.insideGuide && quality.centered && quality.faceRatio >= FACE_DISTANCE_MIN && quality.faceRatio <= FACE_DISTANCE_MAX;
-        const blinkDetected = livenessVerified || updateBlinkState(blinkRef, quality.ear);
 
-        let next = { phase: "scanning", instruction: "Ready", guideState: "ready", confidence: Math.round(quality.score * 100), error: "" };
+        let next = { phase: "scanning", instruction: "Ready", guideState: "ready", confidence: Math.round(quality.score * 100), error: "", debug: import.meta.env.DEV ? blinkRef.current.lastDebug : null };
         let validForCountdown = false;
+        let shouldResetBlink = false;
 
         // Guide validation follows the same priority as the single live instruction text.
         if (!quality.insideGuide) {
+          shouldResetBlink = true;
           next = { ...next, instruction: "Face outside guide", guideState: "warn" };
         } else if (quality.faceRatio < FACE_DISTANCE_MIN) {
+          shouldResetBlink = true;
           next = { ...next, instruction: "Move closer", guideState: "warn" };
         } else if (quality.faceRatio > FACE_DISTANCE_MAX) {
+          shouldResetBlink = true;
           next = { ...next, instruction: "Move farther", guideState: "warn" };
         } else if (!quality.centered) {
+          shouldResetBlink = true;
           next = { ...next, instruction: "Center your face", guideState: "warn" };
         } else if (!quality.lookingForward) {
+          shouldResetBlink = true;
           next = { ...next, instruction: "Look directly at the camera", guideState: "warn" };
         } else if (!quality.headStraight) {
+          shouldResetBlink = true;
           next = { ...next, instruction: "Keep your head straight", guideState: "warn" };
         } else if (metrics.brightness < MIN_BRIGHTNESS) {
+          shouldResetBlink = true;
           next = { ...next, instruction: "Increase lighting", guideState: "warn" };
-        } else if (!quality.eyesVisible) {
+        } else if (!quality.eyeLandmarksAvailable || !quality.eyesVisible) {
+          shouldResetBlink = true;
           next = { ...next, instruction: "Remove sunglasses", guideState: "warn" };
         } else if (quality.partiallyHidden) {
+          shouldResetBlink = true;
           next = { ...next, instruction: "Face partially hidden", guideState: "warn" };
         } else if (metrics.blurScore < MIN_BLUR_SCORE || quality.movement > 0.38) {
+          shouldResetBlink = true;
           next = { ...next, instruction: "Hold still", guideState: "warn" };
-        } else if (!blinkDetected && facePositionValid) {
-          next = { ...next, instruction: "Blink once", guideState: "warn" };
         } else {
-          validForCountdown = true;
-          next = { ...next, instruction: "Hold still", guideState: "ready" };
+          const blinkResult = livenessVerified
+            ? { detected: true, instruction: "Blink detected", state: BLINK_STATES.BLINK_CONFIRMED }
+            : updateBlinkState(blinkRef, quality, timestamp);
+          const blinkDebugValue = import.meta.env.DEV ? blinkRef.current.lastDebug : null;
+
+          if (!blinkResult.detected) {
+            next = { ...next, instruction: blinkResult.instruction, guideState: blinkResult.state === BLINK_STATES.CALIBRATING ? "scanning" : "warn", debug: blinkDebugValue };
+          } else {
+            validForCountdown = true;
+            next = {
+              ...next,
+              instruction: stabilityStartRef.current ? "Hold still" : "Blink detected",
+              guideState: "ready",
+              debug: blinkDebugValue
+            };
+          }
+        }
+
+        if (shouldResetBlink && !livenessVerified) {
+          resetBlink(blinkRef);
+          next = { ...next, debug: import.meta.env.DEV ? blinkRef.current.lastDebug : null };
         }
 
         if (!validForCountdown) {
           cancelReadyState();
-          if (!facePositionValid) resetBlink(blinkRef);
           publishUi({ ...next, countdown: 0 });
           return;
         }
@@ -618,6 +817,20 @@ export default function SelfieCaptureStep({ selfie, selfiePreview, livenessVerif
           <span>{showSuccess ? "Verification Successful" : ui.instruction}</span>
           {ui.confidence ? <strong>{ui.confidence}%</strong> : null}
         </div>
+
+        {import.meta.env.DEV && ui.debug ? (
+          <dl className="retela-faceid-debug" aria-label="Development blink debug values">
+            <div><dt>Left EAR</dt><dd>{ui.debug.leftEar}</dd></div>
+            <div><dt>Right EAR</dt><dd>{ui.debug.rightEar}</dd></div>
+            <div><dt>Avg EAR</dt><dd>{ui.debug.averageEar}</dd></div>
+            <div><dt>Baseline</dt><dd>{ui.debug.baselineEar}</dd></div>
+            <div><dt>Close</dt><dd>{ui.debug.closeThreshold}</dd></div>
+            <div><dt>Open</dt><dd>{ui.debug.openThreshold}</dd></div>
+            <div><dt>State</dt><dd>{ui.debug.blinkState}</dd></div>
+            <div><dt>Closed</dt><dd>{ui.debug.closedFrameCount}</dd></div>
+            <div><dt>Duration</dt><dd>{ui.debug.blinkDuration}ms</dd></div>
+          </dl>
+        ) : null}
 
         {ui.error ? <p className="retela-register-alert"><TriangleAlert size={16} /> {ui.error}</p> : null}
 

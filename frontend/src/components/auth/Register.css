@@ -715,6 +715,38 @@
   color: #dc2626;
 }
 
+.retela-faceid-debug {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.35rem;
+  margin: 0;
+  border: 1px dashed #bbf7d0;
+  border-radius: 0.8rem;
+  background: #f8fdf9;
+  padding: 0.55rem;
+  color: #14532d;
+  font-size: 0.68rem;
+}
+
+.retela-faceid-debug div {
+  display: grid;
+  min-width: 0;
+  gap: 0.08rem;
+}
+
+.retela-faceid-debug dt {
+  color: #64748b;
+  font-weight: 800;
+}
+
+.retela-faceid-debug dd {
+  margin: 0;
+  overflow: hidden;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .retela-faceid-actions {
   justify-content: stretch;
 }
