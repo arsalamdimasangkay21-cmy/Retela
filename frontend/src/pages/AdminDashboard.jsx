@@ -11,6 +11,7 @@ import { ChangePasswordForm } from "../components/ChangePasswordForm";
 import CustomerDocumentsModal from "../components/CustomerDocumentsModal";
 import { Button, Card, Field, StatCard } from "../components/ui";
 import { useAuth } from "../context/AuthContext";
+import { RETELA_LOGO_URL } from "../config/branding";
 import AutomationsPage from "./AutomationsPage";
 import AdminSettingsPage from "./AdminSettingsPage";
 import BroadcastsPage from "./BroadcastsPage";
@@ -1145,7 +1146,7 @@ function PremiumInventoryPage({
                     >
                       <td className="px-3 py-4">
                         <div className="h-14 w-14 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.06] shadow-lg shadow-black/20">
-                          {product.image_url ? <img src={assetUrl(product.image_url)} className="h-full w-full object-cover transition duration-500 group-hover:scale-105" alt={product.name} /> : <div className="grid h-full w-full place-items-center text-[10px] font-bold text-white/35">No Image</div>}
+                          <ProductImage src={product.image_url} className="h-full w-full object-cover transition duration-500 group-hover:scale-105" alt={product.name} />
                         </div>
                       </td>
                       <td className="px-3 py-4">
@@ -1167,17 +1168,7 @@ function PremiumInventoryPage({
                       <td className="break-words px-3 py-4 font-bold text-white">PHP {Number(product.price || 0).toLocaleString()}</td>
                       <td className="px-3 py-4"><InventoryStatusBadge stock={product.stock} status={product.status} /></td>
                       <td className="px-3 py-4">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <InventoryActionButton tone="edit" icon={Edit3} onClick={() => onEdit(product)}>
-                            Edit
-                          </InventoryActionButton>
-                          <InventoryActionButton tone="more" icon={MoreHorizontal} onClick={() => onUpdateStock(product.id, Number(product.stock) <= 0 ? 1 : -1)}>
-                            More
-                          </InventoryActionButton>
-                          <InventoryActionButton tone="delete" icon={Trash2} disabled={!validProductId(product) || isDeletingProduct(product, deletingProductIds)} title={deleteDisabledReason(product)} onClick={() => onDelete(product)}>
-                            {isDeletingProduct(product, deletingProductIds) ? "Deleting..." : "Delete"}
-                          </InventoryActionButton>
-                        </div>
+                        <InventoryActions product={product} onEdit={onEdit} onUpdateStock={onUpdateStock} onDelete={onDelete} deletingProductIds={deletingProductIds} />
                       </td>
                     </motion.tr>
                   ))}
@@ -1189,7 +1180,7 @@ function PremiumInventoryPage({
                 <article key={product.id} className="rounded-3xl border border-white/10 bg-white/[0.055] p-3">
                   <div className="flex gap-3">
                     <div className="h-20 w-20 shrink-0 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.06]">
-                      {product.image_url ? <img src={assetUrl(product.image_url)} className="h-full w-full object-cover" alt={product.name} /> : <div className="grid h-full place-items-center text-[10px] font-bold text-white/35">No Image</div>}
+                      <ProductImage src={product.image_url} className="h-full w-full object-cover" alt={product.name} />
                     </div>
                     <div className="min-w-0 flex-1">
                       <strong className="block break-words text-white">{product.name}</strong>
@@ -1212,10 +1203,8 @@ function PremiumInventoryPage({
                       <span><strong className="text-white/80">Price:</strong> PHP {Number(product.price || 0).toLocaleString()}</span>
                     </div>
                   </div>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <InventoryActionButton tone="edit" icon={Edit3} onClick={() => onEdit(product)}>Edit</InventoryActionButton>
-                    <InventoryActionButton tone="more" icon={MoreHorizontal} onClick={() => onUpdateStock(product.id, Number(product.stock) <= 0 ? 1 : -1)}>More</InventoryActionButton>
-                    <InventoryActionButton tone="delete" icon={Trash2} disabled={!validProductId(product) || isDeletingProduct(product, deletingProductIds)} title={deleteDisabledReason(product)} onClick={() => onDelete(product)}>{isDeletingProduct(product, deletingProductIds) ? "Deleting..." : "Delete"}</InventoryActionButton>
+                  <div className="mt-3">
+                    <InventoryActions product={product} onEdit={onEdit} onUpdateStock={onUpdateStock} onDelete={onDelete} deletingProductIds={deletingProductIds} mobile />
                   </div>
                 </article>
               ))}
@@ -1314,16 +1303,53 @@ function InventoryStatusBadge({ stock, status }) {
   return <span className={`inline-flex rounded-full border px-3 py-1 text-xs font-bold ${styles[badgeStatus]}`}>{badgeStatus}</span>;
 }
 
-function InventoryActionButton({ tone, icon: Icon, children, onClick, disabled = false, title = "" }) {
+function ProductImage({ src, alt, className = "" }) {
+  const [failed, setFailed] = useState(false);
+  const imageSrc = !failed && src ? assetUrl(src) : RETELA_LOGO_URL;
+
+  useEffect(() => {
+    setFailed(false);
+  }, [src]);
+
+  return (
+    <img
+      src={imageSrc}
+      className={className}
+      alt={alt || "Retela apparel"}
+      onError={() => {
+        if (!failed) setFailed(true);
+      }}
+    />
+  );
+}
+
+function InventoryActions({ product, onEdit, onUpdateStock, onDelete, deletingProductIds = [], mobile = false }) {
+  const deleting = isDeletingProduct(product, deletingProductIds);
+  return (
+    <div className={mobile ? "grid grid-cols-2 gap-2" : "grid grid-cols-3 gap-2"}>
+      <InventoryActionButton tone="edit" icon={Edit3} onClick={() => onEdit(product)}>
+        Edit
+      </InventoryActionButton>
+      <InventoryActionButton tone="more" icon={MoreHorizontal} onClick={() => onUpdateStock(product.id, Number(product.stock) <= 0 ? 1 : -1)}>
+        More
+      </InventoryActionButton>
+      <InventoryActionButton tone="delete" icon={Trash2} disabled={!validProductId(product) || deleting} title={deleteDisabledReason(product)} onClick={() => onDelete(product)} className={mobile ? "col-span-2" : ""}>
+        {deleting ? "Deleting..." : "Delete"}
+      </InventoryActionButton>
+    </div>
+  );
+}
+
+function InventoryActionButton({ tone, icon: Icon, children, onClick, disabled = false, title = "", className = "" }) {
   const styles = {
     edit: "border-[#60A5FA] bg-[#DBEAFE] text-[#1D4ED8] hover:border-[#2563EB]",
     more: "border-[#D1D5DB] bg-[#F3F4F6] text-[#374151] hover:border-[#9CA3AF]",
     delete: "border-[#F87171] bg-[#FEE2E2] text-[#B91C1C] hover:border-[#DC2626]"
   };
   return (
-    <button type="button" disabled={disabled} title={title} onClick={onClick} className={`inline-flex h-10 items-center justify-center gap-2 rounded-[10px] border px-4 py-2 text-sm font-semibold shadow-sm transition duration-200 hover:-translate-y-0.5 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-45 ${styles[tone] || styles.more}`}>
-      {Icon ? <Icon size={16} /> : null}
-      {children}
+    <button type="button" disabled={disabled} title={title} onClick={onClick} className={`inline-flex min-h-11 min-w-0 items-center justify-center gap-2 whitespace-nowrap rounded-[10px] border px-3 py-2 text-sm font-semibold leading-none shadow-sm transition duration-200 hover:-translate-y-0.5 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-45 ${styles[tone] || styles.more} ${className}`}>
+      {Icon ? <Icon size={16} className="shrink-0" /> : null}
+      <span className="truncate">{children}</span>
     </button>
   );
 }
@@ -2985,7 +3011,7 @@ function ProductGallery({ products, filters, setFilters, optionValues, onAdd, on
         {products.length ? <div className="grid min-w-0 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
           {products.map((p) => (
             <motion.article key={p.id} className="min-w-0 rounded-[20px] border border-white/10 bg-white/[0.07] p-2.5 shadow-xl shadow-black/18 backdrop-blur-2xl transition duration-300 hover:-translate-y-0.5 hover:border-neonbrand/30 hover:shadow-[0_18px_55px_rgba(0,0,0,0.3),0_0_28px_rgba(56,255,136,0.08)]" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.28 }}>
-              {p.image_url ? <img src={assetUrl(p.image_url)} className="h-36 w-full rounded-xl object-cover" alt={p.name} /> : <div className="grid h-36 place-items-center rounded-xl bg-slate-100 text-sm font-semibold text-slate-400">No image</div>}
+              <ProductImage src={p.image_url} className="h-36 w-full rounded-xl object-cover" alt={p.name} />
               <div className="mt-3 min-w-0">
                 <h4 className="truncate font-bold text-white" title={p.name}>{p.name}</h4>
                 <div className="mt-2 grid gap-1 text-xs text-white/52">
