@@ -7,6 +7,8 @@ const LEFT_CHEEK = 234;
 const RIGHT_CHEEK = 454;
 const MOUTH_CENTER = 13;
 const GUIDE_BOUNDS = { left: 0.17, top: 0.12, right: 0.83, bottom: 0.88 };
+const CIRCLE_CENTER = { x: 0.5, y: 0.5 };
+const CIRCLE_RADIUS = 0.43;
 
 export function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
@@ -33,6 +35,43 @@ function getBounds(landmarks) {
     right: Math.max(bounds.right, point.x),
     bottom: Math.max(bounds.bottom, point.y)
   }), { left: 1, top: 1, right: 0, bottom: 0 });
+}
+
+function isInsideCircularCrop(bounds) {
+  const width = bounds.right - bounds.left;
+  const height = bounds.bottom - bounds.top;
+  const centerX = bounds.left + width / 2;
+  const centerY = bounds.top + height / 2;
+  return Math.hypot(centerX - CIRCLE_CENTER.x, centerY - CIRCLE_CENTER.y) <= CIRCLE_RADIUS;
+}
+
+function compactValidFaces(faceLandmarks = []) {
+  const faces = faceLandmarks
+    .map((landmarks, resultIndex) => {
+      const bounds = getBounds(landmarks);
+      const width = bounds.right - bounds.left;
+      const height = bounds.bottom - bounds.top;
+      const faceRatio = Math.max(width, height);
+      return {
+        landmarks,
+        resultIndex,
+        bounds,
+        faceRatio,
+        area: width * height,
+        centerX: bounds.left + width / 2,
+        centerY: bounds.top + height / 2
+      };
+    })
+    .filter((face) => face.faceRatio >= 0.16 && face.area >= 0.018 && isInsideCircularCrop(face.bounds))
+    .sort((a, b) => b.area - a.area);
+
+  return faces.reduce((unique, face) => {
+    const duplicate = unique.some((existing) => (
+      Math.hypot(face.centerX - existing.centerX, face.centerY - existing.centerY) < 0.08
+    ));
+    if (!duplicate) unique.push(face);
+    return unique;
+  }, []);
 }
 
 function poseFromMatrix(matrix) {
@@ -104,17 +143,19 @@ export function readFrameQuality(video, canvas) {
 }
 
 export function buildFacePose(result, video, canvas, previous = null) {
-  const faceCount = result?.faceLandmarks?.length || 0;
+  const validFaces = compactValidFaces(result?.faceLandmarks || []);
+  const faceCount = validFaces.length;
   if (faceCount !== 1) return { faceCount };
 
-  const landmarks = result.faceLandmarks[0];
-  const blendshapes = result.faceBlendshapes?.[0];
-  const matrix = result.facialTransformationMatrixes?.[0];
-  const bounds = getBounds(landmarks);
+  const primaryFace = validFaces[0];
+  const landmarks = primaryFace.landmarks;
+  const blendshapes = result.faceBlendshapes?.[primaryFace.resultIndex];
+  const matrix = result.facialTransformationMatrixes?.[primaryFace.resultIndex];
+  const bounds = primaryFace.bounds;
   const width = bounds.right - bounds.left;
   const height = bounds.bottom - bounds.top;
-  const centerX = bounds.left + width / 2;
-  const centerY = bounds.top + height / 2;
+  const centerX = primaryFace.centerX;
+  const centerY = primaryFace.centerY;
   const pose = poseFromMatrix(matrix) || poseFromLandmarks(landmarks, bounds);
   const leftEar = eyeAspectRatio(landmarks, LEFT_EYE);
   const rightEar = eyeAspectRatio(landmarks, RIGHT_EYE);
@@ -126,9 +167,9 @@ export function buildFacePose(result, video, canvas, previous = null) {
   const movement = previous?.time
     ? Math.hypot(centerX - previous.centerX, centerY - previous.centerY) / Math.max((now - previous.time) / 1000, 0.1)
     : 0;
-  const insideGuide = centerX >= GUIDE_BOUNDS.left && centerX <= GUIDE_BOUNDS.right && centerY >= GUIDE_BOUNDS.top && centerY <= GUIDE_BOUNDS.bottom;
+  const insideGuide = centerX >= GUIDE_BOUNDS.left && centerX <= GUIDE_BOUNDS.right && centerY >= GUIDE_BOUNDS.top && centerY <= GUIDE_BOUNDS.bottom && isInsideCircularCrop(bounds);
   const centered = Math.abs(centerX - 0.5) <= 0.13 && Math.abs(centerY - 0.5) <= 0.15;
-  const faceRatio = Math.max(width, height);
+  const faceRatio = primaryFace.faceRatio;
 
   return {
     faceCount,
@@ -162,4 +203,3 @@ export function buildFacePose(result, video, canvas, previous = null) {
     time: now
   };
 }
-

@@ -917,3 +917,27 @@
     text-align: center;
   }
 }
+
+.retela-wizard-modal.retela-wizard-modal-faceid {
+  width: 100vw;
+  height: 100dvh;
+  max-height: 100dvh;
+  border: 0;
+  border-radius: 0;
+  background: #020617;
+  padding: 0;
+  overflow: hidden;
+  box-shadow: none;
+}
+
+.retela-wizard-modal.retela-wizard-modal-faceid > .retela-wizard-step {
+  height: 100%;
+  min-height: 0;
+}
+
+@supports not (height: 100dvh) {
+  .retela-wizard-modal.retela-wizard-modal-faceid {
+    height: 100vh;
+    max-height: 100vh;
+  }
+}

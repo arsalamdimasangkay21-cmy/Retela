@@ -16,7 +16,7 @@ export function getFaceLandmarker() {
           delegate: "GPU"
         },
         runningMode: "VIDEO",
-        numFaces: 1,
+        numFaces: 2,
         outputFaceBlendshapes: true,
         outputFacialTransformationMatrixes: true,
         minFaceDetectionConfidence: 0.55,
@@ -28,7 +28,7 @@ export function getFaceLandmarker() {
           delegate: "CPU"
         },
         runningMode: "VIDEO",
-        numFaces: 1,
+        numFaces: 2,
         outputFaceBlendshapes: true,
         outputFacialTransformationMatrixes: true,
         minFaceDetectionConfidence: 0.55,
