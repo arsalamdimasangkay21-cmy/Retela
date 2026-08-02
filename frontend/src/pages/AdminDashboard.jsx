@@ -42,7 +42,7 @@ const assetUrl = (url) => {
   if (!url) return "";
   const value = String(url).trim();
   if (!value) return "";
-  if (/^https?:\/\//i.test(value)) return value;
+  if (/^(https?:|blob:|data:)/i.test(value)) return value;
   return `${API_URL.replace(/\/api$/, "")}/${value.replace(/^\/+/, "")}`;
 };
 const fallbackApparelOptions = {
@@ -137,6 +137,7 @@ function getProductImageValue(productOrUrl) {
     productOrUrl.imageUrl
       ?? productOrUrl.image_url
       ?? productOrUrl.image
+      ?? productOrUrl.image_path
       ?? productOrUrl.photo_url
       ?? productOrUrl.photo
       ?? productOrUrl.product_image
@@ -1512,28 +1513,54 @@ function AdminToast({ toast, onClose }) {
 }
 
 function ProductEditorModal({ editingProductId, form, setForm, productImage, setProductImage, saveProduct, productSaving = false, optionValues, refreshApparelOptions, showProductToast, onClose }) {
-  const inputClass = "rounded-2xl border border-slate-300 bg-white/90 p-3 text-sm font-semibold text-slate-950 outline-none transition placeholder:text-slate-500 focus:border-[#22C55E] focus:ring-4 focus:ring-[#DCFCE7]";
-  const secondaryButtonClass = "inline-flex min-h-12 items-center justify-center rounded-2xl border border-slate-300 bg-white px-5 py-3 text-sm font-bold text-slate-800 shadow-sm transition hover:bg-[#F3F4F6] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#22C55E] active:scale-95";
-  const primaryButtonClass = "inline-flex min-h-12 items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-[#16A34A] via-[#22C55E] to-[#15803D] px-5 py-3 text-sm font-bold text-white shadow-lg shadow-emerald-700/20 transition hover:-translate-y-0.5 hover:shadow-xl hover:shadow-emerald-700/25 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#22C55E] active:translate-y-0 active:scale-95";
+  const inputClass = "h-12 min-h-12 w-full rounded-xl border border-[#cfded4] bg-white px-3 py-2 text-sm font-semibold text-[#17211b] outline-none transition placeholder:text-[#8b9a91] focus:border-[#20b66a] focus:ring-4 focus:ring-[rgba(32,182,106,0.18)]";
+  const secondaryButtonClass = "inline-flex min-h-12 items-center justify-center rounded-xl border border-[#cfded4] bg-white px-5 py-2.5 text-sm font-bold text-[#17211b] shadow-sm transition hover:border-[#20b66a] hover:text-[#15884f] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#20b66a] active:scale-95";
+  const primaryButtonClass = "inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-[#20b66a] px-5 py-2.5 text-sm font-bold text-white shadow-lg shadow-emerald-700/18 transition hover:bg-[#15884f] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#20b66a] active:scale-95";
   const [optionModal, setOptionModal] = useState(null);
   const [otherValues, setOtherValues] = useState({ category: "", gender: "", size: "", condition: "" });
   const [otherErrors, setOtherErrors] = useState({});
   const [brandName, setBrandName] = useState("");
   const [brandError, setBrandError] = useState("");
-  const [previewUrl, setPreviewUrl] = useState("");
+  const [existingImageUrl, setExistingImageUrl] = useState(null);
+  const [selectedImageFile, setSelectedImageFile] = useState(null);
+  const [previewImageUrl, setPreviewImageUrl] = useState(null);
+  const [imageLoadFailed, setImageLoadFailed] = useState(false);
+  const previewObjectUrlRef = useRef("");
   const brandOptions = optionNames([form.brand], optionValues.brands);
-  const existingImageUrl = getProductImageUrl(form);
-  const displayedImageUrl = previewUrl || existingImageUrl;
+  const displayedImageUrl = previewImageUrl || existingImageUrl;
+
+  function revokePreviewObjectUrl() {
+    if (previewObjectUrlRef.current) {
+      URL.revokeObjectURL(previewObjectUrlRef.current);
+      previewObjectUrlRef.current = "";
+    }
+  }
 
   useEffect(() => {
-    if (!productImage) {
-      setPreviewUrl("");
-      return undefined;
+    revokePreviewObjectUrl();
+    setExistingImageUrl(getProductImageUrl(form));
+    setSelectedImageFile(null);
+    setPreviewImageUrl(null);
+    setImageLoadFailed(false);
+    setProductImage(null);
+  }, [editingProductId, form.image_url]);
+
+  useEffect(() => () => revokePreviewObjectUrl(), []);
+
+  function handleImageChange(event) {
+    const file = event.target.files?.[0] || null;
+    revokePreviewObjectUrl();
+    setSelectedImageFile(file);
+    setProductImage(file);
+    setImageLoadFailed(false);
+    if (!file) {
+      setPreviewImageUrl(null);
+      return;
     }
-    const objectUrl = URL.createObjectURL(productImage);
-    setPreviewUrl(objectUrl);
-    return () => URL.revokeObjectURL(objectUrl);
-  }, [productImage]);
+    const objectUrl = URL.createObjectURL(file);
+    previewObjectUrlRef.current = objectUrl;
+    setPreviewImageUrl(objectUrl);
+  }
 
   async function createAndSelectOption(kind, formKey, name, successMessage) {
     const trimmedName = name.trim();
@@ -1616,13 +1643,13 @@ function ProductEditorModal({ editingProductId, form, setForm, productImage, set
 
   return (
     <motion.div
-      className="fixed inset-0 z-[80] grid place-items-center bg-[rgba(15,23,18,0.55)] p-3 backdrop-blur-[4px] sm:p-6"
+      className="fixed inset-0 z-[1200] grid place-items-center bg-[rgba(15,23,18,0.55)] p-2.5 backdrop-blur-[4px] sm:p-5"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ duration: 0.22, ease: "easeOut" }}
     >
       <motion.section
-        className="max-h-[85vh] w-full max-w-[860px] overflow-hidden rounded-[24px] border border-white/40 bg-white text-slate-950 shadow-[0_24px_70px_rgba(15,23,18,0.28)]"
+        className="flex max-h-[calc(100vh-20px)] w-[min(820px,calc(100vw-20px))] flex-col overflow-hidden rounded-[22px] border border-[#dce8e0] bg-[#f8fbf9] text-[#17211b] shadow-[0_24px_70px_rgba(15,23,18,0.28)] sm:max-h-[82vh] sm:w-[min(820px,calc(100vw-40px))]"
         initial={{ opacity: 0, y: 18, scale: 0.98 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
         transition={{ duration: 0.28, ease: "easeOut" }}
@@ -1630,16 +1657,19 @@ function ProductEditorModal({ editingProductId, form, setForm, productImage, set
         aria-modal="true"
         aria-labelledby="apparel-editor-title"
       >
-        <div className="flex items-start justify-between gap-3 border-b border-slate-200/80 px-5 py-4 sm:px-6">
+        <div className="shrink-0 border-b border-[#dce8e0] bg-[#f8fbf9] px-4 py-3 sm:px-5">
+          <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <p className="text-xs font-bold uppercase tracking-[0.18em] text-emerald-700">Apparel Item</p>
-            <h3 id="apparel-editor-title" className="mt-1 font-display text-2xl font-bold text-slate-950">{editingProductId ? "Edit Apparel Item" : "Add Apparel Item"}</h3>
+            <h3 id="apparel-editor-title" className="mt-1 font-display text-xl font-bold text-[#17211b] sm:text-2xl">{editingProductId ? "Edit Apparel Item" : "Add Apparel Item"}</h3>
           </div>
-          <button type="button" disabled={productSaving} onClick={onClose} className="grid h-11 w-11 shrink-0 place-items-center rounded-xl border border-slate-300 bg-white text-slate-700 transition hover:bg-[#F3F4F6] hover:text-slate-950 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#22C55E] disabled:cursor-not-allowed disabled:opacity-60" aria-label="Close apparel editor">
+          <button type="button" disabled={productSaving} onClick={onClose} className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-[#cfded4] bg-white text-[#5f6f65] transition hover:border-[#20b66a] hover:text-[#15884f] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#20b66a] disabled:cursor-not-allowed disabled:opacity-60" aria-label="Close apparel editor">
             <X size={18} />
           </button>
+          </div>
         </div>
-        <form onSubmit={handleSubmit} className="grid max-h-[calc(85vh-88px)] gap-3 overflow-y-auto px-5 py-5 md:grid-cols-2 sm:px-6">
+        <form onSubmit={handleSubmit} className="min-h-0 overflow-y-auto px-4 py-4 sm:px-5">
+          <div className="grid gap-x-4 gap-y-3 md:grid-cols-2">
           <input className={inputClass} placeholder="Apparel Name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
             <div className="grid gap-1">
               <select className={inputClass} value={form.brand} onChange={(e) => {
@@ -1766,28 +1796,34 @@ function ProductEditorModal({ editingProductId, form, setForm, productImage, set
           ) : null}
           <div className="grid gap-2">
             <span className="text-xs font-bold text-slate-700">{editingProductId ? "Current image" : "Apparel image"}</span>
-            <div className="grid gap-3 sm:grid-cols-[112px_minmax(0,1fr)] sm:items-center md:grid-cols-1">
-              <div className="aspect-[4/3] w-full overflow-hidden rounded-2xl border border-slate-200 bg-slate-100 sm:h-28 sm:w-28 md:h-auto md:w-full">
-                {displayedImageUrl ? (
-                  <ProductImage src={displayedImageUrl} className="h-full w-full object-cover" alt={`${form.name || "Apparel"} preview`} />
+            <div className="grid gap-3 sm:grid-cols-[190px_minmax(0,1fr)] sm:items-stretch md:grid-cols-1">
+              <div className="h-[160px] w-full overflow-hidden rounded-[14px] border border-[#d7e3db] bg-white">
+                {displayedImageUrl && !imageLoadFailed ? (
+                  <img
+                    src={displayedImageUrl}
+                    className="h-full w-full object-cover"
+                    alt={`${form.name || "Apparel"} preview`}
+                    onError={() => setImageLoadFailed(true)}
+                  />
                 ) : (
                   <div className="grid h-full w-full place-items-center text-center text-xs font-bold text-slate-400">No image</div>
                 )}
               </div>
-              <label className="flex min-h-12 cursor-pointer items-center justify-center gap-2 rounded-2xl border border-dashed border-emerald-500/45 bg-emerald-50 p-3 text-sm font-bold text-emerald-700 transition hover:bg-emerald-100 focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-[#22C55E]">
+              <label className="flex min-h-12 cursor-pointer items-center justify-center gap-2 rounded-[14px] border border-dashed border-[#58c998] bg-[#effcf5] p-3 text-sm font-bold text-[#087a55] transition hover:bg-emerald-100 focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-[#20b66a]">
                 <Upload size={17} />
-                {productImage ? productImage.name : "Browse apparel image"}
-                <input className="hidden" type="file" accept="image/*" onChange={(e) => setProductImage(e.target.files?.[0] || null)} aria-label="Browse apparel image" />
+                {selectedImageFile ? selectedImageFile.name : "Browse apparel image"}
+                <input className="hidden" type="file" accept="image/*" onChange={handleImageChange} aria-label="Browse apparel image" />
               </label>
             </div>
           </div>
-          <textarea className={`${inputClass} min-h-28 resize-y md:col-span-2`} placeholder="Apparel description, fit notes, flaws, fabric, or styling details" value={form.description || ""} onChange={(e) => setForm({ ...form, description: e.target.value })} />
-          <div className="grid gap-3 border-t border-slate-200/80 pt-4 md:col-span-2 sm:flex sm:justify-end">
+          <textarea className={`${inputClass} h-auto min-h-[120px] max-h-[220px] resize-y md:col-span-2`} placeholder="Apparel description, fit notes, flaws, fabric, or styling details" value={form.description || ""} onChange={(e) => setForm({ ...form, description: e.target.value })} />
+          <div className="sticky bottom-0 -mx-4 mt-1 grid gap-3 border-t border-[#dce8e0] bg-[#f8fbf9] px-4 pb-1 pt-3 md:col-span-2 sm:-mx-5 sm:flex sm:justify-end sm:px-5">
             <button type="button" disabled={productSaving} className={`${secondaryButtonClass} disabled:cursor-not-allowed disabled:opacity-60`} onClick={onClose}>Cancel</button>
             <button type="submit" disabled={productSaving} className={`${primaryButtonClass} disabled:cursor-not-allowed disabled:opacity-60`}>
               {productSaving ? <Loader2 className="animate-spin" size={17} /> : editingProductId ? <Save size={17} /> : <PackagePlus size={17} />}
               {productSaving ? "Saving..." : editingProductId ? "Save Apparel Item" : "Add Apparel Item"}
             </button>
+          </div>
           </div>
         </form>
         {optionModal ? (
