@@ -106,13 +106,17 @@ function resolveProductId(productOrId) {
 
 function validProductId(productOrId) {
   const rawId = resolveProductId(productOrId);
-  if (String(rawId).startsWith("sample-")) return rawId;
   const productId = Number(rawId);
   return Number.isInteger(productId) && productId > 0 ? productId : null;
 }
 
 function deleteDisabledReason(product) {
   return validProductId(product) ? "" : "Cannot delete this item because the backend response did not include a valid product ID.";
+}
+
+function isDeletingProduct(product, deletingProductIds = []) {
+  const productId = validProductId(product);
+  return Boolean(productId && deletingProductIds.includes(productId));
 }
 
 function duplicateOptionMessage(label) {
@@ -141,6 +145,7 @@ export default function AdminDashboard({ active, onChange }) {
   const [selectedDocumentCustomerId, setSelectedDocumentCustomerId] = useState(null);
   const [productToast, setProductToast] = useState(null);
   const [apparelOptions, setApparelOptions] = useState({ brands: [], categories: [], types: [], sizes: [], conditions: [] });
+  const [deletingProductIds, setDeletingProductIds] = useState([]);
   const mountedRef = useRef(true);
   const refreshTimerRef = useRef(null);
 
@@ -371,18 +376,25 @@ export default function AdminDashboard({ active, onChange }) {
 
   async function deleteProduct(productOrId) {
     const productId = validProductId(productOrId);
-    if (String(productId).startsWith("sample-")) return;
     if (!productId) {
       console.error("Cannot delete product: missing product ID", productOrId);
       showProductToast("Cannot delete apparel item because its product ID is missing.", "error");
       return;
     }
+    const productName = typeof productOrId === "object" ? productOrId.name || "this apparel item" : "this apparel item";
+    if (!window.confirm(`Move "${productName}" to Trash Bin?`)) return;
+    if (deletingProductIds.includes(productId)) return;
+    setDeletingProductIds((ids) => [...ids, productId]);
     try {
       await api.delete(`/products/${productId}`);
-      await refreshProductLists();
+      clearGetCache("/products");
+      setProducts((rows) => rows.filter((product) => validProductId(product) !== productId));
+      setInventoryProducts((rows) => rows.filter((product) => validProductId(product) !== productId));
       showProductToast("Apparel item moved to Trash Bin.");
     } catch (error) {
       showProductToast(getApiErrorMessage(error, "Could not delete this apparel item."), "error");
+    } finally {
+      setDeletingProductIds((ids) => ids.filter((id) => id !== productId));
     }
   }
 
@@ -468,6 +480,7 @@ export default function AdminDashboard({ active, onChange }) {
             onChange("Inventory");
           }}
           onDelete={deleteProduct}
+          deletingProductIds={deletingProductIds}
         />
         {productToast ? <AdminToast toast={productToast} onClose={() => setProductToast(null)} /> : null}
       </>
@@ -488,6 +501,7 @@ export default function AdminDashboard({ active, onChange }) {
         }}
         onEdit={editProduct}
         onDelete={deleteProduct}
+        deletingProductIds={deletingProductIds}
         onUpdateStock={updateStock}
         modalOpen={inventoryModalOpen}
         onCloseModal={() => {
@@ -881,6 +895,7 @@ function PremiumInventoryPage({
   onAddItem,
   onEdit,
   onDelete,
+  deletingProductIds = [],
   onUpdateStock,
   modalOpen,
   onCloseModal,
@@ -1075,8 +1090,8 @@ function PremiumInventoryPage({
                           <InventoryActionButton tone="more" icon={MoreHorizontal} onClick={() => onUpdateStock(product.id, Number(product.stock) <= 0 ? 1 : -1)}>
                             More
                           </InventoryActionButton>
-                          <InventoryActionButton tone="delete" icon={Trash2} disabled={!validProductId(product)} title={deleteDisabledReason(product)} onClick={() => onDelete(product)}>
-                            Delete
+                          <InventoryActionButton tone="delete" icon={Trash2} disabled={!validProductId(product) || isDeletingProduct(product, deletingProductIds)} title={deleteDisabledReason(product)} onClick={() => onDelete(product)}>
+                            {isDeletingProduct(product, deletingProductIds) ? "Deleting..." : "Delete"}
                           </InventoryActionButton>
                         </div>
                       </td>
@@ -1116,7 +1131,7 @@ function PremiumInventoryPage({
                   <div className="mt-3 flex flex-wrap gap-2">
                     <InventoryActionButton tone="edit" icon={Edit3} onClick={() => onEdit(product)}>Edit</InventoryActionButton>
                     <InventoryActionButton tone="more" icon={MoreHorizontal} onClick={() => onUpdateStock(product.id, Number(product.stock) <= 0 ? 1 : -1)}>More</InventoryActionButton>
-                    <InventoryActionButton tone="delete" icon={Trash2} disabled={!validProductId(product)} title={deleteDisabledReason(product)} onClick={() => onDelete(product)}>Delete</InventoryActionButton>
+                    <InventoryActionButton tone="delete" icon={Trash2} disabled={!validProductId(product) || isDeletingProduct(product, deletingProductIds)} title={deleteDisabledReason(product)} onClick={() => onDelete(product)}>{isDeletingProduct(product, deletingProductIds) ? "Deleting..." : "Delete"}</InventoryActionButton>
                   </div>
                 </article>
               ))}
@@ -2848,7 +2863,7 @@ function orderStatusLabel(status) {
   return labels[status] || status;
 }
 
-function ProductGallery({ products, filters, setFilters, optionValues, onAdd, onEdit, onDelete }) {
+function ProductGallery({ products, filters, setFilters, optionValues, onAdd, onEdit, onDelete, deletingProductIds = [] }) {
   return (
     <Card className="border-white/10 bg-white/[0.06] shadow-[0_24px_70px_rgba(0,0,0,0.28)] backdrop-blur-2xl">
         <div className="mb-5 flex flex-col justify-between gap-3 lg:flex-row lg:items-center">
@@ -2901,9 +2916,9 @@ function ProductGallery({ products, filters, setFilters, optionValues, onAdd, on
                   <Edit3 size={14} />
                   Edit
                 </button>
-                <button type="button" disabled={!validProductId(p)} title={deleteDisabledReason(p)} onClick={() => onDelete?.(p)} className="inline-flex items-center justify-center gap-1 rounded-xl border border-white/10 bg-white/[0.06] px-3 py-2 text-xs font-bold text-white/72 transition hover:border-rose-400/40 hover:text-rose-300 disabled:cursor-not-allowed disabled:opacity-45">
+                <button type="button" disabled={!validProductId(p) || isDeletingProduct(p, deletingProductIds)} title={deleteDisabledReason(p)} onClick={() => onDelete?.(p)} className="inline-flex items-center justify-center gap-1 rounded-xl border border-white/10 bg-white/[0.06] px-3 py-2 text-xs font-bold text-white/72 transition hover:border-rose-400/40 hover:text-rose-300 disabled:cursor-not-allowed disabled:opacity-45">
                   <Trash2 size={14} />
-                  Delete
+                  {isDeletingProduct(p, deletingProductIds) ? "Deleting..." : "Delete"}
                 </button>
               </div>
             </motion.article>
