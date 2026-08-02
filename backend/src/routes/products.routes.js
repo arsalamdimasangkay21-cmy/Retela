@@ -144,7 +144,7 @@ function parseProductId(value) {
 }
 
 router.get("/", requireAuth, requireApproved, asyncHandler(async (req, res) => {
-  await ensureProductInventoryColumns();
+  const table = await productWriteTable();
   const schema = z.object({
     search: z.string().trim().optional().default(""),
     brand: z.string().trim().optional().default(""),
@@ -201,42 +201,42 @@ router.get("/", requireAuth, requireApproved, asyncHandler(async (req, res) => {
         ? "ORDER BY name ASC, created_at DESC"
       : "ORDER BY created_at DESC";
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
-  const products = await query(`SELECT *, ${inventoryStatusSql("stock")} AS computed_status FROM products ${where} ${orderBy}`, params);
-  const mapped = products.map((product) => ({ ...product, status: product.computed_status || product.status || productStatusForStock(product.stock) }));
+  const products = await query(`SELECT \`${table}\`.id AS id, \`${table}\`.*, ${inventoryStatusSql("stock")} AS computed_status FROM \`${table}\` ${where} ${orderBy}`, params);
+  const mapped = products.map((product) => ({ ...product, id: Number(product.id), status: product.computed_status || product.status || productStatusForStock(product.stock) }));
   res.json(mapped);
 }));
 
 router.get("/inventory", requireAuth, requireRole("admin"), asyncHandler(async (req, res) => {
-  await ensureProductInventoryColumns();
+  const table = await productWriteTable();
   const products = await query(
-    `SELECT *, ${inventoryStatusSql("stock")} AS computed_status
-     FROM products
+    `SELECT \`${table}\`.id AS id, \`${table}\`.*, ${inventoryStatusSql("stock")} AS computed_status
+     FROM \`${table}\`
      WHERE ${nonDeletedProductWhere()}
      ORDER BY created_at DESC`
   );
-  res.json(products.map((product) => ({ ...product, status: product.computed_status || product.status || productStatusForStock(product.stock) })));
+  res.json(products.map((product) => ({ ...product, id: Number(product.id), status: product.computed_status || product.status || productStatusForStock(product.stock) })));
 }));
 
 router.get("/available", requireAuth, requireApproved, asyncHandler(async (req, res) => {
-  await ensureProductInventoryColumns();
+  const table = await productWriteTable();
   const products = await query(
-    `SELECT *, ${inventoryStatusSql("stock")} AS computed_status
-     FROM products
+    `SELECT \`${table}\`.id AS id, \`${table}\`.*, ${inventoryStatusSql("stock")} AS computed_status
+     FROM \`${table}\`
      WHERE ${availableProductWhere()}
      ORDER BY created_at DESC`
   );
-  res.json(products.map((product) => ({ ...product, status: product.computed_status || product.status || productStatusForStock(product.stock) })));
+  res.json(products.map((product) => ({ ...product, id: Number(product.id), status: product.computed_status || product.status || productStatusForStock(product.stock) })));
 }));
 
 router.get("/archived", requireAuth, requireRole("admin"), asyncHandler(async (req, res) => {
-  await ensureProductInventoryColumns();
+  const table = await productWriteTable();
   const products = await query(
-    `SELECT *, ${inventoryStatusSql("stock")} AS computed_status
-     FROM products
+    `SELECT \`${table}\`.id AS id, \`${table}\`.*, ${inventoryStatusSql("stock")} AS computed_status
+     FROM \`${table}\`
      WHERE is_deleted = TRUE
      ORDER BY deleted_at DESC, updated_at DESC`
   );
-  res.json(products.map((product) => ({ ...product, status: product.computed_status || product.status || productStatusForStock(product.stock) })));
+  res.json(products.map((product) => ({ ...product, id: Number(product.id), status: product.computed_status || product.status || productStatusForStock(product.stock) })));
 }));
 
 router.get("/barcode/:sku", requireAuth, requireRole("admin"), asyncHandler(async (req, res) => {

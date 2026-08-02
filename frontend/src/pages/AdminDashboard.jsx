@@ -119,6 +119,21 @@ function isDeletingProduct(product, deletingProductIds = []) {
   return Boolean(productId && deletingProductIds.includes(productId));
 }
 
+function normalizeProductRow(product) {
+  const productId = validProductId(product);
+  if (!productId && import.meta.env.DEV) {
+    console.warn("Loaded product is missing a valid id:", product);
+  }
+  return {
+    ...product,
+    id: productId
+  };
+}
+
+function normalizeProductRows(rows = []) {
+  return Array.isArray(rows) ? rows.map(normalizeProductRow) : [];
+}
+
 function duplicateOptionMessage(label) {
   return `This ${label.toLowerCase()} already exists.`;
 }
@@ -200,7 +215,7 @@ export default function AdminDashboard({ active, onChange }) {
     ]);
     if (!canUpdate(cancelled)) return;
     setSummary(reportRes.data);
-    setInventoryProducts(inventoryRes.data);
+    setInventoryProducts(normalizeProductRows(inventoryRes.data));
     setOrders(orderRes.data);
     setUsers(userRes.data);
     setNotifications(notificationRes.data);
@@ -212,7 +227,7 @@ export default function AdminDashboard({ active, onChange }) {
       loadApparelOptions({ cancelled })
     ]);
     if (!canUpdate(cancelled)) return;
-    setProducts(productRes.data);
+    setProducts(normalizeProductRows(productRes.data));
   }, [canUpdate, getShared, loadApparelOptions]);
 
   const loadInventoryData = useCallback(async ({ cancelled, force = false } = {}) => {
@@ -221,7 +236,7 @@ export default function AdminDashboard({ active, onChange }) {
       loadApparelOptions({ cancelled })
     ]);
     if (!canUpdate(cancelled)) return;
-    setInventoryProducts(inventoryRes.data);
+    setInventoryProducts(normalizeProductRows(inventoryRes.data));
   }, [canUpdate, getShared, loadApparelOptions]);
 
   const loadOrdersData = useCallback(async ({ cancelled, force = false } = {}) => {
