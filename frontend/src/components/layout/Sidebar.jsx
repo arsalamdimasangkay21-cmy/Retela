@@ -1,5 +1,5 @@
 import { BarChart3, Barcode, Bell, Bot, Home, Info, LayoutDashboard, LogOut, MapPin, Megaphone, Menu, MessageCircle, Package, ReceiptText, RotateCcw, Settings, ShoppingBag, ShoppingCart, Star, Users, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { RETELA_LOGO_URL } from "../../config/branding";
 import { useAuth } from "../../context/AuthContext";
 
@@ -35,32 +35,95 @@ const activeAliases = {
 export default function Sidebar({ active, collapsed, onChange, onToggleCollapsed, logoUrl = RETELA_LOGO_URL }) {
   const { user, logout } = useAuth();
   const [open, setOpen] = useState(false);
+  const closeButtonRef = useRef(null);
   const isAdminRole = user?.role === "admin" || user?.role === "staff";
   const items = user?.role === "admin" ? adminItems : user?.role === "staff" ? staffItems : customerItems;
   const bottomItems = user?.role === "customer" ? customerBottomItems : [];
   const isAdmin = isAdminRole;
   const desktopCollapsed = collapsed;
 
+  const openSidebar = useCallback(() => {
+    setOpen(true);
+  }, []);
+
+  const closeSidebar = useCallback(() => {
+    setOpen(false);
+  }, []);
+
   useEffect(() => {
     if (!open) return undefined;
-    const previousOverflow = document.body.style.overflow;
+    const previousBodyOverflow = document.body.style.overflow;
+    const previousHtmlOverflow = document.documentElement.style.overflow;
     document.body.style.overflow = "hidden";
+    document.documentElement.style.overflow = "hidden";
     return () => {
-      document.body.style.overflow = previousOverflow;
+      document.body.style.overflow = previousBodyOverflow;
+      document.documentElement.style.overflow = previousHtmlOverflow;
     };
   }, [open]);
 
+  useEffect(() => {
+    if (!open) return undefined;
+    closeButtonRef.current?.focus({ preventScroll: true });
+
+    function closeOnEscape(event) {
+      if (event.key === "Escape") closeSidebar();
+    }
+
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [closeSidebar, open]);
+
+  useEffect(() => {
+    const desktopQuery = window.matchMedia("(min-width: 1024px)");
+    function closeForDesktop(event) {
+      if (event.matches) closeSidebar();
+    }
+
+    closeForDesktop(desktopQuery);
+    desktopQuery.addEventListener?.("change", closeForDesktop);
+    return () => {
+      desktopQuery.removeEventListener?.("change", closeForDesktop);
+    };
+  }, [closeSidebar]);
+
   function selectItem(label) {
     onChange(routeMap[label] || label);
-    setOpen(false);
+    closeSidebar();
+  }
+
+  function toggleMobileSidebar() {
+    if (open) closeSidebar();
+    else openSidebar();
+  }
+
+  function handleSidebarHeaderAction() {
+    const isDesktop = window.matchMedia("(min-width: 1024px)").matches;
+    if (isDesktop) {
+      onToggleCollapsed();
+      return;
+    }
+    closeSidebar();
+  }
+
+  function handleLogout() {
+    closeSidebar();
+    logout();
   }
 
   return (
     <>
-      <button className={`fixed left-4 top-4 z-50 grid h-11 w-11 place-items-center rounded-2xl border border-emerald-100 bg-white text-emerald-900 shadow-lg shadow-slate-200/80 transition lg:hidden ${open ? "pointer-events-none opacity-0" : "opacity-100"}`} onClick={() => setOpen(true)} aria-label="Open menu" aria-controls="retela-sidebar" aria-expanded={open}>
+      <button className={`retela-mobile-menu-button ${open ? "is-open" : ""}`} onClick={toggleMobileSidebar} aria-label="Open navigation menu" aria-controls="retela-sidebar" aria-expanded={open}>
         <Menu size={20} />
       </button>
-      <aside id="retela-sidebar" className={`premium-sidebar fixed inset-y-4 left-4 z-40 flex w-[82vw] max-w-[320px] flex-col overflow-hidden rounded-[24px] border p-4 shadow-xl transition-[width,transform,opacity,padding,background-color,border-color,color,box-shadow] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-transform ${desktopCollapsed ? "lg:w-20 lg:p-3" : "lg:w-72"} ${open ? "translate-x-0 opacity-100" : "-translate-x-[calc(100%+2rem)] opacity-0 lg:translate-x-0 lg:opacity-100"}`} aria-hidden={!open ? undefined : false}>
+      <aside
+        id="retela-sidebar"
+        className={`premium-sidebar retela-sidebar-panel flex flex-col border shadow-xl ${desktopCollapsed ? "retela-sidebar-desktop-collapsed lg:p-3" : "retela-sidebar-desktop-expanded"} ${open ? "retela-sidebar-mobile-open" : "retela-sidebar-mobile-closed"}`}
+        role={open ? "dialog" : "navigation"}
+        aria-modal={open ? "true" : undefined}
+        onClick={(event) => event.stopPropagation()}
+        onPointerDown={(event) => event.stopPropagation()}
+      >
         <div className={`flex items-center gap-3 overflow-hidden rounded-[20px] border border-[#14532D]/30 bg-[#14532D] text-white shadow-md shadow-emerald-950/20 ${desktopCollapsed ? "p-2 lg:flex-col lg:justify-center" : "p-4"}`}>
           <div className={`flex min-w-0 flex-1 items-center gap-3 ${desktopCollapsed ? "lg:flex-none lg:justify-center" : ""}`}>
             <img src={logoUrl} className="h-12 w-12 rounded-2xl border border-white/25 bg-white object-cover shadow-sm" alt="RETELA SYSTEM logo" />
@@ -69,10 +132,7 @@ export default function Sidebar({ active, collapsed, onChange, onToggleCollapsed
               <p className="mt-0.5 truncate text-xs font-extrabold uppercase tracking-[0.18em] text-emerald-100">{isAdmin ? "Commerce System" : "Customer Portal"}</p>
             </div>
           </div>
-          <button className="grid h-10 w-10 shrink-0 place-items-center rounded-full border border-white/15 bg-white/15 text-white shadow-md shadow-emerald-950/20 transition duration-200 hover:scale-105 hover:bg-white/25 active:scale-95" onClick={() => {
-            if (window.innerWidth >= 1024) onToggleCollapsed();
-            else setOpen(false);
-          }} aria-label={open ? "Close menu" : "Collapse menu"}>
+          <button ref={closeButtonRef} className="retela-sidebar-close-button grid h-10 w-10 shrink-0 place-items-center rounded-full border border-white/15 bg-white/15 text-white shadow-md shadow-emerald-950/20 transition duration-200 hover:scale-105 hover:bg-white/25 active:scale-95" onClick={handleSidebarHeaderAction} aria-label={open ? "Close navigation menu" : "Collapse navigation menu"}>
             {open ? <X size={18} /> : <Menu size={18} />}
           </button>
         </div>
@@ -94,11 +154,11 @@ export default function Sidebar({ active, collapsed, onChange, onToggleCollapsed
             </div>
           ) : null}
         </nav>
-        <button onClick={logout} title={desktopCollapsed ? "Logout" : undefined} className={`sidebar-logout mt-4 flex items-center gap-3 rounded-2xl border px-4 py-3 text-sm font-bold transition duration-300 hover:-translate-y-0.5 ${desktopCollapsed ? "lg:justify-center lg:px-0" : ""}`}>
+        <button onClick={handleLogout} title={desktopCollapsed ? "Logout" : undefined} className={`sidebar-logout mt-4 flex items-center gap-3 rounded-2xl border px-4 py-3 text-sm font-bold transition duration-300 hover:-translate-y-0.5 ${desktopCollapsed ? "lg:justify-center lg:px-0" : ""}`}>
           <LogOut size={19} /> <span className={desktopCollapsed ? "lg:hidden" : ""}>Logout</span>
         </button>
       </aside>
-      {open ? <button aria-label="Close menu" className="fixed inset-0 z-30 bg-slate-950/55 backdrop-blur-sm lg:hidden" onClick={() => setOpen(false)} /> : null}
+      {open ? <button type="button" aria-label="Close navigation menu" className="retela-sidebar-overlay" onClick={closeSidebar} /> : null}
     </>
   );
 }

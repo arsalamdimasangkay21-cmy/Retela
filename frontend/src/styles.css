@@ -397,7 +397,7 @@ button {
     max-width: 100% !important;
   }
 
-  .premium-sidebar {
+  .premium-sidebar:not(.retela-sidebar-panel) {
     inset: 0.75rem auto 0.75rem 0.75rem !important;
     width: min(19rem, calc(100vw - 1.5rem)) !important;
     max-width: calc(100vw - 1.5rem) !important;
@@ -430,7 +430,7 @@ button {
     justify-content: flex-end;
   }
 
-  .premium-sidebar {
+  .premium-sidebar:not(.retela-sidebar-panel) {
     width: min(20rem, calc(100vw - 2rem)) !important;
   }
 
@@ -445,7 +445,7 @@ button {
     padding-right: 1.25rem !important;
   }
 
-  .premium-sidebar {
+  .premium-sidebar:not(.retela-sidebar-panel) {
     width: min(22rem, calc(100vw - 2rem)) !important;
   }
 
@@ -620,6 +620,130 @@ button {
   background: linear-gradient(180deg, #374151 0%, #2F3742 100%) !important;
   color: #F9FAFB !important;
   box-shadow: 0 22px 50px rgba(17, 24, 39, 0.24) !important;
+}
+
+.retela-mobile-menu-button {
+  position: fixed;
+  top: max(1rem, env(safe-area-inset-top));
+  left: 1rem;
+  z-index: 80;
+  display: grid;
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  min-height: 44px;
+  place-items: center;
+  border: 1px solid #d8efe0;
+  border-radius: 16px;
+  background: #ffffff;
+  color: #14532d;
+  box-shadow: 0 14px 30px rgba(15, 23, 42, 0.16);
+  opacity: 1;
+  pointer-events: auto;
+  transition: border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
+}
+
+.retela-mobile-menu-button:active {
+  transform: scale(0.96);
+}
+
+.retela-sidebar-panel {
+  position: fixed;
+  top: 1rem;
+  bottom: 1rem;
+  left: 1rem;
+  z-index: 70;
+  width: 18rem;
+  max-width: calc(100vw - 2rem);
+  overflow: hidden;
+  padding: 1rem;
+  animation: none;
+  will-change: transform;
+  transition: width 300ms ease, padding 300ms ease, transform 300ms ease, background-color 300ms ease, border-color 300ms ease, color 300ms ease, box-shadow 300ms ease;
+}
+
+.retela-sidebar-desktop-collapsed {
+  width: 5rem;
+}
+
+.retela-sidebar-desktop-expanded {
+  width: 18rem;
+}
+
+.retela-sidebar-close-button {
+  position: relative;
+  z-index: 2;
+  pointer-events: auto;
+}
+
+.retela-sidebar-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: block;
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  border: 0;
+  background: rgba(15, 23, 42, 0.55);
+  padding: 0;
+  margin: 0;
+  backdrop-filter: blur(3px);
+  cursor: pointer;
+}
+
+@media (min-width: 1024px) {
+  .retela-mobile-menu-button,
+  .retela-sidebar-overlay {
+    display: none;
+  }
+
+  .retela-sidebar-panel {
+    transform: translateX(0) !important;
+    opacity: 1 !important;
+  }
+}
+
+@media (max-width: 1023px) {
+  .retela-sidebar-panel {
+    top: 0 !important;
+    bottom: auto !important;
+    left: 0 !important;
+    width: min(86vw, 340px) !important;
+    max-width: min(86vw, 340px) !important;
+    height: 100vh;
+    height: 100dvh;
+    max-height: 100vh !important;
+    max-height: 100dvh !important;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+    overscroll-behavior: contain;
+    border-radius: 0 24px 24px 0 !important;
+    padding: max(1rem, env(safe-area-inset-top)) 1rem calc(1rem + env(safe-area-inset-bottom)) !important;
+    opacity: 1 !important;
+    -webkit-overflow-scrolling: touch;
+    transition: transform 300ms ease, background-color 300ms ease, border-color 300ms ease, color 300ms ease, box-shadow 300ms ease;
+  }
+
+  .retela-sidebar-mobile-open {
+    transform: translateX(0) !important;
+  }
+
+  .retela-sidebar-mobile-closed {
+    transform: translateX(-100%) !important;
+  }
+
+  .retela-sidebar-panel nav {
+    min-height: 0;
+    overflow-y: auto;
+    padding-bottom: 0.5rem;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .retela-sidebar-panel .sidebar-logout {
+    flex-shrink: 0;
+    margin-bottom: max(0.25rem, env(safe-area-inset-bottom));
+  }
 }
 
 .premium-sidebar .sidebar-nav-item {
