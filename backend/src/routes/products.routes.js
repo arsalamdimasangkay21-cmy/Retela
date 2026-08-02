@@ -113,6 +113,14 @@ async function ensureProductOptionValues(input) {
   }
 }
 
+function parseProductId(value) {
+  const productId = Number(value);
+  if (!Number.isInteger(productId) || productId <= 0) {
+    throw new HttpError(400, "A valid product ID is required");
+  }
+  return productId;
+}
+
 router.get("/", requireAuth, requireApproved, asyncHandler(async (req, res) => {
   await ensureProductInventoryColumns();
   const schema = z.object({
@@ -294,15 +302,16 @@ router.post("/", requireAuth, requireRole("admin"), upload.single("image"), asyn
 
 router.put("/:id", requireAuth, requireRole("admin"), upload.single("image"), asyncHandler(async (req, res) => {
   await ensureProductInventoryColumns();
+  const productId = parseProductId(req.params.id);
   const input = normalizeProductInput(productSchema.parse({ ...req.body, image_url: req.file ? `/uploads/${req.file.filename}` : req.body.image_url }));
   await ensureProductOptionValues(input);
   const status = productStatusForStock(input.stock);
   await query(
     `UPDATE products SET name=:name, brand=:brand, category=:category, gender=:gender, size=:size, color=:color, price=:price,
      stock=:stock, status=:status, image_url=:image_url, \`condition\`=:condition, description=:description WHERE id=:id AND ${nonDeletedProductWhere()}`,
-    { ...input, status, id: req.params.id }
+    { ...input, status, id: productId }
   );
-  const apparel = { id: Number(req.params.id), ...input, status };
+  const apparel = { id: productId, ...input, status };
   req.app.get("io")?.emit("inventory:update", { type: "inventory", action: "updated", apparel });
   req.app.get("io")?.emit("product:update", apparel);
   res.json(apparel);
@@ -310,32 +319,34 @@ router.put("/:id", requireAuth, requireRole("admin"), upload.single("image"), as
 
 router.patch("/:id/stock", requireAuth, requireRole("admin"), asyncHandler(async (req, res) => {
   await ensureProductInventoryColumns();
+  const productId = parseProductId(req.params.id);
   const schema = z.object({
     delta: z.coerce.number().int().optional(),
     stock: z.coerce.number().int().min(0).optional()
   }).refine((value) => value.delta !== undefined || value.stock !== undefined, "delta or stock is required");
   const input = schema.parse(req.body);
-  const products = await query("SELECT id, stock FROM products WHERE id = :id AND is_deleted = FALSE", { id: req.params.id });
+  const products = await query("SELECT id, stock FROM products WHERE id = :id AND is_deleted = FALSE", { id: productId });
   if (!products.length) throw new HttpError(404, "Apparel item not found");
   const nextStock = input.stock !== undefined ? input.stock : Math.max(0, Number(products[0].stock) + input.delta);
   const nextStatus = productStatusForStock(nextStock);
-  await query("UPDATE products SET stock = :stock, status = :status, updated_at = NOW() WHERE id = :id", { id: req.params.id, stock: nextStock, status: nextStatus });
+  await query("UPDATE products SET stock = :stock, status = :status, updated_at = NOW() WHERE id = :id", { id: productId, stock: nextStock, status: nextStatus });
   if (nextStock > 0 && nextStock <= 5) {
     await query(
       "INSERT INTO notifications (type, title, body, product_id) VALUES ('inventory', 'Low stock alert', :body, :id)",
-      { id: req.params.id, body: `Apparel item #${req.params.id} is now at ${nextStock} stock.` }
+      { id: productId, body: `Apparel item #${productId} is now at ${nextStock} stock.` }
     );
   }
   if (nextStock === 0) {
-    req.app.get("io")?.to("admin").emit("notification:new", { type: "inventory", title: "Out of stock", body: `Apparel item #${req.params.id} is out of stock.` });
+    req.app.get("io")?.to("admin").emit("notification:new", { type: "inventory", title: "Out of stock", body: `Apparel item #${productId} is out of stock.` });
   }
-  req.app.get("io")?.emit("inventory:update", { type: "inventory", action: "stock", id: Number(req.params.id), stock: nextStock, status: nextStatus });
-  res.json({ id: Number(req.params.id), stock: nextStock, status: nextStatus });
+  req.app.get("io")?.emit("inventory:update", { type: "inventory", action: "stock", id: productId, stock: nextStock, status: nextStatus });
+  res.json({ id: productId, stock: nextStock, status: nextStatus });
 }));
 
 router.delete("/:id", requireAuth, requireRole("admin"), asyncHandler(async (req, res) => {
   await ensureProductInventoryColumns();
-  const existing = await query("SELECT id FROM products WHERE id = :id AND is_deleted = FALSE", { id: req.params.id });
+  const productId = parseProductId(req.params.id);
+  const existing = await query("SELECT id FROM products WHERE id = :id AND is_deleted = FALSE", { id: productId });
   if (!existing.length) throw new HttpError(404, "Apparel item not found");
   await query(
     `UPDATE products
@@ -344,15 +355,16 @@ router.delete("/:id", requireAuth, requireRole("admin"), asyncHandler(async (req
          deleted_by = :deletedBy,
          updated_at = NOW()
      WHERE id = :id`,
-    { id: req.params.id, deletedBy: req.user.id }
+    { id: productId, deletedBy: req.user.id }
   );
-  req.app.get("io")?.emit("inventory:update", { type: "inventory", action: "archived", id: Number(req.params.id) });
+  req.app.get("io")?.emit("inventory:update", { type: "inventory", action: "archived", id: productId });
   res.json({ message: "Apparel item archived", isDeleted: true, deletedAt: new Date().toISOString() });
 }));
 
 router.patch("/:id/restore", requireAuth, requireRole("admin"), asyncHandler(async (req, res) => {
   await ensureProductInventoryColumns();
-  const rows = await query("SELECT id, stock FROM products WHERE id = :id LIMIT 1", { id: req.params.id });
+  const productId = parseProductId(req.params.id);
+  const rows = await query("SELECT id, stock FROM products WHERE id = :id LIMIT 1", { id: productId });
   if (!rows.length) throw new HttpError(404, "Apparel item not found");
   const restoredStatus = productStatusForStock(rows[0].stock);
   await query(
@@ -363,18 +375,19 @@ router.patch("/:id/restore", requireAuth, requireRole("admin"), asyncHandler(asy
          status = :status,
          updated_at = NOW()
      WHERE id = :id`,
-    { id: req.params.id, status: restoredStatus }
+    { id: productId, status: restoredStatus }
   );
-  req.app.get("io")?.emit("inventory:update", { type: "inventory", action: "restored", id: Number(req.params.id), status: restoredStatus });
-  res.json({ message: "Apparel item restored", id: Number(req.params.id), status: restoredStatus });
+  req.app.get("io")?.emit("inventory:update", { type: "inventory", action: "restored", id: productId, status: restoredStatus });
+  res.json({ message: "Apparel item restored", id: productId, status: restoredStatus });
 }));
 
 router.delete("/:id/permanent", requireAuth, requireRole("admin"), asyncHandler(async (req, res) => {
   await ensureProductInventoryColumns();
-  const result = await query("DELETE FROM products WHERE id = :id AND is_deleted = TRUE", { id: req.params.id });
+  const productId = parseProductId(req.params.id);
+  const result = await query("DELETE FROM products WHERE id = :id AND is_deleted = TRUE", { id: productId });
   if (!result.affectedRows) throw new HttpError(404, "Apparel item not found in trash");
-  req.app.get("io")?.emit("inventory:update", { type: "inventory", action: "deleted", id: Number(req.params.id) });
-  res.json({ message: "Apparel item permanently deleted", id: Number(req.params.id) });
+  req.app.get("io")?.emit("inventory:update", { type: "inventory", action: "deleted", id: productId });
+  res.json({ message: "Apparel item permanently deleted", id: productId });
 }));
 
 export default router;

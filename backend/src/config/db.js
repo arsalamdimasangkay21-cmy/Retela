@@ -12,21 +12,39 @@ dotenv.config();
 
 const requestContext = new AsyncLocalStorage();
 
+function databaseSslConfig() {
+  const sslMode = String(process.env.DB_SSL || process.env.MYSQL_SSL || "").trim().toLowerCase();
+  if (!["true", "1", "required", "require"].includes(sslMode)) return undefined;
+  return {
+    rejectUnauthorized: String(process.env.DB_SSL_REJECT_UNAUTHORIZED || "true").toLowerCase() !== "false",
+    ...(process.env.MYSQL_SSL_CA ? { ca: process.env.MYSQL_SSL_CA } : {})
+  };
+}
+
+function databaseConnectionConfig() {
+  const ssl = databaseSslConfig();
+  return {
+    host: process.env.DB_HOST || "localhost",
+    port: Number(process.env.DB_PORT || 3306),
+    user: process.env.DB_USER || "root",
+    password: process.env.DB_PASSWORD || "",
+    database: process.env.DB_NAME || "retela_db",
+    waitForConnections: true,
+    connectionLimit: Number(process.env.DB_CONNECTION_LIMIT || 10),
+    enableKeepAlive: true,
+    keepAliveInitialDelay: 0,
+    namedPlaceholders: true,
+    ...(ssl ? { ssl } : {})
+  };
+}
+
 function isSchemaMigrationSql(sql) {
   const normalized = String(sql || "").trim().replace(/\s+/g, " ").toUpperCase();
   return /^(ALTER TABLE|CREATE TABLE|CREATE VIEW|CREATE INDEX|CREATE UNIQUE INDEX|DROP VIEW|DROP TABLE)\b/.test(normalized);
 }
 
 export const pool = mysql.createPool({
-  host: process.env.DB_HOST || "localhost",
-  user: process.env.DB_USER || "root",
-  password: process.env.DB_PASSWORD || "",
-  database: process.env.DB_NAME || "retela_db",
-  waitForConnections: true,
-  connectionLimit: 10,
-  enableKeepAlive: true,
-  keepAliveInitialDelay: 0,
-  namedPlaceholders: true
+  ...databaseConnectionConfig()
 });
 
 export function requestContextMiddleware(req, res, next) {
@@ -139,12 +157,17 @@ export async function transaction(callback) {
 }
 
 export async function checkDatabaseConnection() {
-  const [row] = await query("SELECT DATABASE() AS database_name, NOW() AS checked_at");
+  const [row] = await query("SELECT 1 AS ok, DATABASE() AS database_name, NOW() AS checked_at");
   return {
-    connected: true,
+    connected: Number(row?.ok) === 1,
     databaseName: row?.database_name || process.env.DB_NAME || "retela_db",
     checkedAt: row?.checked_at || new Date().toISOString()
   };
+}
+
+export async function testDatabaseConnection() {
+  const [row] = await query("SELECT 1 AS ok");
+  return Number(row?.ok) === 1;
 }
 
 async function listTables(names) {
@@ -339,10 +362,10 @@ async function getProductStorageTable() {
 async function ensureProductAlias(storageTable) {
   await runSchemaMigration("products", "products view creation", async () => {
     const productsInfo = await tableInfo("products");
-    if (productsInfo) return;
     if (storageTable !== "apparel_items") return;
+    if (productsInfo?.TABLE_TYPE === "BASE TABLE") return;
     await query(`
-      CREATE VIEW products AS
+      CREATE OR REPLACE VIEW products AS
       SELECT
         id,
         sku,
@@ -929,6 +952,7 @@ async function seedMissingOptionData() {
 }
 
 export async function initializeDatabase() {
+  await testDatabaseConnection();
   await runSchemaMigration("startup", "core schema bootstrap", ensureCoreTables);
   await runSchemaMigration("startup", "communication schema bootstrap", ensureCommunicationTables);
   await runSchemaMigration("startup", "option seed bootstrap", seedMissingOptionData);

@@ -38,7 +38,17 @@ function isDatabaseSchemaError(error) {
   ].includes(error?.code);
 }
 
-function publicErrorFor(err, status) {
+function routeLoadMessage(req) {
+  if (req?.method !== "GET") return "";
+  const route = String(req.originalUrl || req.url || "");
+  if (route === "/api/products" || route.startsWith("/api/products?")) return "Unable to load products";
+  if (route === "/api/settings" || route.startsWith("/api/settings?")) return "Unable to load settings";
+  if (route === "/api/broadcasts" || route.startsWith("/api/broadcasts?")) return "Unable to load broadcasts";
+  return "";
+}
+
+function publicErrorFor(err, status, req = null) {
+  const routeMessage = status >= 500 ? routeLoadMessage(req) : "";
   if (err?.name === "ZodError") {
     return {
       status: 400,
@@ -56,14 +66,14 @@ function publicErrorFor(err, status) {
   if (isDatabaseConnectionError(err)) {
     return {
       status: 503,
-      message: "Database unavailable. Please try again shortly.",
+      message: routeMessage || "Database unavailable. Please try again shortly.",
       error: "database_unavailable"
     };
   }
   if (isDatabaseSchemaError(err)) {
     return {
       status: 500,
-      message: "Server data is not ready. Please contact support if this continues.",
+      message: routeMessage || "Server data is not ready. Please contact support if this continues.",
       error: "database_schema_error"
     };
   }
@@ -85,7 +95,7 @@ function publicErrorFor(err, status) {
   }
   return {
     status: status >= 400 && status < 600 ? status : 500,
-    message: "Internal server error. Please try again shortly.",
+    message: routeMessage || "Internal server error. Please try again shortly.",
     error: "internal_server_error"
   };
 }
@@ -123,7 +133,7 @@ function statusErrorCode(status) {
 }
 
 export function errorHandler(err, req, res, next) {
-  const publicError = publicErrorFor(err, err.status || err.statusCode || 500);
+  const publicError = publicErrorFor(err, err.status || err.statusCode || 500, req);
   // Print full details to server logs only. Do not expose SQL, stack traces, or secrets to clients.
   console.error("========== SERVER ERROR ==========");
   console.error("Time:", new Date().toISOString());

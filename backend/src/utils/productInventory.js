@@ -67,16 +67,16 @@ async function ensureProductsViewIncludesSku(storageTable) {
 
   try {
     const rows = await query(
-      `SELECT TABLE_NAME
+      `SELECT TABLE_NAME, TABLE_TYPE
        FROM INFORMATION_SCHEMA.TABLES
        WHERE TABLE_SCHEMA = DATABASE()
          AND TABLE_NAME = 'products'
        LIMIT 1`
     );
-    if (rows.length) return;
+    if (rows[0]?.TABLE_TYPE === "BASE TABLE") return;
 
     await query(`
-      CREATE VIEW products AS
+      CREATE OR REPLACE VIEW products AS
       SELECT
         id,
         sku,

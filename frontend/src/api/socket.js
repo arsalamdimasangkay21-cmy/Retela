@@ -10,13 +10,20 @@ const socketOptions = {
   path: "/socket.io",
   transports: ["websocket", "polling"],
   reconnection: true,
-  reconnectionAttempts: 8,
-  reconnectionDelay: 1000,
-  reconnectionDelayMax: 10000,
+  reconnectionAttempts: 5,
+  reconnectionDelay: 1500,
+  reconnectionDelayMax: 8000,
   randomizationFactor: 0.5,
   timeout: 12000,
-  autoConnect: true
+  autoConnect: false
 };
+
+function handleConnectError(error) {
+  console.error("[socket] connect_error", {
+    message: error?.message || "Socket connection failed",
+    description: error?.description || null
+  });
+}
 
 export function acquireSocket(token) {
   const nextToken = String(token || "").trim();
@@ -38,11 +45,14 @@ export function acquireSocket(token) {
       ...socketOptions,
       auth: { token: nextToken }
     });
+    socket.on("connect_error", handleConnectError);
     socketToken = nextToken;
   }
 
   consumers += 1;
-  if (!socket.connected && !socket.active) socket.connect();
+  if (!socket.connected && !socket.active) {
+    socket.connect();
+  }
   return socket;
 }
 
@@ -53,6 +63,7 @@ export function releaseSocket(instance) {
 
   disconnectTimer = window.setTimeout(() => {
     if (consumers === 0 && socket) {
+      socket.off("connect_error", handleConnectError);
       socket.disconnect();
       socket = null;
       socketToken = "";

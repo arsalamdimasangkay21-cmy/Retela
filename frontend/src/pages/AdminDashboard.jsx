@@ -88,6 +88,20 @@ function optionExists(options = [], name) {
   return options.find((value) => String(value || "").trim().toLowerCase() === normalized) || "";
 }
 
+function resolveProductId(productOrId) {
+  if (productOrId && typeof productOrId === "object") {
+    return productOrId.id ?? productOrId.product_id ?? productOrId.productId ?? productOrId.apparel_id ?? null;
+  }
+  return productOrId;
+}
+
+function validProductId(productOrId) {
+  const rawId = resolveProductId(productOrId);
+  if (String(rawId).startsWith("sample-")) return rawId;
+  const productId = Number(rawId);
+  return Number.isInteger(productId) && productId > 0 ? productId : null;
+}
+
 function duplicateOptionMessage(label) {
   return `This ${label.toLowerCase()} already exists.`;
 }
@@ -233,9 +247,15 @@ export default function AdminDashboard({ active, onChange }) {
     setInventoryModalOpen(true);
   }
 
-  async function deleteProduct(id) {
-    if (String(id).startsWith("sample-")) return;
-    await api.delete(`/products/${id}`);
+  async function deleteProduct(productOrId) {
+    const productId = validProductId(productOrId);
+    if (String(productId).startsWith("sample-")) return;
+    if (!productId) {
+      console.error("Cannot delete product: missing product ID", productOrId);
+      showProductToast("Cannot delete apparel item because its product ID is missing.", "error");
+      return;
+    }
+    await api.delete(`/products/${productId}`);
     await load();
     showProductToast("Apparel item moved to Trash Bin.");
   }
@@ -895,7 +915,7 @@ function PremiumInventoryPage({
                           <InventoryActionButton tone="more" icon={MoreHorizontal} onClick={() => onUpdateStock(product.id, Number(product.stock) <= 0 ? 1 : -1)}>
                             More
                           </InventoryActionButton>
-                          <InventoryActionButton tone="delete" icon={Trash2} onClick={() => onDelete(product.id)}>
+                          <InventoryActionButton tone="delete" icon={Trash2} disabled={!validProductId(product)} onClick={() => onDelete(product)}>
                             Delete
                           </InventoryActionButton>
                         </div>
@@ -936,7 +956,7 @@ function PremiumInventoryPage({
                   <div className="mt-3 flex flex-wrap gap-2">
                     <InventoryActionButton tone="edit" icon={Edit3} onClick={() => onEdit(product)}>Edit</InventoryActionButton>
                     <InventoryActionButton tone="more" icon={MoreHorizontal} onClick={() => onUpdateStock(product.id, Number(product.stock) <= 0 ? 1 : -1)}>More</InventoryActionButton>
-                    <InventoryActionButton tone="delete" icon={Trash2} onClick={() => onDelete(product.id)}>Delete</InventoryActionButton>
+                    <InventoryActionButton tone="delete" icon={Trash2} disabled={!validProductId(product)} onClick={() => onDelete(product)}>Delete</InventoryActionButton>
                   </div>
                 </article>
               ))}
@@ -1034,14 +1054,14 @@ function InventoryStatusBadge({ stock, status }) {
   return <span className={`inline-flex rounded-full border px-3 py-1 text-xs font-bold ${styles[badgeStatus]}`}>{badgeStatus}</span>;
 }
 
-function InventoryActionButton({ tone, icon: Icon, children, onClick }) {
+function InventoryActionButton({ tone, icon: Icon, children, onClick, disabled = false }) {
   const styles = {
     edit: "border-[#60A5FA] bg-[#DBEAFE] text-[#1D4ED8] hover:border-[#2563EB]",
     more: "border-[#D1D5DB] bg-[#F3F4F6] text-[#374151] hover:border-[#9CA3AF]",
     delete: "border-[#F87171] bg-[#FEE2E2] text-[#B91C1C] hover:border-[#DC2626]"
   };
   return (
-    <button type="button" onClick={onClick} className={`inline-flex h-10 items-center justify-center gap-2 rounded-[10px] border px-4 py-2 text-sm font-semibold shadow-sm transition duration-200 hover:-translate-y-0.5 hover:shadow-md ${styles[tone] || styles.more}`}>
+    <button type="button" disabled={disabled} onClick={onClick} className={`inline-flex h-10 items-center justify-center gap-2 rounded-[10px] border px-4 py-2 text-sm font-semibold shadow-sm transition duration-200 hover:-translate-y-0.5 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-45 ${styles[tone] || styles.more}`}>
       {Icon ? <Icon size={16} /> : null}
       {children}
     </button>
@@ -2713,7 +2733,7 @@ function ProductGallery({ products, filters, setFilters, optionValues, onAdd, on
                   <Edit3 size={14} />
                   Edit
                 </button>
-                <button type="button" onClick={() => onDelete?.(p.id)} className="inline-flex items-center justify-center gap-1 rounded-xl border border-white/10 bg-white/[0.06] px-3 py-2 text-xs font-bold text-white/72 transition hover:border-rose-400/40 hover:text-rose-300">
+                <button type="button" disabled={!validProductId(p)} onClick={() => onDelete?.(p)} className="inline-flex items-center justify-center gap-1 rounded-xl border border-white/10 bg-white/[0.06] px-3 py-2 text-xs font-bold text-white/72 transition hover:border-rose-400/40 hover:text-rose-300 disabled:cursor-not-allowed disabled:opacity-45">
                   <Trash2 size={14} />
                   Delete
                 </button>

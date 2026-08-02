@@ -1,5 +1,5 @@
 import "./env.js";
-import http from "http";
+import { createServer } from "http";
 import { Server } from "socket.io";
 
 import { createApp } from "./app.js";
@@ -29,11 +29,12 @@ async function initializeDatabaseWithRetry(delayMs = 15000) {
 await initializeDatabaseWithRetry();
 
 const app = createApp();
-const httpServer = http.createServer(app);
+const httpServer = createServer(app);
 const io = new Server(httpServer, {
   path: "/socket.io",
   cors: {
     origin: corsOrigin,
+    methods: ["GET", "POST"],
     credentials: true
   },
   transports: ["websocket", "polling"],

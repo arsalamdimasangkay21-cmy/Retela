@@ -9,7 +9,7 @@ function socketUrlFromApiUrl(apiUrl) {
 }
 
 export const API_URL = stripTrailingSlash(import.meta.env.VITE_API_URL || "http://localhost:5000/api");
-export const SOCKET_URL = socketUrlFromApiUrl(import.meta.env.VITE_SOCKET_URL || socketUrlFromApiUrl(API_URL));
+export const SOCKET_URL = socketUrlFromApiUrl(import.meta.env.VITE_SOCKET_URL || API_URL);
 
 export const api = axios.create({
   baseURL: API_URL
