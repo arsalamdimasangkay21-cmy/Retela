@@ -4,6 +4,7 @@
   z-index: 220;
   display: grid;
   place-items: center;
+  overflow-x: hidden;
   overflow-y: auto;
   background: rgba(17, 24, 39, 0.58);
   padding: 1rem;
@@ -12,7 +13,9 @@
 
 .customer-docs-modal {
   width: min(100%, 72rem);
+  max-width: calc(100vw - 2rem);
   max-height: calc(100vh - 2rem);
+  overflow-x: hidden;
   overflow-y: auto;
   border: 1px solid #e5e7eb;
   border-radius: 18px;
@@ -24,6 +27,7 @@
 .customer-docs-header,
 .customer-docs-footer {
   display: flex;
+  min-width: 0;
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
@@ -64,8 +68,10 @@
 
 .customer-docs-icon-button {
   display: grid;
-  width: 2.45rem;
-  height: 2.45rem;
+  min-width: 2.75rem;
+  width: 2.75rem;
+  min-height: 2.75rem;
+  height: 2.75rem;
   place-items: center;
   border: 1px solid #e5e7eb;
   border-radius: 14px;
@@ -83,6 +89,7 @@
 
 .customer-docs-content {
   display: grid;
+  min-width: 0;
   gap: 1rem;
   padding: 1.25rem;
 }
@@ -90,6 +97,8 @@
 .customer-profile-card,
 .customer-verification-card,
 .customer-docs-section {
+  min-width: 0;
+  max-width: 100%;
   border: 1px solid #e5e7eb;
   border-radius: 18px;
   background: #ffffff;
@@ -307,6 +316,7 @@
 
 .customer-verification-table-wrap {
   margin-top: 1rem;
+  max-width: 100%;
   overflow-x: auto;
   border: 1px solid #e5e7eb;
   border-radius: 16px;
@@ -485,8 +495,10 @@
 
 .customer-docs-image-actions button,
 .customer-docs-image-actions a {
-  width: 2.15rem;
-  height: 2.15rem;
+  min-width: 2.75rem;
+  width: 2.75rem;
+  min-height: 2.75rem;
+  height: 2.75rem;
 }
 
 .customer-docs-image-actions button:hover,
@@ -646,12 +658,20 @@
   }
 
   .customer-docs-modal {
+    width: 100%;
+    max-width: calc(100vw - 1rem);
     max-height: calc(100vh - 1rem);
+    border-radius: 14px;
   }
 
   .customer-docs-header,
   .customer-docs-footer {
+    flex-wrap: wrap;
     padding: 0.9rem;
+  }
+
+  .customer-docs-footer > * {
+    flex: 1 1 100%;
   }
 
   .customer-docs-content,
@@ -663,6 +683,32 @@
   .customer-docs-section-heading {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .customer-profile-card,
+  .customer-verification-card,
+  .customer-docs-section {
+    border-radius: 14px;
+  }
+
+  .customer-avatar {
+    width: 4.5rem;
+    height: 4.5rem;
+    border-radius: 18px;
+  }
+
+  .customer-docs-details {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .customer-verification-table {
+    min-width: 42rem;
+  }
+
+  .customer-docs-image-frame,
+  .customer-docs-missing {
+    min-height: 14rem;
+    max-height: 70vh;
   }
 
   .customer-profile-copy h3 {

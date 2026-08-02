@@ -1,5 +1,5 @@
 import { BarChart3, Barcode, Bell, Bot, Home, Info, LayoutDashboard, LogOut, MapPin, Megaphone, Menu, MessageCircle, Package, ReceiptText, RotateCcw, Settings, ShoppingBag, ShoppingCart, Star, Users, X } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { RETELA_LOGO_URL } from "../../config/branding";
 import { useAuth } from "../../context/AuthContext";
 
@@ -40,6 +40,15 @@ export default function Sidebar({ active, collapsed, onChange, onToggleCollapsed
   const bottomItems = user?.role === "customer" ? customerBottomItems : [];
   const isAdmin = isAdminRole;
   const desktopCollapsed = collapsed;
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [open]);
 
   function selectItem(label) {
     onChange(routeMap[label] || label);

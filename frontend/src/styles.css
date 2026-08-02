@@ -53,6 +53,11 @@ video {
   max-width: 100%;
 }
 
+img,
+video {
+  object-fit: cover;
+}
+
 #root {
   min-height: 100vh;
   width: 100%;
@@ -106,6 +111,31 @@ button {
   min-width: 0;
 }
 
+.premium-shell,
+.auth-shell {
+  max-width: 100vw;
+}
+
+.premium-shell :where(button, [role="button"], a[href], input, select, textarea) {
+  touch-action: manipulation;
+}
+
+.premium-shell :where(button, [role="button"]),
+.auth-shell :where(button, [role="button"]) {
+  min-height: 44px;
+  min-width: 44px;
+}
+
+.premium-shell :where(.grid, .flex),
+.auth-shell :where(.grid, .flex) {
+  min-width: 0;
+}
+
+.premium-shell :where(.grid > *, .flex > *),
+.auth-shell :where(.grid > *, .flex > *) {
+  min-width: 0;
+}
+
 .premium-shell table {
   width: 100%;
 }
@@ -128,6 +158,28 @@ button {
   width: 100%;
   max-width: 100%;
   overflow-x: clip;
+}
+
+.retela-app-main,
+.retela-app-header,
+.premium-topbar,
+.retela-topbar-title,
+.retela-topbar-actions,
+.retela-profile-button {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.retela-topbar-actions {
+  row-gap: 0.5rem;
+}
+
+.retela-profile-button {
+  justify-content: center;
+}
+
+.retela-page-content > * {
+  max-width: 100%;
 }
 
 .retela-page-content :where(h1) {
@@ -155,6 +207,16 @@ button {
 
 .retela-page-content :where(img, video) {
   height: auto;
+  object-fit: cover;
+}
+
+.retela-page-content :where(.premium-card, .floating-card, article, section, [class*="rounded-"]) {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.retela-page-content :where(.grid > .premium-card, .grid > .floating-card, .grid > article) {
+  height: 100%;
 }
 
 .retela-page-content :where(.recharts-wrapper, .recharts-responsive-container, .recharts-surface) {
@@ -162,6 +224,10 @@ button {
 }
 
 .retela-page-content :where(table) {
+  max-width: 100%;
+}
+
+.retela-page-content :where(input, select, textarea, button) {
   max-width: 100%;
 }
 
@@ -293,6 +359,119 @@ button {
 
   .retela-page-content {
     padding-inline: 0.75rem;
+  }
+}
+
+@media (min-width: 320px) and (max-width: 480px) {
+  .premium-shell {
+    width: 100vw;
+  }
+
+  .retela-app-header {
+    padding-left: 4.75rem !important;
+    padding-right: 0.75rem !important;
+  }
+
+  .premium-topbar {
+    gap: 0.625rem !important;
+    padding: 0.75rem !important;
+  }
+
+  .retela-topbar-title {
+    flex-basis: 100%;
+    padding-right: 0;
+  }
+
+  .retela-topbar-title img {
+    height: 2.25rem;
+    width: 2.25rem;
+  }
+
+  .retela-topbar-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .retela-profile-button {
+    flex: 1 1 min(12rem, 100%);
+    max-width: 100% !important;
+  }
+
+  .premium-sidebar {
+    inset: 0.75rem auto 0.75rem 0.75rem !important;
+    width: min(19rem, calc(100vw - 1.5rem)) !important;
+    max-width: calc(100vw - 1.5rem) !important;
+    border-radius: 18px !important;
+    padding: 0.75rem !important;
+  }
+
+  .retela-page-content {
+    padding: 0.75rem !important;
+  }
+
+  .retela-page-content :where(.premium-card, .floating-card, article, section) {
+    border-radius: 12px !important;
+  }
+
+}
+
+@media (min-width: 481px) and (max-width: 767px) {
+  .retela-app-header {
+    padding-left: 4.75rem !important;
+    padding-right: 1rem !important;
+  }
+
+  .retela-topbar-title {
+    flex: 1 1 16rem;
+  }
+
+  .retela-topbar-actions {
+    flex: 1 1 auto;
+    justify-content: flex-end;
+  }
+
+  .premium-sidebar {
+    width: min(20rem, calc(100vw - 2rem)) !important;
+  }
+
+  .retela-page-content {
+    padding: 1rem !important;
+  }
+}
+
+@media (min-width: 768px) and (max-width: 1023px) {
+  .retela-app-header {
+    padding-left: 5rem !important;
+    padding-right: 1.25rem !important;
+  }
+
+  .premium-sidebar {
+    width: min(22rem, calc(100vw - 2rem)) !important;
+  }
+
+  .retela-page-content {
+    padding: 1.25rem !important;
+  }
+
+  .retela-page-content [class*="xl:grid-cols-"],
+  .retela-page-content [class*="2xl:grid-cols-"] {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (min-width: 1024px) and (max-width: 1439px) {
+  .retela-page-content {
+    padding: 1.5rem !important;
+  }
+
+  .retela-page-content [class*="2xl:grid-cols-"] {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (min-width: 1440px) {
+  .retela-page-content {
+    padding: 2rem !important;
   }
 }
 

@@ -255,10 +255,10 @@ export default function AppLayout({ children, active, onChange }) {
   return (
     <div className={`premium-shell min-h-screen overflow-x-hidden text-slate-900 transition-colors duration-300 ${darkMode ? "retela-dark-shell" : ""}`}>
       <Sidebar active={active} collapsed={sidebarCollapsed} onChange={onChange} onToggleCollapsed={() => setSidebarCollapsed((value) => !value)} logoUrl={logoUrl} />
-      <main className={`min-w-0 transition-[margin] duration-500 ${sidebarCollapsed ? "lg:ml-28" : "lg:ml-80"}`}>
-        <header className="sticky top-0 z-20 px-3 py-3 pl-20 sm:px-5 lg:px-8 lg:pl-0 lg:pr-8">
+      <main className={`retela-app-main min-w-0 transition-[margin] duration-500 ${sidebarCollapsed ? "lg:ml-28" : "lg:ml-80"}`}>
+        <header className="retela-app-header sticky top-0 z-20 px-3 py-3 pl-20 sm:px-5 lg:px-8 lg:pl-0 lg:pr-8">
           <div className="premium-topbar flex min-h-16 flex-wrap items-center justify-between gap-2 rounded-[22px] border border-slate-200 bg-white px-3 py-3 shadow-lg shadow-slate-200/70 sm:gap-3 sm:px-4">
-          <div className="min-w-0 flex-1">
+          <div className="retela-topbar-title min-w-0 flex-1">
             <div className="flex items-center gap-3">
               <img src={logoUrl} className="h-10 w-10 shrink-0 rounded-xl border border-emerald-100 object-cover" alt="RETELA logo" />
               <div className="min-w-0">
@@ -267,7 +267,7 @@ export default function AppLayout({ children, active, onChange }) {
               </div>
             </div>
           </div>
-          <div className="flex min-w-0 shrink-0 flex-wrap items-center justify-end gap-2">
+          <div className="retela-topbar-actions flex min-w-0 shrink-0 flex-wrap items-center justify-end gap-2">
             <div className="hidden items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-600 sm:flex">
               <CalendarDays size={16} className="text-emerald-700" />
               {now.toLocaleDateString()} {now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
@@ -298,7 +298,7 @@ export default function AppLayout({ children, active, onChange }) {
               </button>
             ) : null}
             {user?.role !== "staff" ? (
-              <button type="button" onClick={() => onChange("Profile")} className="flex min-h-11 max-w-[44vw] items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-slate-700 transition hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700 sm:min-h-10 sm:max-w-[170px]">
+              <button type="button" onClick={() => onChange("Profile")} className="retela-profile-button flex min-h-11 max-w-[44vw] items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-slate-700 transition hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700 sm:min-h-10 sm:max-w-[170px]">
                 <UserCircle size={18} className="shrink-0 text-emerald-700" />
                 <span className="truncate text-sm font-semibold">{profileName}</span>
               </button>
