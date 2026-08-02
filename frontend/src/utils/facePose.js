@@ -86,7 +86,7 @@ function poseFromMatrix(matrix) {
   const m20 = data[8];
   const m21 = data[9];
   const m22 = data[10];
-  const yaw = Math.atan2(m02, m22) * 180 / Math.PI;
+  const yaw = -Math.atan2(m02, m22) * 180 / Math.PI;
   const pitch = Math.atan2(-m21, Math.sqrt((m20 * m20) + (m22 * m22))) * 180 / Math.PI;
   const roll = Math.atan2(m10, m11) * 180 / Math.PI;
   return { yaw, pitch, roll, matrixConfidence: Math.abs(m00) + Math.abs(m11) + Math.abs(m22) };
@@ -102,7 +102,7 @@ function poseFromLandmarks(landmarks, bounds) {
   const width = Math.max(bounds.right - bounds.left, 0.0001);
   const height = Math.max(bounds.bottom - bounds.top, 0.0001);
   const cheekMidX = ((leftCheek?.x || 0) + (rightCheek?.x || 0)) / 2;
-  const yaw = ((nose?.x || cheekMidX) - cheekMidX) / width * 95;
+  const yaw = -((nose?.x || cheekMidX) - cheekMidX) / width * 95;
   const verticalAnchor = (((forehead?.y || bounds.top) + (mouth?.y || bounds.bottom)) / 2);
   const pitch = (verticalAnchor - (nose?.y || verticalAnchor)) / height * 70;
   const roll = Math.atan2((rightCheek?.y || 0) - (leftCheek?.y || 0), (rightCheek?.x || 1) - (leftCheek?.x || 0)) * 180 / Math.PI;
@@ -177,6 +177,7 @@ export function buildFacePose(result, video, canvas, previous = null) {
     bounds,
     centerX,
     centerY,
+    faceWidthRatio: width,
     faceRatio,
     insideGuide,
     centered,
@@ -193,8 +194,8 @@ export function buildFacePose(result, video, canvas, previous = null) {
     brightness: frame.brightness,
     blurScore: frame.blurScore,
     movement,
-    tooFar: faceRatio < 0.28,
-    tooClose: faceRatio > 0.68,
+    tooFar: width < 0.3,
+    tooClose: width > 0.78,
     dark: frame.brightness < 42,
     blurry: frame.blurScore < 4,
     movingTooFast: movement > 0.42,

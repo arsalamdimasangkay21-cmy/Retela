@@ -1,6 +1,6 @@
 import { clamp } from "./facePose";
 
-export const SCAN_REGION_HOLD_MS = 220;
+export const SCAN_REGION_HOLD_MS = 140;
 export const CENTER_HOLD_MS = 520;
 export const STEP_TIMEOUT_MS = 8000;
 export const FACE_MISSING_RESET_MS = 1500;
@@ -17,7 +17,7 @@ export const CIRCULAR_SCAN_ROUTE = [
   "LOWER_RIGHT",
   "DOWN",
   "LOWER_LEFT",
-  "CENTER_FINAL"
+  "RETURN_CENTER"
 ];
 
 export const TARGET_LABELS = {
@@ -30,16 +30,16 @@ export const TARGET_LABELS = {
   LOWER_RIGHT: "Move a little lower",
   DOWN: "Move a little lower",
   LOWER_LEFT: "Almost done",
-  CENTER_FINAL: "Return to center"
+  RETURN_CENTER: "Return to the center"
 };
 
 export const SCAN_THRESHOLDS = {
-  yawMin: 12,
-  yawMax: 30,
-  pitchMin: 8,
-  pitchMax: 24,
-  diagonalYawMin: 9,
-  diagonalPitchMin: 6,
+  yawMin: 13,
+  yawMax: 32,
+  pitchMin: 11,
+  pitchMax: 26,
+  diagonalYawMin: 10,
+  diagonalPitchMin: 8,
   centeredYaw: 10,
   centeredPitch: 10,
   centerTolerance: 0.18
@@ -90,7 +90,7 @@ export function isFaceUsableForScan(face) {
 
 export function targetInstruction(target, progress) {
   if (target === "CENTER") return TARGET_LABELS.CENTER;
-  if (target === "CENTER_FINAL") return progress > 0.8 ? "Face verified" : TARGET_LABELS.CENTER_FINAL;
+  if (target === "RETURN_CENTER") return progress > 0.8 ? "Almost done" : TARGET_LABELS.RETURN_CENTER;
   if (progress > 0.86) return "Almost done";
   return TARGET_LABELS[target] || "Move your head slowly to complete the circle";
 }
@@ -113,7 +113,7 @@ export function regionScore(target, face, neutralPose) {
   const absYaw = Math.abs(delta.yaw);
   const absPitch = Math.abs(delta.pitch);
 
-  if (target === "CENTER" || target === "CENTER_FINAL") {
+  if (target === "CENTER" || target === "RETURN_CENTER") {
     const yawScore = 1 - clamp(absYaw / SCAN_THRESHOLDS.centeredYaw, 0, 1);
     const pitchScore = 1 - clamp(absPitch / SCAN_THRESHOLDS.centeredPitch, 0, 1);
     return Math.min(yawScore, pitchScore);
@@ -158,7 +158,7 @@ export function isRegionSatisfied(target, face, neutralPose) {
   const absYaw = Math.abs(delta.yaw);
   const absPitch = Math.abs(delta.pitch);
 
-  if (target === "CENTER" || target === "CENTER_FINAL") {
+  if (target === "CENTER" || target === "RETURN_CENTER") {
     return absYaw <= SCAN_THRESHOLDS.centeredYaw && absPitch <= SCAN_THRESHOLDS.centeredPitch && Math.abs(delta.roll) <= 12;
   }
   if (target === "LEFT") return inRange(delta.yaw, -SCAN_THRESHOLDS.yawMax, -SCAN_THRESHOLDS.yawMin);

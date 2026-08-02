@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, Camera, CheckCircle2, Loader2, RotateCcw, ShieldCheck, TriangleAlert } from "lucide-react";
+import { ArrowLeft, Check, RotateCcw } from "lucide-react";
 import { useFaceLandmarker } from "../../hooks/useFaceLandmarker";
 import { buildFacePose } from "../../utils/facePose";
 import {
@@ -32,7 +32,7 @@ const CAMERA_CONSTRAINTS = {
   video: {
     facingMode: "user",
     width: { ideal: 720 },
-    height: { ideal: 1280 },
+    height: { ideal: 720 },
     frameRate: { ideal: 30, max: 30 }
   }
 };
@@ -141,7 +141,8 @@ function faceFrameScore(face) {
 }
 
 export default function CircularFaceScanner({ selfie, selfiePreview, livenessVerified = false, onCaptured, onBack, onNext }) {
-  const { landmarker, loading, error: modelError } = useFaceLandmarker();
+  const { landmarker, error: modelError, retry: retryModel } = useFaceLandmarker();
+  const landmarkerRef = useRef(null);
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const qualityCanvasRef = useRef(null);
@@ -165,7 +166,7 @@ export default function CircularFaceScanner({ selfie, selfiePreview, livenessVer
 
   const [ui, setUi] = useState({
     phase: selfiePreview && livenessVerified ? "success" : "starting",
-    instruction: selfiePreview && livenessVerified ? "Face verified" : "Starting camera",
+    instruction: selfiePreview && livenessVerified ? "Face verified" : "Position your face inside the circle",
     progress: selfiePreview && livenessVerified ? 1 : 0,
     currentScore: 0,
     target: "CENTER",
@@ -218,7 +219,7 @@ export default function CircularFaceScanner({ selfie, selfiePreview, livenessVer
   const openCamera = useCallback(async () => {
     stopCamera();
     stoppedRef.current = false;
-    publishUi({ phase: "starting", instruction: "Starting camera", error: "", retryVisible: false });
+    publishUi({ phase: "starting", instruction: "Position your face inside the circle", error: "", retryVisible: false });
     try {
       const stream = await navigator.mediaDevices.getUserMedia(CAMERA_CONSTRAINTS);
       streamRef.current = stream;
@@ -234,12 +235,14 @@ export default function CircularFaceScanner({ selfie, selfiePreview, livenessVer
         }, { once: true });
       });
       if (videoRef.current) {
+        videoRef.current.setAttribute("playsinline", "true");
+        videoRef.current.muted = true;
         videoRef.current.srcObject = stream;
-        await waitForVideoMetadata(videoRef.current);
         await videoRef.current.play();
+        await waitForVideoMetadata(videoRef.current);
       }
       resetScan();
-      publishUi({ phase: "loading", instruction: "Preparing verifier..." });
+      publishUi({ phase: "scanning", instruction: "Position your face inside the circle" });
     } catch (cameraError) {
       publishUi({ phase: "error", instruction: cameraErrorMessage(cameraError), error: cameraErrorMessage(cameraError), retryVisible: true });
     }
@@ -285,7 +288,7 @@ export default function CircularFaceScanner({ selfie, selfiePreview, livenessVer
     if (!video || video.readyState < 2) return;
     scanRef.current.capturedAngles.push({ target, yaw: face.yaw, pitch: face.pitch, roll: face.roll });
     const score = faceFrameScore(face);
-    if (score >= bestFrameScoreRef.current || target === "CENTER_FINAL") {
+    if (score >= bestFrameScoreRef.current || target === "RETURN_CENTER") {
       bestFrameScoreRef.current = score;
       bestFrameRef.current = captureVideoFrame(video, "selfie-verification.jpg");
     }
@@ -327,6 +330,9 @@ export default function CircularFaceScanner({ selfie, selfiePreview, livenessVer
       smoothedFaceRef.current = face;
       return face;
     }
+    if (Math.abs(face.yaw - previous.yaw) > 42 || Math.abs(face.pitch - previous.pitch) > 36) {
+      return previous;
+    }
     const alpha = 0.34;
     const smoothed = {
       ...face,
@@ -341,7 +347,8 @@ export default function CircularFaceScanner({ selfie, selfiePreview, livenessVer
   }, []);
 
   const analyzeFrame = useCallback((timestamp) => {
-    if (!landmarker || stoppedRef.current || hiddenRef.current || captureLockRef.current) return;
+    const detector = landmarkerRef.current;
+    if (!detector || stoppedRef.current || hiddenRef.current || captureLockRef.current) return;
     const video = videoRef.current;
     if (!video || video.readyState < 2 || !video.videoWidth) return;
     if (detectingRef.current || timestamp - lastDetectionRef.current < DETECTION_INTERVAL_MS) return;
@@ -349,7 +356,7 @@ export default function CircularFaceScanner({ selfie, selfiePreview, livenessVer
     detectingRef.current = true;
     lastDetectionRef.current = timestamp;
     try {
-      const result = landmarker.detectForVideo(video, timestamp);
+      const result = detector.detectForVideo(video, timestamp);
       const rawFace = buildFacePose(result, video, qualityCanvasRef.current, previousFaceRef.current);
       const face = rawFace.faceCount === 1 ? smoothFace(rawFace) : rawFace;
       const now = performance.now();
@@ -409,13 +416,13 @@ export default function CircularFaceScanner({ selfie, selfiePreview, livenessVer
       if (target !== "CENTER") updateBlinkTracker(blinkRef, face, now);
       const score = regionScore(target, face, scan.neutralPose);
       const satisfied = isRegionSatisfied(target, face, scan.neutralPose);
-      const hasEnoughLiveness = target !== "CENTER_FINAL" || blinkRef.current.detected;
+      const hasEnoughLiveness = target !== "RETURN_CENTER" || blinkRef.current.detected;
 
       if (!satisfied || !hasEnoughLiveness) {
         scan.targetValidSince = 0;
         publishUi({
           phase: "scanning",
-          instruction: target === "CENTER_FINAL" && !blinkRef.current.detected ? "Blink once" : targetInstruction(target, scanProgress(scan.completed.size, score)),
+          instruction: target === "RETURN_CENTER" && !blinkRef.current.detected ? "Blink once" : targetInstruction(target, scanProgress(scan.completed.size, score)),
           target,
           progress: scanProgress(scan.completed.size, score),
           currentScore: score,
@@ -425,7 +432,7 @@ export default function CircularFaceScanner({ selfie, selfiePreview, livenessVer
       }
 
       if (!scan.targetValidSince) scan.targetValidSince = now;
-      const holdTime = target === "CENTER" || target === "CENTER_FINAL" ? CENTER_HOLD_MS : SCAN_REGION_HOLD_MS;
+      const holdTime = target === "CENTER" ? CENTER_HOLD_MS : SCAN_REGION_HOLD_MS;
       publishUi({
         phase: "scanning",
         instruction: target === "CENTER" ? "Hold still" : "Keep going",
@@ -440,7 +447,7 @@ export default function CircularFaceScanner({ selfie, selfiePreview, livenessVer
     } finally {
       detectingRef.current = false;
     }
-  }, [completeTarget, landmarker, publishUi, smoothFace]);
+  }, [completeTarget, publishUi, smoothFace]);
 
   const startLoop = useCallback(() => {
     window.cancelAnimationFrame(animationRef.current);
@@ -458,6 +465,7 @@ export default function CircularFaceScanner({ selfie, selfiePreview, livenessVer
   }, [openCamera, selfiePreview, stopCamera]);
 
   useEffect(() => {
+    landmarkerRef.current = landmarker;
     if (landmarker && streamRef.current && !selfiePreview && !captureLockRef.current) {
       publishUi({ phase: "scanning", instruction: "Position your face inside the circle" });
       startLoop();
@@ -469,14 +477,14 @@ export default function CircularFaceScanner({ selfie, selfiePreview, livenessVer
       hiddenRef.current = document.visibilityState === "hidden";
       if (hiddenRef.current) {
         window.cancelAnimationFrame(animationRef.current);
-      } else if (!stoppedRef.current && landmarker && streamRef.current) {
+      } else if (!stoppedRef.current && landmarkerRef.current && streamRef.current) {
         scanRef.current.stepStartedAt = performance.now();
         startLoop();
       }
     }
     document.addEventListener("visibilitychange", handleVisibility);
     return () => document.removeEventListener("visibilitychange", handleVisibility);
-  }, [landmarker, startLoop]);
+  }, [startLoop]);
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
@@ -494,6 +502,7 @@ export default function CircularFaceScanner({ selfie, selfiePreview, livenessVer
   function handleRestart() {
     restartAttemptsRef.current = 0;
     resetScan();
+    if (modelError) retryModel();
     openCamera();
   }
 
@@ -505,9 +514,8 @@ export default function CircularFaceScanner({ selfie, selfiePreview, livenessVer
 
   const activeMessage = useMemo(() => {
     if (modelError) return modelError;
-    if (loading && !landmarker) return "Preparing verifier...";
     return ui.instruction;
-  }, [landmarker, loading, modelError, ui.instruction]);
+  }, [modelError, ui.instruction]);
 
   return (
     <div className={`retela-face-scan-shell retela-face-scan-live${complete ? " is-complete" : ""}`}>
@@ -516,14 +524,7 @@ export default function CircularFaceScanner({ selfie, selfiePreview, livenessVer
           <ArrowLeft size={20} />
           <span>Cancel</span>
         </button>
-        <div className="retela-face-scan-title">
-          <span>Face Verification</span>
-          <strong>Step 2 of 5</strong>
-        </div>
-        <div className="retela-face-scan-secure">
-          <ShieldCheck size={15} />
-          <span>Secure</span>
-        </div>
+        <div className="retela-face-scan-title">Face Verification</div>
       </header>
 
       <main className="retela-face-scan-main">
@@ -544,17 +545,14 @@ export default function CircularFaceScanner({ selfie, selfiePreview, livenessVer
         </div>
 
         <section className="retela-face-scan-status" role="status" aria-live="polite">
-          <div className="retela-face-scan-status-icon" aria-hidden="true">
-            {loading && !landmarker ? <Loader2 className="animate-spin" size={22} /> : complete ? <CheckCircle2 size={24} /> : ui.phase === "error" || modelError ? <TriangleAlert size={23} /> : <Camera size={22} />}
-          </div>
           <h1>{complete ? "Face verified" : activeMessage}</h1>
-          <p>{complete ? "Continuing to the next step" : `${Math.min(scanRef.current.route.length, Math.round((complete ? 1 : ui.progress) * scanRef.current.route.length))} / ${scanRef.current.route.length}`}</p>
+          {complete ? <div className="retela-face-scan-success-mark" aria-hidden="true"><Check size={34} /></div> : null}
         </section>
 
         {ui.retryVisible || modelError ? (
           <div className="retela-face-scan-retry">
             <Button type="button" variant="secondary" onClick={handleRestart}>
-              <RotateCcw size={16} /> Restart verification
+              <RotateCcw size={16} /> Retry
             </Button>
           </div>
         ) : null}

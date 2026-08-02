@@ -1,6 +1,6 @@
 import { Check } from "lucide-react";
 
-const SEGMENT_COUNT = 56;
+const SEGMENT_COUNT = 60;
 const RADIUS = 92;
 const CENTER = 110;
 const SEGMENT_LENGTH = 10;
