@@ -39,6 +39,12 @@ import { errorHandler } from "./utils/errors.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+const corsOptions = {
+  origin: corsOrigin,
+  credentials: true,
+  optionsSuccessStatus: 204,
+};
+
 export function createApp(io) {
   const app = express();
 
@@ -65,12 +71,8 @@ export function createApp(io) {
     })
   );
 
-  app.use(
-    cors({
-      origin: corsOrigin,
-      credentials: true,
-    })
-  );
+  app.use(cors(corsOptions));
+  app.options("*", cors(corsOptions));
 
   app.use(
     "/api/payments/webhook",

@@ -14,34 +14,86 @@ const developmentOrigins = [
   "http://127.0.0.1:5177"
 ];
 
+function normalizeOrigin(value) {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value
+    .trim()
+    .replace(/\/+$/, "");
+
+  return normalized || null;
+}
+
 function configuredOrigins() {
+  const clientOrigins =
+    typeof process.env.CLIENT_URL === "string"
+      ? process.env.CLIENT_URL.split(",")
+      : [];
+
   const envOrigins = [
     process.env.FRONTEND_URL,
-    ...(process.env.CLIENT_URL || "").split(",")
+    ...clientOrigins
   ];
-  return [
+
+  const allOrigins = [
     ...productionOrigins,
     ...envOrigins,
-    ...(process.env.NODE_ENV === "production" ? [] : developmentOrigins)
-  ]
-    .map((origin) => origin.trim().replace(/\/$/, ""))
-    .filter(Boolean)
-    .filter((origin, index, origins) => origins.indexOf(origin) === index);
+    ...(process.env.NODE_ENV === "production"
+      ? []
+      : developmentOrigins)
+  ];
+
+  return [
+    ...new Set(
+      allOrigins
+        .map(normalizeOrigin)
+        .filter(Boolean)
+    )
+  ];
 }
 
 function isLocalhostOrigin(origin) {
-  return /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
+  return /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(
+    origin
+  );
 }
 
 export function isAllowedOrigin(origin) {
-  if (!origin) return true;
-  const normalized = String(origin).trim().replace(/\/$/, "");
-  return configuredOrigins().includes(normalized) || (process.env.NODE_ENV !== "production" && isLocalhostOrigin(normalized));
+  // Allow health checks, Postman, curl, and server-to-server requests.
+  if (!origin) {
+    return true;
+  }
+
+  const normalized = normalizeOrigin(origin);
+
+  if (!normalized) {
+    return false;
+  }
+
+  const isConfigured =
+    configuredOrigins().includes(normalized);
+
+  const isDevelopmentLocalhost =
+    process.env.NODE_ENV !== "production" &&
+    isLocalhostOrigin(normalized);
+
+  return isConfigured || isDevelopmentLocalhost;
 }
 
 export function corsOrigin(origin, callback) {
-  if (isAllowedOrigin(origin)) return callback(null, true);
-  return callback(new Error("Not allowed by CORS"));
+  if (isAllowedOrigin(origin)) {
+    return callback(null, true);
+  }
+
+  console.warn("[cors] Blocked origin:", normalizeOrigin(origin) || "<missing-or-invalid-origin>");
+
+  const error = new Error("Origin is not allowed by CORS");
+  error.status = 403;
+  error.code = "CORS_ORIGIN_DENIED";
+
+  return callback(error);
 }
 
 export function allowedOrigins() {
