@@ -1,17 +1,10 @@
 const productionOrigins = [
-  "https://retela.shop",
-  "https://www.retela.shop"
+  "https://www.retela.shop",
+  "https://retela.shop"
 ];
 
 const developmentOrigins = [
-  "http://localhost:5173",
-  "http://localhost:5174",
-  "http://localhost:5175",
-  "http://localhost:5177",
-  "http://127.0.0.1:5173",
-  "http://127.0.0.1:5174",
-  "http://127.0.0.1:5175",
-  "http://127.0.0.1:5177"
+  "http://localhost:5173"
 ];
 
 function normalizeOrigin(value) {
@@ -26,19 +19,24 @@ function normalizeOrigin(value) {
   return normalized || null;
 }
 
+function splitOrigins(value) {
+  return typeof value === "string" ? value.split(",") : [];
+}
+
 function configuredOrigins() {
-  const clientOrigins =
-    typeof process.env.CLIENT_URL === "string"
-      ? process.env.CLIENT_URL.split(",")
-      : [];
+  const frontendOrigins = splitOrigins(process.env.FRONTEND_URL);
+  const clientOrigins = splitOrigins(process.env.CLIENT_URL);
+  const corsOrigins = splitOrigins(process.env.CORS_ORIGIN);
 
   const envOrigins = [
-    process.env.FRONTEND_URL,
-    ...clientOrigins
+    ...frontendOrigins,
+    ...clientOrigins,
+    ...corsOrigins
   ];
 
   const allOrigins = [
     ...productionOrigins,
+    ...developmentOrigins,
     ...envOrigins,
     ...(process.env.NODE_ENV === "production"
       ? []
@@ -99,3 +97,16 @@ export function corsOrigin(origin, callback) {
 export function allowedOrigins() {
   return configuredOrigins();
 }
+
+export const corsOptions = {
+  origin: corsOrigin,
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: [
+    "Content-Type",
+    "Authorization",
+    "X-Requested-With"
+  ],
+  exposedHeaders: [],
+  optionsSuccessStatus: 204
+};

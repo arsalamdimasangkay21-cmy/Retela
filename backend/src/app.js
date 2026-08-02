@@ -24,7 +24,7 @@ import chatRoutes from "./routes/chat.routes.js";
 import posRoutes from "./routes/pos.routes.js";
 import customerRoutes from "./routes/customer.routes.js";
 import { checkDatabaseConnection, requestContextMiddleware } from "./config/db.js";
-import { corsOrigin } from "./config/cors.js";
+import { allowedOrigins, corsOptions } from "./config/cors.js";
 
 import {
   brandsRoutes,
@@ -39,17 +39,13 @@ import { errorHandler } from "./utils/errors.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const corsOptions = {
-  origin: corsOrigin,
-  credentials: true,
-  optionsSuccessStatus: 204,
-};
-
 export function createApp(io) {
   const app = express();
 
   // Trust Railway / reverse proxy
   app.set("trust proxy", 1);
+
+  console.log("[cors] allowed origins", allowedOrigins());
 
   app.set("io", io);
   app.use(requestContextMiddleware);
