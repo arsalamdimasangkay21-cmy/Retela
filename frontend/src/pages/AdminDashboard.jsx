@@ -388,6 +388,13 @@ export default function AdminDashboard({ active, onChange }) {
       payload.append("description", productPayloadValue(resolvedForm.description));
       if (editingProductId && resolvedForm.image_url) payload.append("image_url", resolvedForm.image_url);
       if (productImage) payload.append("image", productImage);
+      if (import.meta.env.DEV) {
+        console.log("[apparel image submit]", {
+          hasFile: Boolean(productImage),
+          fileName: productImage?.name || null,
+          formDataFields: Array.from(payload.keys())
+        });
+      }
       let response;
       if (editingProductId) {
         response = await api.put(`/products/${editingProductId}`, payload);
@@ -2157,7 +2164,7 @@ function SalesAnalytics({ summary }) {
     category: normalizeInventoryCategory(product.category),
     units: Number(product.sold || 0),
     revenue: Number(product.revenue || 0),
-    image: resolveProductImageUrl(product)
+    imageUrl: resolveProductImageUrl(product)
   }));
   const cards = [
     { title: "Total Sales", value: money(totalSales), change: "Live", caption: "database revenue", icon: TrendingUp },
@@ -2475,7 +2482,7 @@ function SalesAnalytics({ summary }) {
           <div className="grid gap-3">
             {topProducts.length ? topProducts.map((product, index) => (
               <motion.article key={product.name} className="flex min-w-0 items-center gap-4 rounded-2xl border border-white/10 bg-white/[0.045] p-3 transition hover:border-neonbrand/25 hover:bg-neonbrand/[0.055]" initial={{ opacity: 0, x: -12 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.28, delay: index * 0.04 }}>
-                {product.image ? <img src={product.image} alt={product.name} className="h-14 w-14 shrink-0 rounded-xl object-cover" /> : <div className="grid h-14 w-14 shrink-0 place-items-center rounded-xl border border-white/10 bg-white/[0.06] text-[10px] font-bold text-white/35">No Image</div>}
+                {product.imageUrl ? <img src={product.imageUrl} alt={product.name} className="h-14 w-14 shrink-0 rounded-xl object-cover" /> : <div className="grid h-14 w-14 shrink-0 place-items-center rounded-xl border border-white/10 bg-white/[0.06] text-[10px] font-bold text-white/35">No Image</div>}
                 <div className="min-w-0 flex-1">
                   <strong className="block truncate text-white">{product.name}</strong>
                   <span className="mt-1 block text-xs text-white/45">{product.category || "Apparel"}</span>

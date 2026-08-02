@@ -97,7 +97,7 @@ function createdProductResponse(row) {
     throw new Error("Product response is missing a valid ID");
   }
   const barcode = row.sku || row.barcode || null;
-  const imageUrl = row.imageUrl || row.image_url || row.image_path || row.image || null;
+  const imageUrl = row.image_url || row.imageUrl || null;
   return {
     ...row,
     id: productId,
@@ -113,7 +113,6 @@ function createdProductResponse(row) {
     condition: row.condition,
     description: row.description,
     imageUrl,
-    image: imageUrl,
     image_url: imageUrl,
     sku: barcode,
     barcode,
@@ -177,6 +176,28 @@ function parseProductId(value) {
     throw new HttpError(400, "A valid product ID is required");
   }
   return productId;
+}
+
+function uploadedProductImageUrl(req) {
+  return req.file ? `/uploads/${req.file.filename}` : null;
+}
+
+function logProductUpload(req) {
+  console.log("[product upload]", {
+    hasFile: Boolean(req.file),
+    fieldname: req.file?.fieldname || null,
+    filename: req.file?.filename || null,
+    path: req.file?.path || null
+  });
+}
+
+function logProductImageSaveFailure(error) {
+  console.error("[product image save failed]", {
+    message: error.message,
+    code: error.code,
+    sqlMessage: error.sqlMessage,
+    stack: error.stack
+  });
 }
 
 router.get("/", requireAuth, requireApproved, asyncHandler(async (req, res) => {
@@ -308,6 +329,7 @@ router.get("/filters", requireAuth, requireApproved, asyncHandler(async (req, re
 }));
 
 router.post("/", requireAuth, requireRole("admin"), upload.single("image"), asyncHandler(async (req, res) => {
+  logProductUpload(req);
   console.log("[POST /api/products] request", {
     bodyFields: Object.keys(req.body || {}),
     hasFile: Boolean(req.file),
@@ -315,7 +337,8 @@ router.post("/", requireAuth, requireRole("admin"), upload.single("image"), asyn
   });
   try {
     const table = await productWriteTable();
-    const rawInput = normalizeProductInput({ ...req.body, image_url: req.file ? `/uploads/${req.file.filename}` : req.body.image_url });
+    const imageUrl = uploadedProductImageUrl(req);
+    const rawInput = normalizeProductInput({ ...req.body, image_url: imageUrl });
     const input = productSchema.parse(rawInput);
     await ensureProductOptionValues(input);
     const duplicate = await findDuplicateActiveProduct(input);
@@ -384,6 +407,7 @@ router.post("/", requireAuth, requireRole("admin"), upload.single("image"), asyn
       item: product
     });
   } catch (error) {
+    logProductImageSaveFailure(error);
     console.error("[POST /api/products] failed", {
       message: error.message,
       code: error.code,
@@ -398,21 +422,40 @@ router.post("/", requireAuth, requireRole("admin"), upload.single("image"), asyn
 }));
 
 router.put("/:id", requireAuth, requireRole("admin"), upload.single("image"), asyncHandler(async (req, res) => {
-  const table = await productWriteTable();
-  const productId = parseProductId(req.params.id);
-  const input = productSchema.parse(normalizeProductInput({ ...req.body, image_url: req.file ? `/uploads/${req.file.filename}` : req.body.image_url }));
-  await ensureProductOptionValues(input);
-  const status = productStatusForStock(input.stock);
-  const result = await query(
-    `UPDATE \`${table}\` SET name=:name, brand=:brand, category=:category, gender=:gender, size=:size, color=:color, price=:price,
-     stock=:stock, status=:status, image_url=:image_url, \`condition\`=:condition, description=:description WHERE id=:id AND ${nonDeletedProductWhere()}`,
-    { ...input, status, id: productId }
-  );
-  if (!result.affectedRows) throw new HttpError(404, "Apparel item not found");
-  const apparel = { id: productId, ...input, status };
-  req.app.get("io")?.emit("inventory:update", { type: "inventory", action: "updated", apparel });
-  req.app.get("io")?.emit("product:update", apparel);
-  res.json(apparel);
+  logProductUpload(req);
+  try {
+    const table = await productWriteTable();
+    const productId = parseProductId(req.params.id);
+    const [existingProduct] = await query(
+      `SELECT id, image_url FROM \`${table}\` WHERE id = :id AND is_deleted = FALSE LIMIT 1`,
+      { id: productId }
+    );
+    if (!existingProduct) throw new HttpError(404, "Apparel item not found");
+
+    const imageUrl = uploadedProductImageUrl(req) || existingProduct.image_url || null;
+    const input = productSchema.parse(normalizeProductInput({ ...req.body, image_url: imageUrl }));
+    await ensureProductOptionValues(input);
+    const status = productStatusForStock(input.stock);
+    const result = await query(
+      `UPDATE \`${table}\` SET name=:name, brand=:brand, category=:category, gender=:gender, size=:size, color=:color, price=:price,
+       stock=:stock, status=:status, image_url=:image_url, \`condition\`=:condition, description=:description WHERE id=:id AND ${nonDeletedProductWhere()}`,
+      { ...input, status, id: productId }
+    );
+    if (!result.affectedRows) throw new HttpError(404, "Apparel item not found");
+    const [updated] = await query(`SELECT *, ${inventoryStatusSql("stock")} AS computed_status FROM \`${table}\` WHERE id = :id LIMIT 1`, { id: productId });
+    const apparel = productListResponse(updated);
+    req.app.get("io")?.emit("inventory:update", { type: "inventory", action: "updated", apparel });
+    req.app.get("io")?.emit("product:update", apparel);
+    res.json({
+      success: true,
+      message: "Apparel item updated successfully",
+      item: apparel,
+      product: apparel
+    });
+  } catch (error) {
+    logProductImageSaveFailure(error);
+    throw error;
+  }
 }));
 
 router.patch("/:id/stock", requireAuth, requireRole("admin"), asyncHandler(async (req, res) => {

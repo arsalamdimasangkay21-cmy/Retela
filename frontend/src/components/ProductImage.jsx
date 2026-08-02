@@ -8,7 +8,7 @@ export default function ProductImage({ product, src, alt, className = "", placeh
 
   useEffect(() => {
     setFailed(false);
-    logProductImageDebug(product || { image: src }, imageUrl);
+    logProductImageDebug(product || { image_url: src }, imageUrl);
   }, [imageUrl, product, src]);
 
   if (!imageUrl || failed) {
