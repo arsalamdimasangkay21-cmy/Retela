@@ -436,12 +436,30 @@ function StatusBadge({ active }) {
 }
 
 function ToggleSwitch({ active, onClick, label }) {
+  const switchClass = active ? "bg-neonbrand" : "bg-white/20";
+  const knobClass = active ? "left-6 bg-black" : "left-1 bg-white";
   return (
-    <button type="button" onClick={onClick} className="inline-flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.045] px-3 py-2 transition hover:border-neonbrand/35" aria-pressed={active}>
-      <span className={`relative h-6 w-11 rounded-full transition ${active ? "bg-neonbrand" : "bg-white/20"}`}>
-        <span className={`absolute top-1 h-4 w-4 rounded-full bg-black shadow transition ${active ? "left-6" : "left-1 bg-white"}`} />
+    <button type="button" onClick={onClick} className="inline-flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.045] px-3 py-2 transition hover:border-neonbrand/35 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neonbrand" aria-pressed={active}>
+      <span className={`relative h-6 w-11 rounded-full transition ${switchClass}`}>
+        <span className={`absolute top-1 h-4 w-4 rounded-full shadow transition ${knobClass}`} />
       </span>
       <span className="text-xs font-bold text-white/65">{label}</span>
+    </button>
+  );
+}
+
+function AutomationEditorToggle({ active, onClick, label }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="inline-flex min-h-12 w-fit items-center gap-3 rounded-2xl border border-[#cfded4] bg-white px-3 py-2 text-[#17211b] transition hover:border-[#20b66a] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#20b66a]"
+      aria-pressed={active}
+    >
+      <span className={`relative h-6 w-11 rounded-full transition ${active ? "bg-[#20b66a]" : "bg-slate-300"}`}>
+        <span className={`absolute top-1 h-4 w-4 rounded-full shadow transition ${active ? "left-6 bg-white" : "left-1 bg-white"}`} />
+      </span>
+      <span className="text-sm font-bold text-[#17211b]">{label}</span>
     </button>
   );
 }
@@ -500,14 +518,15 @@ function AutomationEditor({ automation, open, onClose, onSave }) {
 
   return (
     <AnimatePresence>
-      <motion.div className="fixed inset-0 z-[140] grid place-items-center bg-black/65 p-4 backdrop-blur-xl" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-        <motion.form onSubmit={submit} className="w-full max-w-2xl rounded-[26px] border border-green-400/20 bg-[#101712]/95 p-5 shadow-[0_24px_90px_rgba(0,0,0,0.45),0_0_40px_rgba(56,255,136,0.12)]" initial={{ opacity: 0, scale: 0.94, y: 12 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.94, y: 12 }}>
+      <motion.div className="fixed inset-0 z-[140] grid place-items-center p-4 sm:p-6" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+        <button type="button" className="absolute inset-0 cursor-default bg-[rgba(10,20,14,0.55)] backdrop-blur-sm" aria-label="Close automation editor overlay" onClick={onClose} />
+        <motion.form onSubmit={submit} className="relative z-10 w-[min(1100px,calc(100vw-32px))] max-h-[calc(100dvh-32px)] overflow-y-auto rounded-[26px] border border-[#cfded4] bg-[#f8fbf9] p-5 text-[#17211b] shadow-[0_24px_90px_rgba(0,0,0,0.25),0_0_40px_rgba(32,182,106,0.10)] sm:p-6" initial={{ opacity: 0, scale: 0.94, y: 12 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.94, y: 12 }} role="dialog" aria-modal="true" aria-labelledby="automation-editor-title">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <h3 className="font-display text-2xl font-bold text-white">{form.id ? "Edit Automation" : "Create Automation"}</h3>
-              <p className="mt-1 text-sm text-white/50">Update the frontend rule configuration and status.</p>
+              <h3 id="automation-editor-title" className="font-display text-2xl font-bold text-[#17211b]">{form.id ? "Edit Automation" : "Create Automation"}</h3>
+              <p className="mt-1 text-sm text-[#5f6f65]">Update the frontend rule configuration and status.</p>
             </div>
-            <button type="button" onClick={onClose} className="grid h-10 w-10 place-items-center rounded-2xl border border-white/10 bg-white/[0.06] text-white/70 transition hover:border-neonbrand/40 hover:text-neonbrand" aria-label="Close editor">
+            <button type="button" onClick={onClose} className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl border border-[#cfded4] bg-white text-[#5f6f65] transition hover:border-[#20b66a] hover:text-[#15884f] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#20b66a]" aria-label="Close automation editor">
               <X size={18} />
             </button>
           </div>
@@ -515,8 +534,8 @@ function AutomationEditor({ automation, open, onClose, onSave }) {
           <div className="mt-5 grid gap-4 md:grid-cols-2">
             <AutomationInput label="Title" value={form.title} onChange={(value) => updateField("title", value)} required />
             <label className="grid gap-2">
-              <span className="text-xs font-bold uppercase tracking-[0.16em] text-white/38">Icon</span>
-              <select value={form.icon} onChange={(event) => updateField("icon", event.target.value)} className="rounded-2xl border border-white/10 bg-white/[0.06] px-3 py-3 text-sm text-white outline-none transition focus:border-neonbrand/60">
+              <span className="text-xs font-bold uppercase tracking-[0.16em] text-[#17211b]">Icon</span>
+              <select value={form.icon} onChange={(event) => updateField("icon", event.target.value)} className="min-h-12 rounded-2xl border border-[#cfded4] bg-white px-3 py-3 text-sm text-[#17211b] outline-none transition focus:border-[#20b66a] focus:outline focus:outline-3 focus:outline-[rgba(32,182,106,0.18)] disabled:bg-slate-100 disabled:text-slate-500">
                 {Object.keys(iconMap).map((key) => <option key={key} value={key}>{key.replace(/([A-Z])/g, " $1")}</option>)}
               </select>
             </label>
@@ -524,14 +543,14 @@ function AutomationEditor({ automation, open, onClose, onSave }) {
             <AutomationTextarea label="Trigger Condition" value={form.trigger} onChange={(value) => updateField("trigger", value)} />
             <AutomationTextarea label="Action Performed" value={form.action} onChange={(value) => updateField("action", value)} />
             <div className="grid content-start gap-3">
-              <span className="text-xs font-bold uppercase tracking-[0.16em] text-white/38">Status</span>
-              <ToggleSwitch active={form.active} onClick={() => updateField("active", !form.active)} label={form.active ? "Active" : "Inactive"} />
+              <span className="text-xs font-bold uppercase tracking-[0.16em] text-[#17211b]">Status</span>
+              <AutomationEditorToggle active={form.active} onClick={() => updateField("active", !form.active)} label={form.active ? "Active" : "Inactive"} />
             </div>
           </div>
 
-          <div className="mt-5 flex flex-col justify-end gap-3 sm:flex-row">
-            <button type="button" onClick={onClose} className="rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-2.5 text-sm font-bold text-white/70 transition hover:border-neonbrand/40 hover:text-neonbrand">Cancel</button>
-            <Button type="submit">
+          <div className="mt-5 grid gap-3 sm:flex sm:justify-end">
+            <button type="button" onClick={onClose} className="min-h-12 rounded-2xl border border-[#cfded4] bg-white px-4 py-2.5 text-sm font-bold text-[#17211b] transition hover:border-[#20b66a] hover:text-[#15884f] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#20b66a]">Cancel</button>
+            <Button type="submit" className="min-h-12">
               <Save size={17} />
               Save Automation
             </Button>
@@ -545,8 +564,8 @@ function AutomationEditor({ automation, open, onClose, onSave }) {
 function AutomationInput({ label, value, onChange, required }) {
   return (
     <label className="grid gap-2">
-      <span className="text-xs font-bold uppercase tracking-[0.16em] text-white/38">{label}</span>
-      <input required={required} value={value} onChange={(event) => onChange(event.target.value)} className="rounded-2xl border border-white/10 bg-white/[0.06] px-3 py-3 text-sm text-white outline-none placeholder:text-white/35 transition focus:border-neonbrand/60" />
+      <span className="text-xs font-bold uppercase tracking-[0.16em] text-[#17211b]">{label}</span>
+      <input required={required} value={value} onChange={(event) => onChange(event.target.value)} className="min-h-12 rounded-2xl border border-[#cfded4] bg-white px-3 py-3 text-sm text-[#17211b] outline-none placeholder:text-[#8b9a91] transition focus:border-[#20b66a] focus:outline focus:outline-3 focus:outline-[rgba(32,182,106,0.18)] disabled:bg-slate-100 disabled:text-slate-500" />
     </label>
   );
 }
@@ -554,8 +573,8 @@ function AutomationInput({ label, value, onChange, required }) {
 function AutomationTextarea({ label, value, onChange }) {
   return (
     <label className="grid gap-2">
-      <span className="text-xs font-bold uppercase tracking-[0.16em] text-white/38">{label}</span>
-      <textarea value={value} onChange={(event) => onChange(event.target.value)} rows={4} className="resize-none rounded-2xl border border-white/10 bg-white/[0.06] px-3 py-3 text-sm leading-6 text-white outline-none placeholder:text-white/35 transition focus:border-neonbrand/60" />
+      <span className="text-xs font-bold uppercase tracking-[0.16em] text-[#17211b]">{label}</span>
+      <textarea value={value} onChange={(event) => onChange(event.target.value)} rows={4} className="min-h-32 resize-none rounded-2xl border border-[#cfded4] bg-white px-3 py-3 text-sm leading-6 text-[#17211b] outline-none placeholder:text-[#8b9a91] transition focus:border-[#20b66a] focus:outline focus:outline-3 focus:outline-[rgba(32,182,106,0.18)] disabled:bg-slate-100 disabled:text-slate-500" />
     </label>
   );
 }
