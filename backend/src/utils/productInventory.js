@@ -1,4 +1,4 @@
-import { query } from "../config/db.js";
+import { query, requireUsableAutoIncrementId } from "../config/db.js";
 
 let productInventoryColumnsReady;
 
@@ -221,6 +221,8 @@ export async function ensureProductInventoryColumns() {
           sku = CASE WHEN sku IS NULL OR sku = '' OR sku = 'RETELA-000000' THEN CONCAT('RETELA-', LPAD(id, 6, '0')) ELSE sku END,
           deleted_at = CASE WHEN is_deleted = TRUE AND deleted_at IS NULL THEN NOW() ELSE deleted_at END`));
 
+    await requireUsableAutoIncrementId(storageTable);
+
     const skuIndexes = await safeProductMigration("sku index inspection", () => query(
       `SELECT INDEX_NAME, GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX) AS COLUMNS
        FROM INFORMATION_SCHEMA.STATISTICS
@@ -238,6 +240,7 @@ export async function ensureProductInventoryColumns() {
   })().catch((error) => {
     productInventoryColumnsReady = undefined;
     warnProductMigrationSkipped("product inventory bootstrap", error.message);
+    throw error;
   });
 
   return productInventoryColumnsReady;

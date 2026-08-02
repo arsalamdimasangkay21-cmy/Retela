@@ -350,6 +350,54 @@ async function ensureAutoIncrementId(tableName) {
   });
 }
 
+export async function inspectIdentityColumn(tableName) {
+  const info = await tableInfo(tableName);
+  if (!info) {
+    return {
+      tableName,
+      exists: false,
+      tableType: null,
+      id: null,
+      primaryKeyColumns: [],
+      autoIncrementColumns: []
+    };
+  }
+  const columns = info.TABLE_TYPE === "BASE TABLE" ? await columnSet(tableName) : new Map();
+  return {
+    tableName,
+    exists: true,
+    tableType: info.TABLE_TYPE,
+    id: columns.get("id") || null,
+    primaryKeyColumns: info.TABLE_TYPE === "BASE TABLE" ? await primaryKeyColumns(tableName) : [],
+    autoIncrementColumns: info.TABLE_TYPE === "BASE TABLE" ? await autoIncrementColumns(tableName) : []
+  };
+}
+
+export async function requireUsableAutoIncrementId(tableName) {
+  const identity = await inspectIdentityColumn(tableName);
+  if (!identity.exists || identity.tableType !== "BASE TABLE") return identity;
+
+  const idExtra = String(identity.id?.EXTRA || "").toLowerCase();
+  const isUsable = identity.id
+    && identity.primaryKeyColumns.length === 1
+    && identity.primaryKeyColumns[0] === "id"
+    && idExtra.includes("auto_increment");
+
+  if (!isUsable) {
+    const error = new Error(
+      `[schema bootstrap] ${tableName}.id is not usable. Expected id as the single-column AUTO_INCREMENT PRIMARY KEY. ` +
+      `Primary key: ${identity.primaryKeyColumns.join(", ") || "<none>"}. ` +
+      `AUTO_INCREMENT columns: ${identity.autoIncrementColumns.join(", ") || "<none>"}.`
+    );
+    error.code = "SCHEMA_ID_INVALID";
+    error.tableName = tableName;
+    error.identity = identity;
+    throw error;
+  }
+
+  return identity;
+}
+
 async function getProductStorageTable() {
   const rows = await listTables(["products", "apparel_items"]);
   const productsBase = rows.some((row) => row.TABLE_NAME === "products" && row.TABLE_TYPE === "BASE TABLE");
@@ -523,6 +571,7 @@ async function ensureCoreTables() {
     `);
   }
   await ensureProductColumns(storageTable);
+  await requireUsableAutoIncrementId(storageTable);
   await ensureProductAlias(storageTable);
 
   await ensureTable("system_settings", `
@@ -798,6 +847,7 @@ async function ensureCommunicationTables() {
     )
   `);
   await ensureAutoIncrementId("broadcasts");
+  await requireUsableAutoIncrementId("broadcasts");
   await ensureColumn("broadcasts", "audience_filter", "audience_filter VARCHAR(160) NULL AFTER audience");
   await ensureColumn("broadcasts", "is_deleted", "is_deleted BOOLEAN NOT NULL DEFAULT FALSE AFTER created_by");
   await ensureColumn("broadcasts", "deleted_at", "deleted_at DATETIME NULL AFTER is_deleted");
@@ -954,8 +1004,8 @@ async function seedMissingOptionData() {
 
 export async function initializeDatabase() {
   await testDatabaseConnection();
-  await runSchemaMigration("startup", "core schema bootstrap", ensureCoreTables);
-  await runSchemaMigration("startup", "communication schema bootstrap", ensureCommunicationTables);
-  await runSchemaMigration("startup", "option seed bootstrap", seedMissingOptionData);
+  await ensureCoreTables();
+  await ensureCommunicationTables();
+  await seedMissingOptionData();
   console.log("Retela database bootstrap complete");
 }

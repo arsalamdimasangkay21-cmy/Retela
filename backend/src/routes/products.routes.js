@@ -92,24 +92,35 @@ function productCreateError(error) {
 }
 
 function createdProductResponse(row) {
+  const productId = Number(row?.id);
+  if (!Number.isInteger(productId) || productId <= 0) {
+    throw new Error("Product response is missing a valid ID");
+  }
+  const barcode = row.sku || row.barcode || null;
   return {
     ...row,
-    id: Number(row.id),
-    product_id: Number(row.id),
-    sku: row.sku || null,
-    barcode: row.sku || null,
+    id: productId,
+    name: row.name,
+    brand: row.brand,
+    category: row.category,
+    type: row.gender || row.type || null,
+    gender: row.gender || row.type || null,
+    size: row.size,
+    color: row.color,
+    price: row.price,
+    stock: row.stock,
+    condition: row.condition,
+    description: row.description,
+    image: row.image_url || row.image || null,
+    image_url: row.image_url || row.image || null,
+    sku: barcode,
+    barcode,
     status: row.computed_status || row.status || productStatusForStock(row.stock)
   };
 }
 
 function productListResponse(row) {
-  return {
-    ...row,
-    id: Number(row.id),
-    product_id: Number(row.id),
-    barcode: row.sku || null,
-    status: row.computed_status || row.status || productStatusForStock(row.stock)
-  };
+  return createdProductResponse(row);
 }
 
 function duplicateSignature(product) {
@@ -295,6 +306,11 @@ router.get("/filters", requireAuth, requireApproved, asyncHandler(async (req, re
 }));
 
 router.post("/", requireAuth, requireRole("admin"), upload.single("image"), asyncHandler(async (req, res) => {
+  console.log("[POST /api/products] request", {
+    bodyFields: Object.keys(req.body || {}),
+    hasFile: Boolean(req.file),
+    contentType: req.headers["content-type"]
+  });
   try {
     const table = await productWriteTable();
     const rawInput = normalizeProductInput({ ...req.body, image_url: req.file ? `/uploads/${req.file.filename}` : req.body.image_url });
@@ -340,9 +356,13 @@ router.post("/", requireAuth, requireRole("admin"), upload.single("image"), asyn
          VALUES (:name, :brand, :category, :gender, :size, :color, :price, :stock, :status, :image_url, :condition, :description, TRUE, FALSE, NULL, NULL)`,
         { ...input, status }
       );
-      const sku = productSkuForId(result.insertId);
-      await run(`UPDATE \`${table}\` SET sku = :sku WHERE id = :id`, { id: result.insertId, sku });
-      const [created] = await run(`SELECT *, ${inventoryStatusSql("stock")} AS computed_status FROM \`${table}\` WHERE id = :id LIMIT 1`, { id: result.insertId });
+      const productId = Number(result.insertId);
+      if (!Number.isInteger(productId) || productId <= 0) {
+        throw new Error("Product insert returned an invalid ID");
+      }
+      const sku = productSkuForId(productId);
+      await run(`UPDATE \`${table}\` SET sku = :sku WHERE id = :id`, { id: productId, sku });
+      const [created] = await run(`SELECT *, ${inventoryStatusSql("stock")} AS computed_status FROM \`${table}\` WHERE id = :id LIMIT 1`, { id: productId });
       return createdProductResponse(created);
     });
 
@@ -362,14 +382,15 @@ router.post("/", requireAuth, requireRole("admin"), upload.single("image"), asyn
       item: product
     });
   } catch (error) {
-    if (process.env.NODE_ENV !== "production") {
-      console.error("Create apparel failed:", {
-        message: error.message,
-        code: error.code,
-        sqlMessage: error.sqlMessage,
-        sql: error.sqlText || error.sql
-      });
-    }
+    console.error("[POST /api/products] failed", {
+      message: error.message,
+      code: error.code,
+      errno: error.errno,
+      sqlMessage: error.sqlMessage,
+      sqlState: error.sqlState,
+      sql: error.sqlText || error.sql,
+      stack: error.stack
+    });
     throw productCreateError(error);
   }
 }));
@@ -400,6 +421,11 @@ router.patch("/:id/stock", requireAuth, requireRole("admin"), asyncHandler(async
     stock: z.coerce.number().int().min(0).optional()
   }).refine((value) => value.delta !== undefined || value.stock !== undefined, "delta or stock is required");
   const input = schema.parse(req.body);
+  console.log("[stock update]", {
+    productId,
+    requestedStock: input.stock ?? null,
+    delta: input.delta ?? null
+  });
   const products = await query("SELECT id, stock FROM products WHERE id = :id AND is_deleted = FALSE", { id: productId });
   if (!products.length) throw new HttpError(404, "Apparel item not found");
   const nextStock = input.stock !== undefined ? input.stock : Math.max(0, Number(products[0].stock) + input.delta);
@@ -414,8 +440,10 @@ router.patch("/:id/stock", requireAuth, requireRole("admin"), asyncHandler(async
   if (nextStock === 0) {
     req.app.get("io")?.to("admin").emit("notification:new", { type: "inventory", title: "Out of stock", body: `Apparel item #${productId} is out of stock.` });
   }
-  req.app.get("io")?.emit("inventory:update", { type: "inventory", action: "stock", id: productId, stock: nextStock, status: nextStatus });
-  res.json({ id: productId, stock: nextStock, status: nextStatus });
+  const [updated] = await query(`SELECT *, ${inventoryStatusSql("stock")} AS computed_status FROM \`${table}\` WHERE id = :id LIMIT 1`, { id: productId });
+  const product = productListResponse(updated);
+  req.app.get("io")?.emit("inventory:update", { type: "inventory", action: "stock", id: productId, stock: nextStock, status: nextStatus, product });
+  res.json(product);
 }));
 
 router.delete("/:id", requireAuth, requireRole("admin"), asyncHandler(async (req, res) => {

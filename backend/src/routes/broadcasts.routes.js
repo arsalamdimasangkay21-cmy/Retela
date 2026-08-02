@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
-import { query, safeModifyColumn } from "../config/db.js";
+import { query, requireUsableAutoIncrementId, safeModifyColumn } from "../config/db.js";
 import { requireApproved, requireAuth, requireRole } from "../middleware/auth.js";
 import { upload } from "../middleware/upload.js";
 import { asyncHandler, HttpError } from "../utils/errors.js";
@@ -82,6 +82,7 @@ async function ensureBroadcastSchema() {
 
     await safeModifyColumn("broadcasts", "audience", "audience enum update", "ALTER TABLE broadcasts MODIFY audience ENUM('all_customers','by_location','by_product_interest','active_customers','new_customers','customers_with_orders','vip_customers') NOT NULL DEFAULT 'all_customers'");
     await safeModifyColumn("broadcasts", "broadcast_type", "broadcast_type enum update", "ALTER TABLE broadcasts MODIFY broadcast_type ENUM('new_arrival','new_product_drop','promo_sale','flash_sale','restock_alert','holiday_promo','order_update','event_announcement','ai_marketing_campaign') NOT NULL DEFAULT 'promo_sale'");
+    await requireUsableAutoIncrementId("broadcasts");
     const broadcastColumns = await query(
       `SELECT COLUMN_NAME
        FROM INFORMATION_SCHEMA.COLUMNS
@@ -604,8 +605,20 @@ router.get("/sales/active", requireAuth, requireApproved, asyncHandler(async (re
 router.use(requireAuth, requireRole("admin"));
 
 router.get("/", asyncHandler(async (req, res) => {
-  await ensureBroadcastSchema();
-  res.json(await getBroadcastsResponse(req.app));
+  try {
+    await ensureBroadcastSchema();
+    res.json(await getBroadcastsResponse(req.app));
+  } catch (error) {
+    console.error("[GET /api/broadcasts] failed", {
+      message: error.message,
+      code: error.code,
+      sqlMessage: error.sqlMessage,
+      sqlState: error.sqlState,
+      sql: error.sqlText || error.sql,
+      stack: error.stack
+    });
+    throw error;
+  }
 }));
 
 router.get("/trash", asyncHandler(async (req, res) => {

@@ -382,9 +382,9 @@ export default function AdminDashboard({ active, onChange }) {
       if (productImage) payload.append("image", productImage);
       let response;
       if (editingProductId) {
-        response = await api.put(`/products/${editingProductId}`, payload, { headers: { "Content-Type": "multipart/form-data" } });
+        response = await api.put(`/products/${editingProductId}`, payload);
       } else {
-        response = await api.post("/products", payload, { headers: { "Content-Type": "multipart/form-data" } });
+        response = await api.post("/products", payload);
       }
       const savedItem = response?.data?.item || response?.data?.product || response?.data;
       setForm(blankProduct);
@@ -453,18 +453,30 @@ export default function AdminDashboard({ active, onChange }) {
     }
   }
 
-  async function updateStock(id, change) {
-    if (String(id).startsWith("sample-")) return;
-    const productId = validProductId(id);
+  async function updateStock(productOrId, change) {
+    if (String(productOrId?.id ?? productOrId).startsWith("sample-")) return;
+    const productId = validProductId(productOrId);
     if (!productId) {
       showProductToast("Cannot update stock because the product ID is missing.", "error");
       return;
+    }
+    if (import.meta.env.DEV) {
+      console.log("[stock update]", {
+        productId,
+        requestedStock: null,
+        delta: change
+      });
     }
     const actionKey = `stock-${productId}`;
     if (busyAction === actionKey) return;
     setBusyAction(actionKey);
     try {
-      await api.patch(`/products/${productId}/stock`, { delta: change });
+      const { data } = await api.patch(`/products/${productId}/stock`, { delta: change });
+      if (data?.id) {
+        const updatedItem = normalizeProductRows([data])[0];
+        setInventoryProducts((rows) => rows.map((product) => (validProductId(product) === productId ? updatedItem : product)));
+        setProducts((rows) => rows.map((product) => (validProductId(product) === productId ? updatedItem : product)));
+      }
       await refreshProductLists();
       showProductToast(change > 0 ? "Apparel item restocked successfully." : "Stock updated successfully.");
     } catch (error) {
@@ -1365,7 +1377,7 @@ function InventoryActions({ product, onEdit, onUpdateStock, onDelete, deletingPr
       <InventoryActionButton tone="edit" icon={Edit3} onClick={() => onEdit(product)}>
         Edit
       </InventoryActionButton>
-      <InventoryActionButton tone="more" icon={MoreHorizontal} onClick={() => onUpdateStock(product.id, Number(product.stock) <= 0 ? 1 : -1)}>
+      <InventoryActionButton tone="more" icon={MoreHorizontal} disabled={!validProductId(product)} title={deleteDisabledReason(product)} onClick={() => onUpdateStock(product, Number(product.stock) <= 0 ? 1 : -1)}>
         More
       </InventoryActionButton>
       <InventoryActionButton tone="delete" icon={Trash2} disabled={!validProductId(product) || deleting} title={deleteDisabledReason(product)} onClick={() => onDelete(product)} className={mobile ? "col-span-2" : ""}>
@@ -2563,6 +2575,13 @@ function barcodePattern(value) {
 }
 
 function BarcodeSvg({ value, compact = false }) {
+  if (!value || value === "Barcode unavailable") {
+    return (
+      <div className="grid h-full w-full place-items-center rounded-md bg-white text-center text-[10px] font-black uppercase tracking-[0.08em] text-slate-400">
+        Barcode unavailable
+      </div>
+    );
+  }
   const bits = barcodePattern(value);
   const barWidth = compact ? 2 : 3;
   const height = compact ? 38 : 56;
@@ -2577,6 +2596,9 @@ function BarcodeSvg({ value, compact = false }) {
 
 function barcodeSvgMarkup(value) {
   const safeValue = escapePrintHtml(value);
+  if (!value || value === "Barcode unavailable") {
+    return `<div style="display:grid;place-items:center;width:360px;height:118px;border:1px solid #d1d5db;border-radius:10px;color:#6b7280;font:700 12px Arial,sans-serif;text-transform:uppercase;letter-spacing:0.08em;">${safeValue}</div>`;
+  }
   const bits = barcodePattern(value);
   const barWidth = 3;
   const height = 74;
