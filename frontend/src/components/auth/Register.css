@@ -394,6 +394,435 @@
   text-align: center;
 }
 
+.retela-wizard-modal-faceid {
+  width: min(100%, 34rem);
+  max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 1rem);
+  overflow: hidden;
+  padding: 0;
+  border-color: #e7f3ea;
+  border-radius: clamp(1.15rem, 4vw, 1.8rem);
+  background: #ffffff;
+}
+
+.retela-faceid-shell {
+  min-width: 0;
+  max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 1rem);
+  overflow: hidden;
+  gap: clamp(0.65rem, 2.2vw, 1rem);
+  padding: calc(clamp(0.9rem, 3vw, 1.35rem) + env(safe-area-inset-top)) clamp(0.85rem, 3vw, 1.25rem) calc(clamp(0.85rem, 3vw, 1.2rem) + env(safe-area-inset-bottom));
+}
+
+.retela-faceid-header {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: clamp(0.55rem, 2vw, 0.8rem);
+}
+
+.retela-faceid-back {
+  display: inline-grid;
+  min-width: 48px;
+  min-height: 48px;
+  place-items: center;
+  border: 1px solid #e2eee5;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #163923;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+}
+
+.retela-faceid-title {
+  display: grid;
+  min-width: 0;
+  gap: 0.1rem;
+  color: #0f172a;
+}
+
+.retela-faceid-title span {
+  overflow: hidden;
+  font-family: var(--font-display, inherit);
+  font-size: clamp(1.05rem, 4.8vw, 1.45rem);
+  font-weight: 900;
+  line-height: 1.05;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.retela-faceid-title strong {
+  color: #16a34a;
+  font-size: clamp(0.72rem, 2.8vw, 0.82rem);
+  font-weight: 900;
+}
+
+.retela-faceid-secure {
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
+  gap: 0.35rem;
+  border: 1px solid #bbf7d0;
+  border-radius: 999px;
+  background: #ecfdf5;
+  padding: 0 0.65rem;
+  color: #15803d;
+  font-size: clamp(0.7rem, 2.8vw, 0.78rem);
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.retela-faceid-progress {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: clamp(0.3rem, 1.6vw, 0.55rem);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.retela-faceid-progress li {
+  display: grid;
+  min-width: 0;
+  justify-items: center;
+  gap: 0.28rem;
+  color: #94a3b8;
+  font-size: clamp(0.58rem, 2vw, 0.68rem);
+  font-weight: 850;
+  text-align: center;
+}
+
+.retela-faceid-progress li span {
+  display: grid;
+  width: clamp(1.35rem, 6vw, 1.65rem);
+  height: clamp(1.35rem, 6vw, 1.65rem);
+  place-items: center;
+  border: 1px solid #e2e8f0;
+  border-radius: 999px;
+  background: #ffffff;
+  color: inherit;
+}
+
+.retela-faceid-progress li strong {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.retela-faceid-progress li.is-active {
+  color: #15803d;
+}
+
+.retela-faceid-progress li.is-active span {
+  border-color: #22c55e;
+  background: #16a34a;
+  color: #ffffff;
+  box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.13);
+}
+
+.retela-faceid-progress li.is-complete {
+  color: #4b8f61;
+}
+
+.retela-faceid-card {
+  display: grid;
+  min-width: 0;
+  gap: clamp(0.7rem, 2.2vw, 0.95rem);
+  border: 1px solid #e1f1e6;
+  border-radius: clamp(1rem, 4vw, 1.5rem);
+  background: #ffffff;
+  padding: clamp(0.65rem, 2vw, 0.9rem);
+  box-shadow: 0 20px 50px rgba(15, 23, 42, 0.12);
+}
+
+.retela-faceid-shell .retela-selfie-stage {
+  width: 100%;
+  max-width: none;
+}
+
+.retela-faceid-camera {
+  width: 100%;
+  height: clamp(21rem, 58dvh, 35rem);
+  max-height: calc(100dvh - 15.5rem - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  min-height: 19rem;
+  aspect-ratio: 3 / 4;
+  border-radius: clamp(1rem, 4vw, 1.45rem);
+  background: #07130c;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+.retela-faceid-camera .retela-camera-preview {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  max-height: none;
+  border-radius: inherit;
+  object-fit: cover;
+}
+
+.retela-faceid-camera .retela-camera-preview-live {
+  transform: scaleX(-1) !important;
+}
+
+.retela-faceid-camera .retela-selfie-preview {
+  transform: none !important;
+}
+
+.retela-faceid-guide {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  display: grid;
+  width: clamp(13rem, 58vw, 19rem);
+  height: clamp(16.5rem, 72vw, 24rem);
+  max-width: 72%;
+  max-height: 84%;
+  place-items: center;
+  border: 3px solid rgba(255, 255, 255, 0.95);
+  border-radius: 50% / 45%;
+  box-shadow:
+    0 0 0 999px rgba(2, 6, 23, 0.36),
+    0 0 28px rgba(255, 255, 255, 0.22),
+    inset 0 0 28px rgba(255, 255, 255, 0.08);
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+  transition: border-color 300ms ease, box-shadow 300ms ease, filter 300ms ease;
+}
+
+.retela-faceid-guide::before {
+  position: absolute;
+  inset: 12% 16%;
+  border: 1.5px dashed rgba(255, 255, 255, 0.64);
+  border-radius: 50% / 45%;
+  content: "";
+}
+
+.retela-faceid-guide::after {
+  position: absolute;
+  inset: -0.5rem;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: inherit;
+  animation: retelaFaceScan 1.9s ease-in-out infinite;
+  content: "";
+}
+
+.retela-faceid-guide.is-ready,
+.retela-faceid-guide.is-success {
+  border-color: #22c55e;
+  box-shadow:
+    0 0 0 999px rgba(2, 6, 23, 0.32),
+    0 0 34px rgba(34, 197, 94, 0.62),
+    inset 0 0 26px rgba(34, 197, 94, 0.2);
+}
+
+.retela-faceid-guide.is-warn {
+  border-color: #f59e0b;
+  box-shadow:
+    0 0 0 999px rgba(2, 6, 23, 0.36),
+    0 0 30px rgba(245, 158, 11, 0.48),
+    inset 0 0 24px rgba(245, 158, 11, 0.16);
+}
+
+.retela-faceid-guide.is-error {
+  border-color: #ef4444;
+  box-shadow:
+    0 0 0 999px rgba(2, 6, 23, 0.38),
+    0 0 30px rgba(239, 68, 68, 0.45),
+    inset 0 0 24px rgba(239, 68, 68, 0.14);
+}
+
+.retela-faceid-countdown {
+  z-index: 2;
+  color: #ffffff;
+  font-size: clamp(4rem, 24vw, 7rem);
+  font-weight: 950;
+  line-height: 1;
+  text-shadow: 0 10px 28px rgba(0, 0, 0, 0.42);
+}
+
+.retela-faceid-success-check {
+  z-index: 2;
+  display: grid;
+  width: clamp(4.5rem, 22vw, 6.5rem);
+  height: clamp(4.5rem, 22vw, 6.5rem);
+  place-items: center;
+  border-radius: 999px;
+  background: #22c55e;
+  color: #ffffff;
+  box-shadow: 0 18px 45px rgba(34, 197, 94, 0.42);
+  animation: retelaSuccessPop 420ms cubic-bezier(0.2, 1.2, 0.24, 1) both;
+}
+
+.retela-faceid-instruction {
+  display: flex;
+  min-height: 52px;
+  min-width: 0;
+  align-items: center;
+  gap: 0.65rem;
+  border: 1px solid #e1ece5;
+  border-radius: 999px;
+  background: #ffffff;
+  padding: 0.65rem 0.85rem;
+  color: #334155;
+  font-size: clamp(0.86rem, 3.2vw, 0.98rem);
+  font-weight: 900;
+  box-shadow: 0 10px 26px rgba(15, 23, 42, 0.07);
+}
+
+.retela-faceid-instruction svg {
+  flex: 0 0 auto;
+  color: #15803d;
+}
+
+.retela-faceid-instruction span {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow-wrap: anywhere;
+}
+
+.retela-faceid-instruction strong {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: #ecfdf5;
+  padding: 0.25rem 0.55rem;
+  color: #15803d;
+  font-size: clamp(0.7rem, 2.4vw, 0.78rem);
+}
+
+.retela-faceid-instruction.is-ready,
+.retela-faceid-instruction.is-success {
+  border-color: #bbf7d0;
+  background: #ecfdf5;
+  color: #14532d;
+}
+
+.retela-faceid-instruction.is-warn {
+  border-color: #fed7aa;
+  background: #fffbeb;
+  color: #92400e;
+}
+
+.retela-faceid-instruction.is-warn svg {
+  color: #d97706;
+}
+
+.retela-faceid-instruction.is-error {
+  border-color: #fecaca;
+  background: #fef2f2;
+  color: #991b1b;
+}
+
+.retela-faceid-instruction.is-error svg {
+  color: #dc2626;
+}
+
+.retela-faceid-actions {
+  justify-content: stretch;
+}
+
+.retela-faceid-actions > * {
+  min-height: 48px;
+  flex: 1 1 0;
+}
+
+@keyframes retelaFaceScan {
+  0%, 100% {
+    opacity: 0.35;
+    transform: scale(0.985);
+  }
+
+  50% {
+    opacity: 0.9;
+    transform: scale(1.025);
+  }
+}
+
+@keyframes retelaSuccessPop {
+  0% {
+    opacity: 0;
+    transform: scale(0.75);
+  }
+
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@media (min-width: 1440px) {
+  .retela-wizard-modal-faceid {
+    width: 36rem;
+  }
+
+  .retela-faceid-camera {
+    height: clamp(31rem, 60dvh, 38rem);
+  }
+}
+
+@media (min-width: 1024px) and (max-width: 1439px) {
+  .retela-wizard-modal-faceid {
+    width: 34rem;
+  }
+}
+
+@media (min-width: 768px) and (max-width: 1023px) {
+  .retela-wizard-modal-faceid {
+    width: min(100%, 32rem);
+  }
+
+  .retela-faceid-camera {
+    height: clamp(25rem, 58dvh, 34rem);
+  }
+}
+
+@media (min-width: 481px) and (max-width: 767px) {
+  .retela-wizard-modal-faceid {
+    width: min(100%, 31rem);
+  }
+
+  .retela-faceid-camera {
+    height: clamp(23rem, 56dvh, 31rem);
+  }
+}
+
+@media (max-width: 480px) {
+  .retela-register-modal-backdrop {
+    padding: max(0.4rem, env(safe-area-inset-top)) 0.45rem max(0.4rem, env(safe-area-inset-bottom));
+  }
+
+  .retela-wizard-modal-faceid {
+    width: 100%;
+  }
+
+  .retela-faceid-header {
+    grid-template-columns: 48px minmax(0, 1fr) auto;
+  }
+
+  .retela-faceid-secure span {
+    display: none;
+  }
+
+  .retela-faceid-progress li strong {
+    display: none;
+  }
+
+  .retela-faceid-card {
+    padding: 0.55rem;
+  }
+
+  .retela-faceid-camera {
+    height: clamp(20rem, 57dvh, 29rem);
+    max-height: calc(100dvh - 13rem - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    min-height: 18rem;
+  }
+
+  .retela-faceid-guide {
+    width: clamp(12rem, 70vw, 16rem);
+    height: clamp(15rem, 86vw, 20.5rem);
+    max-width: 78%;
+    max-height: 86%;
+  }
+}
+
 @media (max-width: 640px) {
   .retela-register-modal,
   .retela-wizard-modal {

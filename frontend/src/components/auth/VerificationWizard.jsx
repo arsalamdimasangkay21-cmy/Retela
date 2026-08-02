@@ -71,22 +71,26 @@ export default function VerificationWizard({ open, registration, onClose, onComp
 
   return createPortal(
     <div className="retela-register-modal-backdrop retela-wizard-backdrop" role="presentation" onMouseDown={close}>
-      <section className="retela-wizard-modal" role="dialog" aria-modal="true" aria-labelledby="verification-title" onMouseDown={(event) => event.stopPropagation()}>
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <p className="text-xs font-bold uppercase tracking-[0.18em] text-emerald-700">Identity Verification</p>
-            <h2 id="verification-title" className="mt-1 font-display text-2xl font-bold text-slate-900">Complete Registration</h2>
+      <section className={`retela-wizard-modal ${step === 1 ? "retela-wizard-modal-faceid" : ""}`} role="dialog" aria-modal="true" aria-labelledby={step === 1 ? undefined : "verification-title"} aria-label={step === 1 ? "Face Verification" : undefined} onMouseDown={(event) => event.stopPropagation()}>
+        {step !== 1 ? (
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[0.18em] text-emerald-700">Identity Verification</p>
+              <h2 id="verification-title" className="mt-1 font-display text-2xl font-bold text-slate-900">Complete Registration</h2>
+            </div>
+            <button type="button" className="grid h-9 w-9 place-items-center rounded-xl bg-slate-100 text-slate-500 hover:bg-slate-200" onClick={close} aria-label="Close verification">
+              <X size={18} />
+            </button>
           </div>
-          <button type="button" className="grid h-9 w-9 place-items-center rounded-xl bg-slate-100 text-slate-500 hover:bg-slate-200" onClick={close} aria-label="Close verification">
-            <X size={18} />
-          </button>
-        </div>
+        ) : null}
 
-        <div className="retela-stepper">
-          {steps.map((label, index) => (
-            <span key={label} className={`retela-step-pill ${index <= step ? "retela-step-pill-active" : ""}`}>{index + 1}. {label}</span>
-          ))}
-        </div>
+        {step !== 1 ? (
+          <div className="retela-stepper">
+            {steps.map((label, index) => (
+              <span key={label} className={`retela-step-pill ${index <= step ? "retela-step-pill-active" : ""}`}>{index + 1}. {label}</span>
+            ))}
+          </div>
+        ) : null}
 
         {step === 1 ? (
           <div className="retela-wizard-step">
