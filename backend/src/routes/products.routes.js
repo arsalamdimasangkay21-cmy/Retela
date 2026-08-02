@@ -97,6 +97,7 @@ function createdProductResponse(row) {
     throw new Error("Product response is missing a valid ID");
   }
   const barcode = row.sku || row.barcode || null;
+  const imageUrl = row.imageUrl || row.image_url || row.image_path || row.image || null;
   return {
     ...row,
     id: productId,
@@ -111,8 +112,9 @@ function createdProductResponse(row) {
     stock: row.stock,
     condition: row.condition,
     description: row.description,
-    image: row.image_url || row.image || null,
-    image_url: row.image_url || row.image || null,
+    imageUrl,
+    image: imageUrl,
+    image_url: imageUrl,
     sku: barcode,
     barcode,
     status: row.computed_status || row.status || productStatusForStock(row.stock)

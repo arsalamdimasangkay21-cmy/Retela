@@ -9,8 +9,10 @@ import { api, API_URL, cachedGet, clearGetCache, getApiErrorMessage } from "../a
 import { createApparelOption, fetchApparelOptions } from "../api/apparelOptions";
 import { ChangePasswordForm } from "../components/ChangePasswordForm";
 import CustomerDocumentsModal from "../components/CustomerDocumentsModal";
+import ProductImage from "../components/ProductImage";
 import { Button, Card, Field, StatCard } from "../components/ui";
 import { useAuth } from "../context/AuthContext";
+import { getProductImageValue, normalizeProductImageFields, resolveProductImageUrl } from "../utils/productImage";
 import AutomationsPage from "./AutomationsPage";
 import AdminSettingsPage from "./AdminSettingsPage";
 import BroadcastsPage from "./BroadcastsPage";
@@ -130,38 +132,15 @@ function isDeletingProduct(product, deletingProductIds = []) {
   return Boolean(productId && deletingProductIds.includes(productId));
 }
 
-function getProductImageValue(productOrUrl) {
-  if (!productOrUrl) return "";
-  if (typeof productOrUrl === "string") return productOrUrl.trim();
-  return String(
-    productOrUrl.imageUrl
-      ?? productOrUrl.image_url
-      ?? productOrUrl.image
-      ?? productOrUrl.image_path
-      ?? productOrUrl.photo_url
-      ?? productOrUrl.photo
-      ?? productOrUrl.product_image
-      ?? ""
-  ).trim();
-}
-
-function getProductImageUrl(productOrUrl) {
-  const value = getProductImageValue(productOrUrl);
-  return value ? assetUrl(value) : null;
-}
-
 function normalizeProductRow(product) {
   const productId = validProductId(product);
   if (!productId && import.meta.env.DEV) {
     console.warn("Loaded product is missing a valid id:", product);
   }
   const barcode = product?.sku || product?.barcode || "";
-  const imageValue = getProductImageValue(product);
   return {
-    ...product,
+    ...normalizeProductImageFields(product),
     id: productId,
-    image_url: imageValue || null,
-    image: imageValue || null,
     sku: barcode,
     barcode
   };
@@ -1371,35 +1350,6 @@ function InventoryStatusBadge({ stock, status }) {
   return <span className={`inline-flex rounded-full border px-3 py-1 text-xs font-bold ${styles[badgeStatus]}`}>{badgeStatus}</span>;
 }
 
-function ProductImage({ product, src, alt, className = "" }) {
-  const [failed, setFailed] = useState(false);
-  const imageValue = getProductImageValue(product || src);
-  const imageSrc = !failed && imageValue ? assetUrl(imageValue) : "";
-
-  useEffect(() => {
-    setFailed(false);
-  }, [imageValue]);
-
-  if (!imageSrc) {
-    return (
-      <div className={`${className} grid place-items-center bg-slate-100 text-center text-[11px] font-bold text-slate-400`}>
-        No image
-      </div>
-    );
-  }
-
-  return (
-    <img
-      src={imageSrc}
-      className={className}
-      alt={alt || product?.name || "Apparel item"}
-      onError={() => {
-        if (!failed) setFailed(true);
-      }}
-    />
-  );
-}
-
 function InventoryActions({ product, onEdit, onUpdateStock, onDelete, deletingProductIds = [], mobile = false }) {
   const deleting = isDeletingProduct(product, deletingProductIds);
   return (
@@ -1538,7 +1488,7 @@ function ProductEditorModal({ editingProductId, form, setForm, productImage, set
 
   useEffect(() => {
     revokePreviewObjectUrl();
-    setExistingImageUrl(getProductImageUrl(form));
+    setExistingImageUrl(resolveProductImageUrl(form));
     setSelectedImageFile(null);
     setPreviewImageUrl(null);
     setImageLoadFailed(false);
@@ -2207,7 +2157,7 @@ function SalesAnalytics({ summary }) {
     category: normalizeInventoryCategory(product.category),
     units: Number(product.sold || 0),
     revenue: Number(product.revenue || 0),
-    image: getProductImageUrl(product)
+    image: resolveProductImageUrl(product)
   }));
   const cards = [
     { title: "Total Sales", value: money(totalSales), change: "Live", caption: "database revenue", icon: TrendingUp },
