@@ -398,7 +398,8 @@ async function ensureProductAlias(storageTable) {
 }
 
 async function ensureProductColumns(storageTable) {
-  await ensureColumn(storageTable, "sku", "sku VARCHAR(32) NULL AFTER id");
+  await ensureColumn(storageTable, "sku", "sku VARCHAR(50) NULL AFTER id");
+  await safeModifyColumn(storageTable, "sku", "product sku length", `ALTER TABLE \`${storageTable}\` MODIFY sku VARCHAR(50) NULL`);
   await ensureColumn(storageTable, "name", "name VARCHAR(160) NOT NULL DEFAULT 'Untitled Apparel' AFTER sku");
   await ensureColumn(storageTable, "brand", "brand VARCHAR(120) NOT NULL DEFAULT 'Other' AFTER name");
   await ensureColumn(storageTable, "category", "category VARCHAR(80) NOT NULL DEFAULT 'T-Shirts' AFTER brand");
@@ -422,7 +423,7 @@ async function ensureProductColumns(storageTable) {
   await ensureColumn(storageTable, "sale_ends_at", "sale_ends_at DATETIME NULL AFTER sale_starts_at");
   await ensureAutoIncrementId(storageTable);
   await safeDataMigration(storageTable, "product inventory defaults", `UPDATE \`${storageTable}\`
-    SET sku = CASE WHEN sku IS NULL OR sku = '' THEN CONCAT('RETELA-', LPAD(id, 6, '0')) ELSE sku END,
+    SET sku = CASE WHEN sku IS NULL OR sku = '' OR sku = 'RETELA-000000' THEN CONCAT('RETELA-', LPAD(id, 6, '0')) ELSE sku END,
         is_active = COALESCE(is_active, TRUE),
         is_deleted = COALESCE(is_deleted, FALSE),
         status = CASE WHEN stock <= 0 THEN 'Out of Stock' WHEN stock <= 5 THEN 'Low Stock' ELSE 'In Stock' END`);
@@ -491,7 +492,7 @@ async function ensureCoreTables() {
     await ensureTable(storageTable, `
       CREATE TABLE IF NOT EXISTS \`${storageTable}\` (
         id INT AUTO_INCREMENT PRIMARY KEY,
-        sku VARCHAR(32) NULL,
+        sku VARCHAR(50) NULL,
         name VARCHAR(160) NOT NULL,
         brand VARCHAR(120) NOT NULL DEFAULT 'Other',
         category VARCHAR(80) NOT NULL DEFAULT 'T-Shirts',

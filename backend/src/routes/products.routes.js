@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
-import { query } from "../config/db.js";
+import { query, transaction } from "../config/db.js";
 import { asyncHandler, HttpError } from "../utils/errors.js";
 import { requireApproved, requireAuth, requireRole } from "../middleware/auth.js";
 import { upload } from "../middleware/upload.js";
@@ -46,10 +46,12 @@ function normalizeProductInput(input) {
   const conditionValue = input.condition ?? input.condition_name ?? input.condition_id;
   const stockValue = input.stock ?? input.quantity;
   const activeValue = input.is_active ?? input.active;
+  const imageValue = typeof input.image_url === "string" ? input.image_url.trim() : input.image_url;
   return {
     ...input,
     stock: stockValue,
     is_active: activeValue,
+    image_url: imageValue || null,
     brand: normalizeBrand(input.brand),
     category: normalizeCategory(input.category),
     gender: String(input.gender || "").trim().replace(/\s+/g, " ") || "Other",
@@ -60,15 +62,15 @@ function normalizeProductInput(input) {
 }
 
 const productSchema = z.object({
-  name: z.string().min(2),
+  name: z.string().trim().min(2, "Apparel name must be at least 2 characters"),
   brand: z.string().trim().min(1).max(120).optional().default("Other"),
   category: z.string().trim().min(1).max(80).optional().default("T-Shirts"),
   gender: z.string().trim().min(1).max(80).optional().default("Other"),
   size: z.string().trim().min(1).max(80).optional().default("Free Size"),
   color: z.string().trim().max(80).optional().default("Other"),
-  price: z.coerce.number().positive(),
-  stock: z.coerce.number().int().min(0),
-  condition: z.string().trim().min(2).max(120),
+  price: z.coerce.number({ invalid_type_error: "Price must be a valid number" }).positive("Price must be greater than zero"),
+  stock: z.coerce.number({ invalid_type_error: "Stock must be a valid number" }).int("Stock must be a whole number").min(0, "Stock cannot be negative"),
+  condition: z.string().trim().min(2, "Condition is required").max(120),
   description: z.string().trim().max(1200).optional().default(""),
   image_url: z.string().optional().nullable()
 });
@@ -87,6 +89,27 @@ function productCreateError(error) {
     return new HttpError(400, "Invalid product details. Please check the form and try again.");
   }
   return error;
+}
+
+function createdProductResponse(row) {
+  return {
+    ...row,
+    id: Number(row.id),
+    product_id: Number(row.id),
+    sku: row.sku || null,
+    barcode: row.sku || null,
+    status: row.computed_status || row.status || productStatusForStock(row.stock)
+  };
+}
+
+function productListResponse(row) {
+  return {
+    ...row,
+    id: Number(row.id),
+    product_id: Number(row.id),
+    barcode: row.sku || null,
+    status: row.computed_status || row.status || productStatusForStock(row.stock)
+  };
 }
 
 function duplicateSignature(product) {
@@ -202,7 +225,7 @@ router.get("/", requireAuth, requireApproved, asyncHandler(async (req, res) => {
       : "ORDER BY created_at DESC";
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
   const products = await query(`SELECT \`${table}\`.id AS id, \`${table}\`.*, ${inventoryStatusSql("stock")} AS computed_status FROM \`${table}\` ${where} ${orderBy}`, params);
-  const mapped = products.map((product) => ({ ...product, id: Number(product.id), status: product.computed_status || product.status || productStatusForStock(product.stock) }));
+  const mapped = products.map(productListResponse);
   res.json(mapped);
 }));
 
@@ -214,7 +237,7 @@ router.get("/inventory", requireAuth, requireRole("admin"), asyncHandler(async (
      WHERE ${nonDeletedProductWhere()}
      ORDER BY created_at DESC`
   );
-  res.json(products.map((product) => ({ ...product, id: Number(product.id), status: product.computed_status || product.status || productStatusForStock(product.stock) })));
+  res.json(products.map(productListResponse));
 }));
 
 router.get("/available", requireAuth, requireApproved, asyncHandler(async (req, res) => {
@@ -225,7 +248,7 @@ router.get("/available", requireAuth, requireApproved, asyncHandler(async (req, 
      WHERE ${availableProductWhere()}
      ORDER BY created_at DESC`
   );
-  res.json(products.map((product) => ({ ...product, id: Number(product.id), status: product.computed_status || product.status || productStatusForStock(product.stock) })));
+  res.json(products.map(productListResponse));
 }));
 
 router.get("/archived", requireAuth, requireRole("admin"), asyncHandler(async (req, res) => {
@@ -236,7 +259,7 @@ router.get("/archived", requireAuth, requireRole("admin"), asyncHandler(async (r
      WHERE is_deleted = TRUE
      ORDER BY deleted_at DESC, updated_at DESC`
   );
-  res.json(products.map((product) => ({ ...product, id: Number(product.id), status: product.computed_status || product.status || productStatusForStock(product.stock) })));
+  res.json(products.map(productListResponse));
 }));
 
 router.get("/barcode/:sku", requireAuth, requireRole("admin"), asyncHandler(async (req, res) => {
@@ -250,7 +273,7 @@ router.get("/barcode/:sku", requireAuth, requireRole("admin"), asyncHandler(asyn
     { sku: String(req.params.sku || "").trim() }
   );
   if (!product) throw new HttpError(404, "No product found for this barcode");
-  res.json({ ...product, status: product.computed_status || product.status || productStatusForStock(product.stock) });
+  res.json(productListResponse(product));
 }));
 
 router.get("/filters", requireAuth, requireApproved, asyncHandler(async (req, res) => {
@@ -299,31 +322,54 @@ router.post("/", requireAuth, requireRole("admin"), upload.single("image"), asyn
         }
       );
       const [merged] = await query(`SELECT *, ${inventoryStatusSql("stock")} AS computed_status FROM products WHERE id = :id LIMIT 1`, { id: duplicate.id });
+      const item = createdProductResponse(merged);
       req.app.get("io")?.emit("inventory:update", { type: "inventory", action: "stock", id: duplicate.id, stock: nextStock, status: nextStatus });
       return res.status(200).json({
-        id: duplicate.id,
-        product_id: duplicate.id,
+        success: true,
         merged: true,
         message: "Existing apparel item found. Stock combined successfully.",
-        product: { ...merged, product_id: merged.id, status: merged.computed_status || merged.status || productStatusForStock(merged.stock) }
+        item,
+        product: item
       });
     }
 
     const status = productStatusForStock(input.stock);
-    const result = await query(
-      `INSERT INTO \`${table}\` (name, brand, category, gender, size, color, price, stock, status, image_url, \`condition\`, description, is_active, is_deleted, deleted_at, deleted_by)
-       VALUES (:name, :brand, :category, :gender, :size, :color, :price, :stock, :status, :image_url, :condition, :description, TRUE, FALSE, NULL, NULL)`,
-      { ...input, status }
-    );
-    const sku = productSkuForId(result.insertId);
-    await query(`UPDATE \`${table}\` SET sku = :sku WHERE id = :id`, { id: result.insertId, sku });
-    const [created] = await query(`SELECT *, ${inventoryStatusSql("stock")} AS computed_status FROM products WHERE id = :id LIMIT 1`, { id: result.insertId });
-    const product = { ...created, product_id: created.id, status: created.computed_status || created.status || productStatusForStock(created.stock) };
-    await query("INSERT INTO notifications (type, title, body, product_id) VALUES ('new_product', 'New apparel posted!', 'View now...', :id)", { id: product.id });
+    const product = await transaction(async (run) => {
+      const result = await run(
+        `INSERT INTO \`${table}\` (name, brand, category, gender, size, color, price, stock, status, image_url, \`condition\`, description, is_active, is_deleted, deleted_at, deleted_by)
+         VALUES (:name, :brand, :category, :gender, :size, :color, :price, :stock, :status, :image_url, :condition, :description, TRUE, FALSE, NULL, NULL)`,
+        { ...input, status }
+      );
+      const sku = productSkuForId(result.insertId);
+      await run(`UPDATE \`${table}\` SET sku = :sku WHERE id = :id`, { id: result.insertId, sku });
+      const [created] = await run(`SELECT *, ${inventoryStatusSql("stock")} AS computed_status FROM \`${table}\` WHERE id = :id LIMIT 1`, { id: result.insertId });
+      return createdProductResponse(created);
+    });
+
+    query("INSERT INTO notifications (type, title, body, product_id) VALUES ('new_product', 'New apparel posted!', 'View now...', :id)", { id: product.id })
+      .catch((notificationError) => {
+        console.warn("Create apparel notification failed:", {
+          message: notificationError.message,
+          code: notificationError.code,
+          sqlMessage: notificationError.sqlMessage
+        });
+      });
     req.app.get("io")?.emit("product:new", product);
     req.app.get("io")?.emit("notification:new", { type: "new_product", title: "New apparel posted!", body: "View now...", product });
-    return res.status(201).json(product);
+    return res.status(201).json({
+      success: true,
+      message: "Apparel item created successfully",
+      item: product
+    });
   } catch (error) {
+    if (process.env.NODE_ENV !== "production") {
+      console.error("Create apparel failed:", {
+        message: error.message,
+        code: error.code,
+        sqlMessage: error.sqlMessage,
+        sql: error.sqlText || error.sql
+      });
+    }
     throw productCreateError(error);
   }
 }));

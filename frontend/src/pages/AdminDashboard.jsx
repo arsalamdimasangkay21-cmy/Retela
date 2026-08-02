@@ -11,7 +11,6 @@ import { ChangePasswordForm } from "../components/ChangePasswordForm";
 import CustomerDocumentsModal from "../components/CustomerDocumentsModal";
 import { Button, Card, Field, StatCard } from "../components/ui";
 import { useAuth } from "../context/AuthContext";
-import { RETELA_LOGO_URL } from "../config/branding";
 import AutomationsPage from "./AutomationsPage";
 import AdminSettingsPage from "./AdminSettingsPage";
 import BroadcastsPage from "./BroadcastsPage";
@@ -79,6 +78,11 @@ const glowingLineStyle = {
   pointHoverBorderWidth: 2
 };
 
+function productPayloadValue(value) {
+  if (value === undefined || value === null) return "";
+  return String(value).trim();
+}
+
 function optionNames(rows = [], fallback = []) {
   const names = [...fallback, ...rows.map((row) => row?.name || row)].map((value) => String(value || "").trim()).filter(Boolean);
   return names.filter((value, index, array) => array.findIndex((item) => item.toLowerCase() === value.toLowerCase()) === index);
@@ -125,9 +129,12 @@ function normalizeProductRow(product) {
   if (!productId && import.meta.env.DEV) {
     console.warn("Loaded product is missing a valid id:", product);
   }
+  const barcode = product?.sku || product?.barcode || "";
   return {
     ...product,
-    id: productId
+    id: productId,
+    sku: barcode,
+    barcode
   };
 }
 
@@ -361,7 +368,17 @@ export default function AdminDashboard({ active, onChange }) {
     setProductSaving(true);
     try {
       const payload = new FormData();
-      Object.entries(resolvedForm).forEach(([key, value]) => payload.append(key, value ?? ""));
+      payload.append("name", productPayloadValue(resolvedForm.name));
+      payload.append("brand", productPayloadValue(resolvedForm.brand || "Other"));
+      payload.append("category", productPayloadValue(resolvedForm.category || "T-Shirts"));
+      payload.append("gender", productPayloadValue(resolvedForm.gender || "Other"));
+      payload.append("size", productPayloadValue(resolvedForm.size || "Free Size"));
+      payload.append("color", productPayloadValue(resolvedForm.color || "Other"));
+      payload.append("price", String(price));
+      payload.append("stock", String(stock));
+      payload.append("condition", productPayloadValue(resolvedForm.condition || "Good"));
+      payload.append("description", productPayloadValue(resolvedForm.description));
+      if (editingProductId && resolvedForm.image_url) payload.append("image_url", resolvedForm.image_url);
       if (productImage) payload.append("image", productImage);
       let response;
       if (editingProductId) {
@@ -369,10 +386,20 @@ export default function AdminDashboard({ active, onChange }) {
       } else {
         response = await api.post("/products", payload, { headers: { "Content-Type": "multipart/form-data" } });
       }
+      const savedItem = response?.data?.item || response?.data?.product || response?.data;
       setForm(blankProduct);
       setProductImage(null);
       setEditingProductId(null);
       setInventoryModalOpen(false);
+      if (savedItem?.id) {
+        setInventoryProducts((current) => {
+          const nextItem = normalizeProductRows([savedItem])[0];
+          const exists = current.some((item) => Number(item.id) === Number(nextItem.id));
+          return exists
+            ? current.map((item) => (Number(item.id) === Number(nextItem.id) ? nextItem : item))
+            : [nextItem, ...current];
+        });
+      }
       await refreshProductLists();
       showProductToast(response?.data?.message || (editingProductId ? "Apparel item updated successfully." : "Apparel item saved successfully."));
     } catch (error) {
@@ -1305,11 +1332,19 @@ function InventoryStatusBadge({ stock, status }) {
 
 function ProductImage({ src, alt, className = "" }) {
   const [failed, setFailed] = useState(false);
-  const imageSrc = !failed && src ? assetUrl(src) : RETELA_LOGO_URL;
+  const imageSrc = !failed && src ? assetUrl(src) : "";
 
   useEffect(() => {
     setFailed(false);
   }, [src]);
+
+  if (!imageSrc) {
+    return (
+      <div className={`${className} grid place-items-center bg-slate-100 text-center text-[11px] font-bold text-slate-400`}>
+        No image
+      </div>
+    );
+  }
 
   return (
     <img
@@ -2512,7 +2547,7 @@ function money(value) {
 }
 
 function productSku(product) {
-  return product?.sku || `RETELA-${String(Number(product?.id || 0)).padStart(6, "0")}`;
+  return product?.sku || product?.barcode || "Barcode unavailable";
 }
 
 function barcodePattern(value) {

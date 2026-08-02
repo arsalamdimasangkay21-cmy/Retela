@@ -124,7 +124,7 @@ export async function ensureProductInventoryColumns() {
        FROM INFORMATION_SCHEMA.COLUMNS
        WHERE TABLE_SCHEMA = DATABASE()
          AND TABLE_NAME = :storageTable
-         AND COLUMN_NAME IN ('sku', 'brand', 'category', 'gender', 'size', 'color', 'description', 'status', 'is_active', 'is_deleted', 'deleted_at', 'deleted_by', 'sale_enabled', 'sale_discount_percent', 'sale_product_ids_json', 'sale_starts_at', 'sale_ends_at')`,
+         AND COLUMN_NAME IN ('sku', 'name', 'brand', 'category', 'gender', 'size', 'color', 'price', 'stock', 'status', 'image_url', 'condition', 'description', 'is_active', 'is_deleted', 'deleted_at', 'deleted_by', 'sale_enabled', 'sale_discount_percent', 'sale_product_ids_json', 'sale_starts_at', 'sale_ends_at', 'created_at', 'updated_at')`,
       { storageTable }
     ));
     if (!rows) return;
@@ -140,7 +140,12 @@ export async function ensureProductInventoryColumns() {
     const columnLengths = new Map(rows.map((row) => [row.COLUMN_NAME, Number(row.CHARACTER_MAXIMUM_LENGTH || 0)]));
 
     if (!columns.has("sku")) {
-      await safeProductMigration("sku column", () => query(`ALTER TABLE \`${storageTable}\` ADD COLUMN sku VARCHAR(32) NULL AFTER id`));
+      await safeProductMigration("sku column", () => query(`ALTER TABLE \`${storageTable}\` ADD COLUMN sku VARCHAR(50) NULL AFTER id`));
+    } else if (columnLengths.get("sku") && columnLengths.get("sku") < 50) {
+      await safeProductMigration("sku column length", () => query(`ALTER TABLE \`${storageTable}\` MODIFY sku VARCHAR(50) NULL`));
+    }
+    if (!columns.has("name")) {
+      await safeProductMigration("name column", () => query(`ALTER TABLE \`${storageTable}\` ADD COLUMN name VARCHAR(160) NOT NULL DEFAULT 'Untitled Apparel' AFTER sku`));
     }
     if (!columns.has("brand")) {
       await safeProductMigration("brand column", () => query(`ALTER TABLE \`${storageTable}\` ADD COLUMN brand VARCHAR(120) NOT NULL DEFAULT 'Other' AFTER name`));
@@ -163,11 +168,23 @@ export async function ensureProductInventoryColumns() {
     if (!columns.has("color")) {
       await safeProductMigration("color column", () => query(`ALTER TABLE \`${storageTable}\` ADD COLUMN color VARCHAR(80) NOT NULL DEFAULT 'Other' AFTER size`));
     }
-    if (!columns.has("description")) {
-      await safeProductMigration("description column", () => query(`ALTER TABLE \`${storageTable}\` ADD COLUMN description TEXT NULL AFTER \`condition\``));
+    if (!columns.has("price")) {
+      await safeProductMigration("price column", () => query(`ALTER TABLE \`${storageTable}\` ADD COLUMN price DECIMAL(10,2) NOT NULL DEFAULT 0 AFTER color`));
+    }
+    if (!columns.has("stock")) {
+      await safeProductMigration("stock column", () => query(`ALTER TABLE \`${storageTable}\` ADD COLUMN stock INT NOT NULL DEFAULT 0 AFTER price`));
     }
     if (!columns.has("status")) {
       await safeProductMigration("status column", () => query(`ALTER TABLE \`${storageTable}\` ADD COLUMN status VARCHAR(20) NOT NULL DEFAULT 'In Stock' AFTER stock`));
+    }
+    if (!columns.has("image_url")) {
+      await safeProductMigration("image_url column", () => query(`ALTER TABLE \`${storageTable}\` ADD COLUMN image_url VARCHAR(255) NULL AFTER status`));
+    }
+    if (!columns.has("condition")) {
+      await safeProductMigration("condition column", () => query(`ALTER TABLE \`${storageTable}\` ADD COLUMN \`condition\` VARCHAR(120) NOT NULL DEFAULT 'Good' AFTER image_url`));
+    }
+    if (!columns.has("description")) {
+      await safeProductMigration("description column", () => query(`ALTER TABLE \`${storageTable}\` ADD COLUMN description TEXT NULL AFTER \`condition\``));
     }
     if (!columns.has("is_active")) {
       await safeProductMigration("is_active column", () => query(`ALTER TABLE \`${storageTable}\` ADD COLUMN is_active BOOLEAN NOT NULL DEFAULT TRUE AFTER description`));
@@ -201,7 +218,7 @@ export async function ensureProductInventoryColumns() {
       SET status = ${inventoryStatusSql("stock")},
           is_active = COALESCE(is_active, TRUE),
           is_deleted = COALESCE(is_deleted, FALSE),
-          sku = CASE WHEN sku IS NULL OR sku = '' THEN CONCAT('RETELA-', LPAD(id, 6, '0')) ELSE sku END,
+          sku = CASE WHEN sku IS NULL OR sku = '' OR sku = 'RETELA-000000' THEN CONCAT('RETELA-', LPAD(id, 6, '0')) ELSE sku END,
           deleted_at = CASE WHEN is_deleted = TRUE AND deleted_at IS NULL THEN NOW() ELSE deleted_at END`));
 
     const skuIndexes = await safeProductMigration("sku index inspection", () => query(
