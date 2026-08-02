@@ -5,7 +5,14 @@ import { Button } from "../ui";
 import { captureVideoFrame, compressImage, fileToImage } from "./imageTools";
 
 const idTypes = ["National ID", "Passport", "Driver's License", "PhilHealth ID", "UMID", "Postal ID", "PRC ID", "Voter's ID"];
-const stableDurationMs = 1000;
+const AUTO_CAPTURE_THRESHOLD = 90;
+const ID_AUTO_CAPTURE_STABILITY_MS = 400;
+const ID_CAPTURE_RETRY_LIMIT = 3;
+const ID_DETECTION_INTERVAL_MS = 160;
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
 
 function cameraErrorMessage(error) {
   if (error?.name === "NotAllowedError" || error?.name === "SecurityError") return "Camera permission denied. Allow camera access to capture your ID.";
@@ -53,6 +60,35 @@ function qualityMessage(metrics, movement) {
   return "";
 }
 
+function calculateIdQuality(metrics, movement) {
+  if (!metrics) return 0;
+  let score = 100;
+
+  if (metrics.averageBrightness < 62) score -= 45;
+  else if (metrics.averageBrightness < 82) score -= (82 - metrics.averageBrightness) * 0.9;
+  if (metrics.averageBrightness > 225) score -= 45;
+  else if (metrics.averageBrightness > 195) score -= (metrics.averageBrightness - 195) * 0.85;
+
+  if (metrics.glareRatio > 0.045) score -= 55;
+  else score -= metrics.glareRatio * 260;
+
+  if (metrics.edgeScore < 14) score -= 55;
+  else if (metrics.edgeScore < 18) score -= 28;
+  else if (metrics.edgeScore < 24) score -= (24 - metrics.edgeScore) * 3.2;
+
+  if (movement > 9) score -= 45;
+  else score -= movement * 2.4;
+
+  return clamp(Math.round(score), 0, 100);
+}
+
+function idStatusMessage(message, score) {
+  if (message) return message;
+  if (score >= AUTO_CAPTURE_THRESHOLD) return "ID ready. Capturing...";
+  if (score >= 70) return "Almost ready";
+  return "Place your ID inside the frame.";
+}
+
 async function analyzeStillFile(file) {
   const image = await fileToImage(file);
   const canvas = document.createElement("canvas");
@@ -68,20 +104,23 @@ export default function GovernmentIDStep({ data, onChange, onNext, onBack, loadi
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const loopRef = useRef(0);
+  const lastAnalyzeRef = useRef(0);
   const stoppedRef = useRef(false);
   const stableSinceRef = useRef(0);
   const lastEdgeRef = useRef(null);
   const capturedRef = useRef(false);
+  const idCaptureLockedRef = useRef(false);
+  const captureRetryRef = useRef(0);
   const [cameraOpen, setCameraOpen] = useState(false);
   const [status, setStatus] = useState("Camera Starting...");
-  const [quality, setQuality] = useState({ ok: false, message: "Place your ID inside the frame.", progress: 0 });
+  const [quality, setQuality] = useState({ ok: false, ready: false, message: "Place your ID inside the frame.", progress: 0, score: 0 });
   const [error, setError] = useState("");
   const [idNumberError, setIdNumberError] = useState("");
   const [idNumberChecking, setIdNumberChecking] = useState(false);
 
   const stopCamera = useCallback(() => {
     stoppedRef.current = true;
-    window.clearTimeout(loopRef.current);
+    window.cancelAnimationFrame(loopRef.current);
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
     if (videoRef.current) videoRef.current.srcObject = null;
@@ -113,9 +152,10 @@ export default function GovernmentIDStep({ data, onChange, onNext, onBack, loadi
   }, [data.idNumber]);
 
   const capture = useCallback(async (liveCapture = true) => {
-    if (!videoRef.current || capturedRef.current) return;
+    if (!videoRef.current || idCaptureLockedRef.current) return;
+    idCaptureLockedRef.current = true;
     capturedRef.current = true;
-    setStatus("Capturing...");
+    setStatus("ID ready. Capturing...");
     try {
       const raw = captureVideoFrame(videoRef.current, "government-id.jpg");
       const compressed = await compressImage(raw, 1800, 0.9);
@@ -129,16 +169,31 @@ export default function GovernmentIDStep({ data, onChange, onNext, onBack, loadi
       stopCamera();
       setStatus("ID captured");
     } catch (captureError) {
+      captureRetryRef.current += 1;
+      idCaptureLockedRef.current = false;
       capturedRef.current = false;
+      if (captureRetryRef.current <= ID_CAPTURE_RETRY_LIMIT) {
+        stableSinceRef.current = 0;
+        setStatus("Capture failed. Retrying...");
+        setQuality({ ok: false, ready: false, message: "Capture failed. Retrying...", progress: 0, score: 0 });
+        return;
+      }
       setError(captureError.message || "Capture failed. Please retake your ID.");
     }
   }, [data, onChange, stopCamera]);
 
-  const analyzeFrame = useCallback(() => {
-    if (stoppedRef.current || capturedRef.current) return;
+  const analyzeFrame = useCallback((timestamp = 0) => {
+    if (stoppedRef.current || capturedRef.current || idCaptureLockedRef.current) return;
+
+    if (timestamp - lastAnalyzeRef.current < ID_DETECTION_INTERVAL_MS) {
+      loopRef.current = window.requestAnimationFrame(analyzeFrame);
+      return;
+    }
+    lastAnalyzeRef.current = timestamp;
+
     const video = videoRef.current;
     if (!video || video.readyState < 2 || !video.videoWidth) {
-      loopRef.current = window.setTimeout(analyzeFrame, 220);
+      loopRef.current = window.requestAnimationFrame(analyzeFrame);
       return;
     }
 
@@ -160,34 +215,41 @@ export default function GovernmentIDStep({ data, onChange, onNext, onBack, loadi
     lastEdgeRef.current = metrics.edgeScore;
     const movement = previousEdge === null ? 0 : Math.abs(metrics.edgeScore - previousEdge);
     const message = qualityMessage(metrics, movement);
+    const score = calculateIdQuality(metrics, movement);
+    const nextStatus = idStatusMessage(message, score);
+    const idReady = score >= AUTO_CAPTURE_THRESHOLD && !message;
 
-    if (message) {
+    if (!idReady) {
       stableSinceRef.current = 0;
-      setQuality({ ok: false, message, progress: 0 });
-      setStatus(message);
+      setQuality({ ok: false, ready: false, message: nextStatus, progress: score / 100, score });
+      setStatus(nextStatus);
     } else {
-      const now = Date.now();
-      if (!stableSinceRef.current) stableSinceRef.current = now;
-      const progress = Math.min(1, (now - stableSinceRef.current) / stableDurationMs);
-      setQuality({ ok: progress >= 1, message: "Hold steady", progress });
-      setStatus(progress >= 1 ? "ID quality verified" : "Hold steady");
-      if (progress >= 1) {
+      if (!stableSinceRef.current) stableSinceRef.current = timestamp;
+      const stableFor = timestamp - stableSinceRef.current;
+      const stableComplete = stableFor >= ID_AUTO_CAPTURE_STABILITY_MS;
+      setQuality({ ok: stableComplete, ready: true, message: nextStatus, progress: score / 100, score });
+      setStatus(nextStatus);
+      if (stableComplete) {
         capture(true);
         return;
       }
     }
 
-    loopRef.current = window.setTimeout(analyzeFrame, 220);
+    loopRef.current = window.requestAnimationFrame(analyzeFrame);
   }, [capture]);
 
   const openCamera = useCallback(async () => {
     setError("");
     setStatus("Camera Starting...");
-    setQuality({ ok: false, message: "Place your ID inside the frame.", progress: 0 });
+    setQuality({ ok: false, ready: false, message: "Place your ID inside the frame.", progress: 0, score: 0 });
     stoppedRef.current = false;
     capturedRef.current = false;
+    idCaptureLockedRef.current = false;
+    captureRetryRef.current = 0;
     stableSinceRef.current = 0;
     lastEdgeRef.current = null;
+    lastAnalyzeRef.current = 0;
+    window.cancelAnimationFrame(loopRef.current);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
@@ -204,7 +266,7 @@ export default function GovernmentIDStep({ data, onChange, onNext, onBack, loadi
         await videoRef.current.play();
       }
       setStatus("Place your ID inside the frame.");
-      analyzeFrame();
+      loopRef.current = window.requestAnimationFrame(analyzeFrame);
     } catch (cameraError) {
       setError(cameraErrorMessage(cameraError));
       setStatus("Camera unavailable");
@@ -239,6 +301,8 @@ export default function GovernmentIDStep({ data, onChange, onNext, onBack, loadi
   function recapture() {
     if (data.idPreview) URL.revokeObjectURL(data.idPreview);
     onChange({ ...data, idImage: null, idPreview: "", idQualityVerified: false, idLiveCapture: false });
+    idCaptureLockedRef.current = false;
+    captureRetryRef.current = 0;
     openCamera();
   }
 
@@ -272,9 +336,9 @@ export default function GovernmentIDStep({ data, onChange, onNext, onBack, loadi
         {data.idPreview ? (
           <img src={data.idPreview} alt="Government ID preview" className="retela-id-preview" />
         ) : (
-          <div className="retela-id-camera-wrap">
+          <div className={`retela-id-camera-wrap ${quality.ready ? "retela-id-camera-ready" : ""}`}>
             <video ref={videoRef} autoPlay playsInline muted className="retela-camera-preview" aria-label="Live government ID camera" />
-            <div className="retela-id-outline" aria-hidden="true">
+            <div className={`retela-id-outline ${quality.ready ? "retela-id-outline-ready" : ""}`} aria-hidden="true">
               <span />
             </div>
           </div>
@@ -283,7 +347,7 @@ export default function GovernmentIDStep({ data, onChange, onNext, onBack, loadi
         <div className={`retela-live-status ${data.idQualityVerified ? "retela-live-status-ok" : ""}`} role="status" aria-live="polite">
           {cameraOpen && !data.idPreview ? <Loader2 className="animate-spin" size={16} /> : data.idQualityVerified ? <CheckCircle2 size={17} /> : <Camera size={17} />}
           <span>{data.idQualityVerified ? "Government ID verified" : status}</span>
-          {!data.idQualityVerified && quality.progress ? <strong>{Math.round(quality.progress * 100)}%</strong> : null}
+          {!data.idQualityVerified && quality.score ? <strong>{quality.score}%</strong> : null}
         </div>
 
         <div className="flex flex-wrap gap-2">

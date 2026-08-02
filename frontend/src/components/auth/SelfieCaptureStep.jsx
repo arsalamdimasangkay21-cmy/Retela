@@ -5,8 +5,8 @@ import { captureVideoFrame, compressImage } from "./imageTools";
 
 const MODEL_URL = "/models/face-api";
 const DETECTION_INTERVAL_MS = 50;
-const STABLE_CAPTURE_MS = 1500;
-const COUNTDOWN_SECONDS = 3;
+const AUTO_CAPTURE_THRESHOLD = 90;
+const AUTO_CAPTURE_STABILITY_MS = 400;
 const CAMERA_RESTART_LIMIT = 1;
 const FACE_DISTANCE_MIN = 0.23;
 const FACE_DISTANCE_MAX = 0.58;
@@ -381,12 +381,12 @@ export default function SelfieCaptureStep({ selfie, selfiePreview, livenessVerif
   const detectionLoopActiveRef = useRef(false);
   const stoppedRef = useRef(false);
   const captureLockRef = useRef(false);
+  const captureRetryRef = useRef(0);
   const successLockRef = useRef(false);
   const restartAttemptsRef = useRef(0);
   const stabilityStartRef = useRef(0);
-  const countdownTimerRef = useRef(0);
-  const countdownActiveRef = useRef(false);
-  const countdownValueRef = useRef(0);
+  const autoCaptureTimerRef = useRef(0);
+  const autoCaptureActiveRef = useRef(false);
   const successTimerRef = useRef(0);
   const previousFrameRef = useRef(null);
   const latestConfidenceRef = useRef(0);
@@ -398,7 +398,6 @@ export default function SelfieCaptureStep({ selfie, selfiePreview, livenessVerif
     phase: hasVerifiedPreview ? "success" : "starting",
     instruction: hasVerifiedPreview ? "Verification Successful" : selfiePreview ? "Recapture your selfie" : "Starting camera",
     guideState: hasVerifiedPreview ? "success" : selfiePreview ? "warn" : "scanning",
-    countdown: 0,
     confidence: 0,
     busy: !selfiePreview,
     error: "",
@@ -413,11 +412,10 @@ export default function SelfieCaptureStep({ selfie, selfiePreview, livenessVerif
     });
   }, []);
 
-  const clearCountdown = useCallback(() => {
-    window.clearTimeout(countdownTimerRef.current);
-    countdownTimerRef.current = 0;
-    countdownActiveRef.current = false;
-    countdownValueRef.current = 0;
+  const clearAutoCapture = useCallback(() => {
+    window.clearTimeout(autoCaptureTimerRef.current);
+    autoCaptureTimerRef.current = 0;
+    autoCaptureActiveRef.current = false;
   }, []);
 
   const releaseCameraStream = useCallback(() => {
@@ -432,21 +430,20 @@ export default function SelfieCaptureStep({ selfie, selfiePreview, livenessVerif
     detectionLoopActiveRef.current = false;
     window.cancelAnimationFrame(animationRef.current);
     animationRef.current = 0;
-    clearCountdown();
+    clearAutoCapture();
     window.clearTimeout(successTimerRef.current);
     releaseCameraStream();
-  }, [clearCountdown, releaseCameraStream]);
+  }, [clearAutoCapture, releaseCameraStream]);
 
   const captureSelfie = useCallback(async (finalConfidence = latestConfidenceRef.current) => {
-    // The capture lock prevents the countdown, a late frame, or StrictMode from submitting twice.
+    // The capture lock prevents the auto-capture timer, a late frame, or StrictMode from submitting twice.
     if (!videoRef.current || captureLockRef.current) return;
     captureLockRef.current = true;
-    clearCountdown();
+    clearAutoCapture();
     publishUi({
       phase: "verifying",
-      instruction: "Verifying your face...",
+      instruction: "Blink detected. Capturing...",
       guideState: "ready",
-      countdown: 0,
       busy: true,
       error: "",
       restartable: false
@@ -477,6 +474,18 @@ export default function SelfieCaptureStep({ selfie, selfiePreview, livenessVerif
       }
     } catch (error) {
       captureLockRef.current = false;
+      captureRetryRef.current += 1;
+      if (captureRetryRef.current <= 3) {
+        publishUi({
+          phase: "scanning",
+          instruction: "Capture failed. Retrying...",
+          guideState: "warn",
+          busy: false,
+          error: "",
+          restartable: false
+        });
+        return;
+      }
       publishUi({
         phase: "error",
         instruction: "We could not verify your identity. Please try again.",
@@ -486,35 +495,22 @@ export default function SelfieCaptureStep({ selfie, selfiePreview, livenessVerif
         restartable: true
       });
     }
-  }, [clearCountdown, onCaptured, onNext, publishUi, stopCamera]);
+  }, [clearAutoCapture, onCaptured, onNext, publishUi, stopCamera]);
 
-  const startCountdown = useCallback(() => {
-    if (countdownActiveRef.current || captureLockRef.current) return;
-    countdownActiveRef.current = true;
-    countdownValueRef.current = COUNTDOWN_SECONDS;
-    publishUi({ countdown: COUNTDOWN_SECONDS, instruction: "Hold still", guideState: "ready" });
-
-    const tick = () => {
-      countdownTimerRef.current = window.setTimeout(() => {
-        if (!countdownActiveRef.current || captureLockRef.current) return;
-        countdownValueRef.current -= 1;
-        if (countdownValueRef.current <= 0) {
-          publishUi({ countdown: 0 });
-          captureSelfie(latestConfidenceRef.current);
-          return;
-        }
-        publishUi({ countdown: countdownValueRef.current, instruction: "Hold still", guideState: "ready" });
-        tick();
-      }, 1000);
-    };
-
-    tick();
+  const beginImmediateAutoCapture = useCallback(() => {
+    if (autoCaptureActiveRef.current || captureLockRef.current) return;
+    autoCaptureActiveRef.current = true;
+    publishUi({ instruction: "Blink detected. Capturing...", guideState: "ready" });
+    autoCaptureTimerRef.current = window.setTimeout(() => {
+      if (!autoCaptureActiveRef.current || captureLockRef.current) return;
+      captureSelfie(latestConfidenceRef.current);
+    }, AUTO_CAPTURE_STABILITY_MS);
   }, [captureSelfie, publishUi]);
 
   const cancelReadyState = useCallback(() => {
     stabilityStartRef.current = 0;
-    clearCountdown();
-  }, [clearCountdown]);
+    clearAutoCapture();
+  }, [clearAutoCapture]);
 
   const startDetectionLoop = useCallback(() => {
     if (detectionLoopActiveRef.current || captureLockRef.current || selfiePreview) return;
@@ -562,10 +558,11 @@ export default function SelfieCaptureStep({ selfie, selfiePreview, livenessVerif
     stoppedRef.current = true;
     detectionLoopActiveRef.current = false;
     window.cancelAnimationFrame(animationRef.current);
-    clearCountdown();
+    clearAutoCapture();
     releaseCameraStream();
     stoppedRef.current = false;
     captureLockRef.current = false;
+    captureRetryRef.current = 0;
     successLockRef.current = false;
     previousFrameRef.current = null;
     latestConfidenceRef.current = 0;
@@ -575,7 +572,6 @@ export default function SelfieCaptureStep({ selfie, selfiePreview, livenessVerif
       phase: "starting",
       instruction: "Starting camera",
       guideState: "scanning",
-      countdown: 0,
       confidence: 0,
       busy: true,
       error: "",
@@ -611,7 +607,7 @@ export default function SelfieCaptureStep({ selfie, selfiePreview, livenessVerif
         restartable: true
       });
     }
-  }, [clearCountdown, handleTrackEnded, livenessVerified, publishUi, releaseCameraStream, startDetectionLoop]);
+  }, [clearAutoCapture, handleTrackEnded, livenessVerified, publishUi, releaseCameraStream, startDetectionLoop]);
 
   openCameraRef.current = openCamera;
 
@@ -647,9 +643,11 @@ export default function SelfieCaptureStep({ selfie, selfiePreview, livenessVerif
         previousFrameRef.current = quality;
         latestConfidenceRef.current = quality.score;
         const metrics = getFrameMetrics(video, metricsCanvasRef.current);
+        const selfieQuality = Math.round(quality.score * 100);
+        const qualityReady = selfieQuality >= AUTO_CAPTURE_THRESHOLD;
 
-        let next = { phase: "scanning", instruction: "Ready", guideState: "ready", confidence: Math.round(quality.score * 100), error: "", debug: import.meta.env.DEV ? blinkRef.current.lastDebug : null };
-        let validForCountdown = false;
+        let next = { phase: "scanning", instruction: "Ready", guideState: "ready", confidence: selfieQuality, error: "", debug: import.meta.env.DEV ? blinkRef.current.lastDebug : null };
+        let selfieReady = false;
         let shouldResetBlink = false;
 
         // Guide validation follows the same priority as the single live instruction text.
@@ -683,6 +681,8 @@ export default function SelfieCaptureStep({ selfie, selfiePreview, livenessVerif
         } else if (metrics.blurScore < MIN_BLUR_SCORE || quality.movement > 0.38) {
           shouldResetBlink = true;
           next = { ...next, instruction: "Hold still", guideState: "warn" };
+        } else if (!qualityReady) {
+          next = { ...next, instruction: selfieQuality >= 70 ? "Almost ready" : "Hold still", guideState: "scanning" };
         } else {
           const blinkResult = livenessVerified
             ? { detected: true, instruction: "Blink detected", state: BLINK_STATES.BLINK_CONFIRMED }
@@ -692,10 +692,10 @@ export default function SelfieCaptureStep({ selfie, selfiePreview, livenessVerif
           if (!blinkResult.detected) {
             next = { ...next, instruction: blinkResult.instruction, guideState: blinkResult.state === BLINK_STATES.CALIBRATING ? "scanning" : "warn", debug: blinkDebugValue };
           } else {
-            validForCountdown = true;
+            selfieReady = true;
             next = {
               ...next,
-              instruction: stabilityStartRef.current ? "Hold still" : "Blink detected",
+              instruction: "Blink detected. Capturing...",
               guideState: "ready",
               debug: blinkDebugValue
             };
@@ -707,18 +707,14 @@ export default function SelfieCaptureStep({ selfie, selfiePreview, livenessVerif
           next = { ...next, debug: import.meta.env.DEV ? blinkRef.current.lastDebug : null };
         }
 
-        if (!validForCountdown) {
+        if (!selfieReady) {
           cancelReadyState();
-          publishUi({ ...next, countdown: 0 });
+          publishUi(next);
           return;
         }
 
-        if (!stabilityStartRef.current) stabilityStartRef.current = timestamp;
         publishUi(next);
-
-        if (timestamp - stabilityStartRef.current >= STABLE_CAPTURE_MS) {
-          startCountdown();
-        }
+        beginImmediateAutoCapture();
       } catch (error) {
         cancelReadyState();
         publishUi({
@@ -731,7 +727,7 @@ export default function SelfieCaptureStep({ selfie, selfiePreview, livenessVerif
         });
       }
     };
-  }, [cancelReadyState, livenessVerified, publishUi, selfiePreview, startCountdown]);
+  }, [beginImmediateAutoCapture, cancelReadyState, livenessVerified, publishUi, selfiePreview]);
 
   useEffect(() => {
     if (!selfiePreview) openCamera();
@@ -802,7 +798,6 @@ export default function SelfieCaptureStep({ selfie, selfiePreview, livenessVerif
               <video ref={videoRef} autoPlay playsInline muted className="retela-camera-preview retela-camera-preview-live" aria-label="Live selfie camera" />
             )}
             <div className={`retela-faceid-guide is-${ui.guideState}`} aria-hidden="true">
-              {ui.countdown ? <span className="retela-faceid-countdown">{ui.countdown}</span> : null}
               {showSuccess ? (
                 <span className="retela-faceid-success-check">
                   <Check size={52} />

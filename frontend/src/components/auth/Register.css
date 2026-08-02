@@ -272,6 +272,19 @@
   border-radius: 0.85rem;
   box-shadow: 0 0 0 999px rgba(15, 23, 42, 0.38), inset 0 0 0 1px rgba(34, 197, 94, 0.6);
   pointer-events: none;
+  transition: border-color 220ms ease, box-shadow 220ms ease;
+}
+
+.retela-id-outline-ready {
+  border-color: #22c55e;
+  box-shadow: 0 0 0 999px rgba(15, 23, 42, 0.34), 0 0 32px rgba(34, 197, 94, 0.56), inset 0 0 0 1px rgba(34, 197, 94, 0.85);
+}
+
+.retela-id-outline-ready::before,
+.retela-id-outline-ready::after,
+.retela-id-outline-ready span::before,
+.retela-id-outline-ready span::after {
+  border-color: #22c55e;
 }
 
 .retela-id-outline::before,
