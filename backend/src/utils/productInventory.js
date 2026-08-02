@@ -46,7 +46,7 @@ export function inventoryStatusSql(stockExpression = "stock") {
   END`;
 }
 
-async function getProductStorageTable() {
+export async function getProductStorageTable() {
   const rows = await query(
     `SELECT TABLE_NAME, TABLE_TYPE
      FROM INFORMATION_SCHEMA.TABLES
@@ -58,6 +58,11 @@ async function getProductStorageTable() {
   const apparelTable = rows.find((row) => row.TABLE_NAME === "apparel_items" && row.TABLE_TYPE === "BASE TABLE");
   if (apparelTable) return "apparel_items";
   return "products";
+}
+
+export async function productWriteTable() {
+  await ensureProductInventoryColumns();
+  return getProductStorageTable();
 }
 
 async function ensureProductsViewIncludesSku(storageTable) {

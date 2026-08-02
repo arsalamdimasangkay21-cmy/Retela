@@ -12,7 +12,8 @@ import {
   normalizeProductMatchValue,
   nonDeletedProductWhere,
   productSkuForId,
-  productStatusForStock
+  productStatusForStock,
+  productWriteTable
 } from "../utils/productInventory.js";
 
 const router = Router();
@@ -42,14 +43,19 @@ function normalizeColor(color) {
 }
 
 function normalizeProductInput(input) {
+  const conditionValue = input.condition ?? input.condition_name ?? input.condition_id;
+  const stockValue = input.stock ?? input.quantity;
+  const activeValue = input.is_active ?? input.active;
   return {
     ...input,
+    stock: stockValue,
+    is_active: activeValue,
     brand: normalizeBrand(input.brand),
     category: normalizeCategory(input.category),
     gender: String(input.gender || "").trim().replace(/\s+/g, " ") || "Other",
     size: normalizeSize(input.size),
     color: normalizeColor(input.color),
-    condition: String(input.condition || "").trim().replace(/\s+/g, " ") || "Good"
+    condition: String(conditionValue || "").trim().replace(/\s+/g, " ") || "Good"
   };
 }
 
@@ -66,6 +72,22 @@ const productSchema = z.object({
   description: z.string().trim().max(1200).optional().default(""),
   image_url: z.string().optional().nullable()
 });
+
+function isDuplicateSkuError(error) {
+  const message = String(error?.sqlMessage || error?.message || "").toLowerCase();
+  return error?.code === "ER_DUP_ENTRY" && message.includes("sku");
+}
+
+function productCreateError(error) {
+  if (isDuplicateSkuError(error)) {
+    return new HttpError(409, "A product with this SKU already exists");
+  }
+  if (error?.name === "ZodError") return error;
+  if (["ER_BAD_NULL_ERROR", "ER_TRUNCATED_WRONG_VALUE", "ER_WARN_DATA_OUT_OF_RANGE", "WARN_DATA_TRUNCATED"].includes(error?.code)) {
+    return new HttpError(400, "Invalid product details. Please check the form and try again.");
+  }
+  return error;
+}
 
 function duplicateSignature(product) {
   return [
@@ -250,64 +272,70 @@ router.get("/filters", requireAuth, requireApproved, asyncHandler(async (req, re
 }));
 
 router.post("/", requireAuth, requireRole("admin"), upload.single("image"), asyncHandler(async (req, res) => {
-  await ensureProductInventoryColumns();
-  const input = normalizeProductInput(productSchema.parse({ ...req.body, image_url: req.file ? `/uploads/${req.file.filename}` : req.body.image_url }));
-  await ensureProductOptionValues(input);
-  const duplicate = await findDuplicateActiveProduct(input);
+  try {
+    const table = await productWriteTable();
+    const rawInput = normalizeProductInput({ ...req.body, image_url: req.file ? `/uploads/${req.file.filename}` : req.body.image_url });
+    const input = productSchema.parse(rawInput);
+    await ensureProductOptionValues(input);
+    const duplicate = await findDuplicateActiveProduct(input);
 
-  if (duplicate) {
-    const nextStock = Number(duplicate.stock || 0) + Number(input.stock || 0);
-    const nextStatus = productStatusForStock(nextStock);
-    await query(
-      `UPDATE products
-       SET stock = :stock,
-           status = :status,
-           updated_at = NOW(),
-           image_url = CASE WHEN (image_url IS NULL OR image_url = '') AND :imageUrl <> '' THEN :imageUrl ELSE image_url END,
-           description = CASE WHEN (description IS NULL OR description = '') AND :description <> '' THEN :description ELSE description END
-       WHERE id = :id`,
-      {
+    if (duplicate) {
+      const nextStock = Number(duplicate.stock || 0) + Number(input.stock || 0);
+      const nextStatus = productStatusForStock(nextStock);
+      await query(
+        `UPDATE \`${table}\`
+         SET stock = :stock,
+             status = :status,
+             updated_at = NOW(),
+             image_url = CASE WHEN (image_url IS NULL OR image_url = '') AND :imageUrl <> '' THEN :imageUrl ELSE image_url END,
+             description = CASE WHEN (description IS NULL OR description = '') AND :description <> '' THEN :description ELSE description END
+         WHERE id = :id`,
+        {
+          id: duplicate.id,
+          stock: nextStock,
+          status: nextStatus,
+          imageUrl: input.image_url || "",
+          description: input.description || ""
+        }
+      );
+      const [merged] = await query(`SELECT *, ${inventoryStatusSql("stock")} AS computed_status FROM products WHERE id = :id LIMIT 1`, { id: duplicate.id });
+      req.app.get("io")?.emit("inventory:update", { type: "inventory", action: "stock", id: duplicate.id, stock: nextStock, status: nextStatus });
+      return res.status(200).json({
         id: duplicate.id,
-        stock: nextStock,
-        status: nextStatus,
-        imageUrl: input.image_url || "",
-        description: input.description || ""
-      }
-    );
-    const [merged] = await query(`SELECT *, ${inventoryStatusSql("stock")} AS computed_status FROM products WHERE id = :id LIMIT 1`, { id: duplicate.id });
-    req.app.get("io")?.emit("inventory:update", { type: "inventory", action: "stock", id: duplicate.id, stock: nextStock, status: nextStatus });
-    return res.status(200).json({
-      id: duplicate.id,
-      merged: true,
-      message: "Existing apparel item found. Stock combined successfully.",
-      product: { ...merged, status: merged.computed_status || merged.status || productStatusForStock(merged.stock) }
-    });
-  }
+        product_id: duplicate.id,
+        merged: true,
+        message: "Existing apparel item found. Stock combined successfully.",
+        product: { ...merged, product_id: merged.id, status: merged.computed_status || merged.status || productStatusForStock(merged.stock) }
+      });
+    }
 
-  const status = productStatusForStock(input.stock);
-  const result = await query(
-    `INSERT INTO products (name, brand, category, gender, size, color, price, stock, status, image_url, \`condition\`, description, is_active, is_deleted, deleted_at, deleted_by)
-     VALUES (:name, :brand, :category, :gender, :size, :color, :price, :stock, :status, :image_url, :condition, :description, TRUE, FALSE, NULL, NULL)`,
-    { ...input, status }
-  );
-  const sku = productSkuForId(result.insertId);
-  await query("UPDATE products SET sku = :sku WHERE id = :id", { id: result.insertId, sku });
-  const [created] = await query(`SELECT *, ${inventoryStatusSql("stock")} AS computed_status FROM products WHERE id = :id LIMIT 1`, { id: result.insertId });
-  const product = { ...created, status: created.computed_status || created.status || productStatusForStock(created.stock) };
-  await query("INSERT INTO notifications (type, title, body, product_id) VALUES ('new_product', 'New apparel posted!', 'View now...', :id)", { id: product.id });
-  req.app.get("io")?.emit("product:new", product);
-  req.app.get("io")?.emit("notification:new", { type: "new_product", title: "New apparel posted!", body: "View now...", product });
-  res.status(201).json(product);
+    const status = productStatusForStock(input.stock);
+    const result = await query(
+      `INSERT INTO \`${table}\` (name, brand, category, gender, size, color, price, stock, status, image_url, \`condition\`, description, is_active, is_deleted, deleted_at, deleted_by)
+       VALUES (:name, :brand, :category, :gender, :size, :color, :price, :stock, :status, :image_url, :condition, :description, TRUE, FALSE, NULL, NULL)`,
+      { ...input, status }
+    );
+    const sku = productSkuForId(result.insertId);
+    await query(`UPDATE \`${table}\` SET sku = :sku WHERE id = :id`, { id: result.insertId, sku });
+    const [created] = await query(`SELECT *, ${inventoryStatusSql("stock")} AS computed_status FROM products WHERE id = :id LIMIT 1`, { id: result.insertId });
+    const product = { ...created, product_id: created.id, status: created.computed_status || created.status || productStatusForStock(created.stock) };
+    await query("INSERT INTO notifications (type, title, body, product_id) VALUES ('new_product', 'New apparel posted!', 'View now...', :id)", { id: product.id });
+    req.app.get("io")?.emit("product:new", product);
+    req.app.get("io")?.emit("notification:new", { type: "new_product", title: "New apparel posted!", body: "View now...", product });
+    return res.status(201).json(product);
+  } catch (error) {
+    throw productCreateError(error);
+  }
 }));
 
 router.put("/:id", requireAuth, requireRole("admin"), upload.single("image"), asyncHandler(async (req, res) => {
-  await ensureProductInventoryColumns();
+  const table = await productWriteTable();
   const productId = parseProductId(req.params.id);
-  const input = normalizeProductInput(productSchema.parse({ ...req.body, image_url: req.file ? `/uploads/${req.file.filename}` : req.body.image_url }));
+  const input = productSchema.parse(normalizeProductInput({ ...req.body, image_url: req.file ? `/uploads/${req.file.filename}` : req.body.image_url }));
   await ensureProductOptionValues(input);
   const status = productStatusForStock(input.stock);
   await query(
-    `UPDATE products SET name=:name, brand=:brand, category=:category, gender=:gender, size=:size, color=:color, price=:price,
+    `UPDATE \`${table}\` SET name=:name, brand=:brand, category=:category, gender=:gender, size=:size, color=:color, price=:price,
      stock=:stock, status=:status, image_url=:image_url, \`condition\`=:condition, description=:description WHERE id=:id AND ${nonDeletedProductWhere()}`,
     { ...input, status, id: productId }
   );
@@ -318,7 +346,7 @@ router.put("/:id", requireAuth, requireRole("admin"), upload.single("image"), as
 }));
 
 router.patch("/:id/stock", requireAuth, requireRole("admin"), asyncHandler(async (req, res) => {
-  await ensureProductInventoryColumns();
+  const table = await productWriteTable();
   const productId = parseProductId(req.params.id);
   const schema = z.object({
     delta: z.coerce.number().int().optional(),
@@ -329,7 +357,7 @@ router.patch("/:id/stock", requireAuth, requireRole("admin"), asyncHandler(async
   if (!products.length) throw new HttpError(404, "Apparel item not found");
   const nextStock = input.stock !== undefined ? input.stock : Math.max(0, Number(products[0].stock) + input.delta);
   const nextStatus = productStatusForStock(nextStock);
-  await query("UPDATE products SET stock = :stock, status = :status, updated_at = NOW() WHERE id = :id", { id: productId, stock: nextStock, status: nextStatus });
+  await query(`UPDATE \`${table}\` SET stock = :stock, status = :status, updated_at = NOW() WHERE id = :id`, { id: productId, stock: nextStock, status: nextStatus });
   if (nextStock > 0 && nextStock <= 5) {
     await query(
       "INSERT INTO notifications (type, title, body, product_id) VALUES ('inventory', 'Low stock alert', :body, :id)",
@@ -344,12 +372,12 @@ router.patch("/:id/stock", requireAuth, requireRole("admin"), asyncHandler(async
 }));
 
 router.delete("/:id", requireAuth, requireRole("admin"), asyncHandler(async (req, res) => {
-  await ensureProductInventoryColumns();
+  const table = await productWriteTable();
   const productId = parseProductId(req.params.id);
   const existing = await query("SELECT id FROM products WHERE id = :id AND is_deleted = FALSE", { id: productId });
   if (!existing.length) throw new HttpError(404, "Apparel item not found");
   await query(
-    `UPDATE products
+    `UPDATE \`${table}\`
      SET is_deleted = TRUE,
          deleted_at = NOW(),
          deleted_by = :deletedBy,
@@ -362,13 +390,13 @@ router.delete("/:id", requireAuth, requireRole("admin"), asyncHandler(async (req
 }));
 
 router.patch("/:id/restore", requireAuth, requireRole("admin"), asyncHandler(async (req, res) => {
-  await ensureProductInventoryColumns();
+  const table = await productWriteTable();
   const productId = parseProductId(req.params.id);
   const rows = await query("SELECT id, stock FROM products WHERE id = :id LIMIT 1", { id: productId });
   if (!rows.length) throw new HttpError(404, "Apparel item not found");
   const restoredStatus = productStatusForStock(rows[0].stock);
   await query(
-    `UPDATE products
+    `UPDATE \`${table}\`
      SET is_deleted = FALSE,
          deleted_at = NULL,
          deleted_by = NULL,
@@ -382,9 +410,9 @@ router.patch("/:id/restore", requireAuth, requireRole("admin"), asyncHandler(asy
 }));
 
 router.delete("/:id/permanent", requireAuth, requireRole("admin"), asyncHandler(async (req, res) => {
-  await ensureProductInventoryColumns();
+  const table = await productWriteTable();
   const productId = parseProductId(req.params.id);
-  const result = await query("DELETE FROM products WHERE id = :id AND is_deleted = TRUE", { id: productId });
+  const result = await query(`DELETE FROM \`${table}\` WHERE id = :id AND is_deleted = TRUE`, { id: productId });
   if (!result.affectedRows) throw new HttpError(404, "Apparel item not found in trash");
   req.app.get("io")?.emit("inventory:update", { type: "inventory", action: "deleted", id: productId });
   res.json({ message: "Apparel item permanently deleted", id: productId });

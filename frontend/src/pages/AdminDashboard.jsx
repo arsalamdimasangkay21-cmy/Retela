@@ -5,7 +5,7 @@ import { Bar, Doughnut, Line, Pie } from "react-chartjs-2";
 import { Chart as ChartJS, ArcElement, BarElement, CategoryScale, Filler, LinearScale, LineElement, PointElement, Tooltip, Legend } from "chart.js";
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip as RechartsTooltip, XAxis, YAxis } from "recharts";
 import { Activity, Archive, Barcode, Bot, Check, ChevronLeft, ChevronRight, Download, Edit3, Eye, FileSpreadsheet, Loader2, MapPin, Megaphone, MessageSquare, MoreHorizontal, PackageCheck, PackagePlus, Plus, Printer, ReceiptText, RotateCcw, Save, Search, Send, Shirt, ShoppingBag, SlidersHorizontal, Sparkles, Star, Tags, Trash2, TrendingUp, Upload, WalletCards, X, Zap } from "lucide-react";
-import { api, API_URL, cachedGet, clearGetCache } from "../api/client";
+import { api, API_URL, cachedGet, clearGetCache, getApiErrorMessage } from "../api/client";
 import { createApparelOption, fetchApparelOptions } from "../api/apparelOptions";
 import { ChangePasswordForm } from "../components/ChangePasswordForm";
 import CustomerDocumentsModal from "../components/CustomerDocumentsModal";
@@ -90,7 +90,16 @@ function optionExists(options = [], name) {
 
 function resolveProductId(productOrId) {
   if (productOrId && typeof productOrId === "object") {
-    return productOrId.id ?? productOrId.product_id ?? productOrId.productId ?? productOrId.apparel_id ?? null;
+    return productOrId.id
+      ?? productOrId.ID
+      ?? productOrId.product_id
+      ?? productOrId.productId
+      ?? productOrId.apparel_id
+      ?? productOrId.apparelId
+      ?? productOrId.apparel_item_id
+      ?? productOrId.apparelItemId
+      ?? productOrId.item_id
+      ?? null;
   }
   return productOrId;
 }
@@ -100,6 +109,10 @@ function validProductId(productOrId) {
   if (String(rawId).startsWith("sample-")) return rawId;
   const productId = Number(rawId);
   return Number.isInteger(productId) && productId > 0 ? productId : null;
+}
+
+function deleteDisabledReason(product) {
+  return validProductId(product) ? "" : "Cannot delete this item because the backend response did not include a valid product ID.";
 }
 
 function duplicateOptionMessage(label) {
@@ -315,21 +328,25 @@ export default function AdminDashboard({ active, onChange }) {
 
   async function saveProduct(event, resolvedForm = form) {
     event.preventDefault();
-    const payload = new FormData();
-    Object.entries(resolvedForm).forEach(([key, value]) => payload.append(key, value ?? ""));
-    if (productImage) payload.append("image", productImage);
-    let response;
-    if (editingProductId) {
-      response = await api.put(`/products/${editingProductId}`, payload, { headers: { "Content-Type": "multipart/form-data" } });
-    } else {
-      response = await api.post("/products", payload, { headers: { "Content-Type": "multipart/form-data" } });
+    try {
+      const payload = new FormData();
+      Object.entries(resolvedForm).forEach(([key, value]) => payload.append(key, value ?? ""));
+      if (productImage) payload.append("image", productImage);
+      let response;
+      if (editingProductId) {
+        response = await api.put(`/products/${editingProductId}`, payload, { headers: { "Content-Type": "multipart/form-data" } });
+      } else {
+        response = await api.post("/products", payload, { headers: { "Content-Type": "multipart/form-data" } });
+      }
+      setForm(blankProduct);
+      setProductImage(null);
+      setEditingProductId(null);
+      setInventoryModalOpen(false);
+      await refreshProductLists();
+      showProductToast(response?.data?.message || (editingProductId ? "Apparel item updated successfully." : "Apparel item saved successfully."));
+    } catch (error) {
+      showProductToast(getApiErrorMessage(error, "Could not save this apparel item."), "error");
     }
-    setForm(blankProduct);
-    setProductImage(null);
-    setEditingProductId(null);
-    setInventoryModalOpen(false);
-    await refreshProductLists();
-    showProductToast(response?.data?.message || (editingProductId ? "Apparel item updated successfully." : "Apparel item saved successfully."));
   }
 
   function editProduct(product) {
@@ -360,9 +377,13 @@ export default function AdminDashboard({ active, onChange }) {
       showProductToast("Cannot delete apparel item because its product ID is missing.", "error");
       return;
     }
-    await api.delete(`/products/${productId}`);
-    await refreshProductLists();
-    showProductToast("Apparel item moved to Trash Bin.");
+    try {
+      await api.delete(`/products/${productId}`);
+      await refreshProductLists();
+      showProductToast("Apparel item moved to Trash Bin.");
+    } catch (error) {
+      showProductToast(getApiErrorMessage(error, "Could not delete this apparel item."), "error");
+    }
   }
 
   async function updateStock(id, change) {
@@ -1054,7 +1075,7 @@ function PremiumInventoryPage({
                           <InventoryActionButton tone="more" icon={MoreHorizontal} onClick={() => onUpdateStock(product.id, Number(product.stock) <= 0 ? 1 : -1)}>
                             More
                           </InventoryActionButton>
-                          <InventoryActionButton tone="delete" icon={Trash2} disabled={!validProductId(product)} onClick={() => onDelete(product)}>
+                          <InventoryActionButton tone="delete" icon={Trash2} disabled={!validProductId(product)} title={deleteDisabledReason(product)} onClick={() => onDelete(product)}>
                             Delete
                           </InventoryActionButton>
                         </div>
@@ -1095,7 +1116,7 @@ function PremiumInventoryPage({
                   <div className="mt-3 flex flex-wrap gap-2">
                     <InventoryActionButton tone="edit" icon={Edit3} onClick={() => onEdit(product)}>Edit</InventoryActionButton>
                     <InventoryActionButton tone="more" icon={MoreHorizontal} onClick={() => onUpdateStock(product.id, Number(product.stock) <= 0 ? 1 : -1)}>More</InventoryActionButton>
-                    <InventoryActionButton tone="delete" icon={Trash2} disabled={!validProductId(product)} onClick={() => onDelete(product)}>Delete</InventoryActionButton>
+                    <InventoryActionButton tone="delete" icon={Trash2} disabled={!validProductId(product)} title={deleteDisabledReason(product)} onClick={() => onDelete(product)}>Delete</InventoryActionButton>
                   </div>
                 </article>
               ))}
@@ -1193,14 +1214,14 @@ function InventoryStatusBadge({ stock, status }) {
   return <span className={`inline-flex rounded-full border px-3 py-1 text-xs font-bold ${styles[badgeStatus]}`}>{badgeStatus}</span>;
 }
 
-function InventoryActionButton({ tone, icon: Icon, children, onClick, disabled = false }) {
+function InventoryActionButton({ tone, icon: Icon, children, onClick, disabled = false, title = "" }) {
   const styles = {
     edit: "border-[#60A5FA] bg-[#DBEAFE] text-[#1D4ED8] hover:border-[#2563EB]",
     more: "border-[#D1D5DB] bg-[#F3F4F6] text-[#374151] hover:border-[#9CA3AF]",
     delete: "border-[#F87171] bg-[#FEE2E2] text-[#B91C1C] hover:border-[#DC2626]"
   };
   return (
-    <button type="button" disabled={disabled} onClick={onClick} className={`inline-flex h-10 items-center justify-center gap-2 rounded-[10px] border px-4 py-2 text-sm font-semibold shadow-sm transition duration-200 hover:-translate-y-0.5 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-45 ${styles[tone] || styles.more}`}>
+    <button type="button" disabled={disabled} title={title} onClick={onClick} className={`inline-flex h-10 items-center justify-center gap-2 rounded-[10px] border px-4 py-2 text-sm font-semibold shadow-sm transition duration-200 hover:-translate-y-0.5 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-45 ${styles[tone] || styles.more}`}>
       {Icon ? <Icon size={16} /> : null}
       {children}
     </button>
@@ -2880,7 +2901,7 @@ function ProductGallery({ products, filters, setFilters, optionValues, onAdd, on
                   <Edit3 size={14} />
                   Edit
                 </button>
-                <button type="button" disabled={!validProductId(p)} onClick={() => onDelete?.(p)} className="inline-flex items-center justify-center gap-1 rounded-xl border border-white/10 bg-white/[0.06] px-3 py-2 text-xs font-bold text-white/72 transition hover:border-rose-400/40 hover:text-rose-300 disabled:cursor-not-allowed disabled:opacity-45">
+                <button type="button" disabled={!validProductId(p)} title={deleteDisabledReason(p)} onClick={() => onDelete?.(p)} className="inline-flex items-center justify-center gap-1 rounded-xl border border-white/10 bg-white/[0.06] px-3 py-2 text-xs font-bold text-white/72 transition hover:border-rose-400/40 hover:text-rose-300 disabled:cursor-not-allowed disabled:opacity-45">
                   <Trash2 size={14} />
                   Delete
                 </button>
