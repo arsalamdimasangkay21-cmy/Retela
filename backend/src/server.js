@@ -1,14 +1,11 @@
 import "./env.js";
-import dotenv from "dotenv";
 import http from "http";
-import express from "express";
 import { Server } from "socket.io";
 
 import { createApp } from "./app.js";
 import { initializeDatabase } from "./config/db.js";
+import { corsOrigin } from "./config/cors.js";
 import { configureSocket } from "./socket.js";
-
-dotenv.config();
 
 if (!process.env.PAYMONGO_SECRET_KEY && !globalThis.__RETELA_PAYMONGO_WARNING_LOGGED__) {
   globalThis.__RETELA_PAYMONGO_WARNING_LOGGED__ = true;
@@ -17,33 +14,35 @@ if (!process.env.PAYMONGO_SECRET_KEY && !globalThis.__RETELA_PAYMONGO_WARNING_LO
 
 const port = process.env.PORT || 5000;
 
-const configuredOrigins = (
-  process.env.CLIENT_URL ||
-  "http://localhost:5173,http://127.0.0.1:5173,http://127.0.0.1:5174,http://127.0.0.1:5175,http://127.0.0.1:5177"
-)
-  .split(",")
-  .map((origin) => origin.trim());
+async function initializeDatabaseWithRetry(delayMs = 15000) {
+  try {
+    await initializeDatabase();
+  } catch (error) {
+    console.error("[database] Bootstrap failed. API will stay online and retry.", {
+      code: error.code || null,
+      message: error.message
+    });
+    setTimeout(() => initializeDatabaseWithRetry(delayMs), delayMs).unref?.();
+  }
+}
 
-const server = http.createServer();
+await initializeDatabaseWithRetry();
 
-const io = new Server(server, {
+const app = createApp();
+const httpServer = http.createServer(app);
+const io = new Server(httpServer, {
+  path: "/socket.io",
   cors: {
-    origin: configuredOrigins,
-    credentials: true,
+    origin: corsOrigin,
+    credentials: true
   },
+  transports: ["websocket", "polling"],
+  allowUpgrades: true
 });
 
-await initializeDatabase();
-
-const app = createApp(io);
-
-app.use(express.json());
-
-server.removeAllListeners("request");
-server.on("request", app);
-
+app.set("io", io);
 configureSocket(io);
 
-server.listen(port, () => {
-  console.log(`Retela API running on http://localhost:${port}`);
+httpServer.listen(port, () => {
+  console.log(`Retela API running on port ${port}`);
 });

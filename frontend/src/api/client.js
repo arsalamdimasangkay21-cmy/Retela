@@ -1,7 +1,15 @@
 import axios from "axios";
 
-export const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
-export const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || "http://localhost:5000";
+function stripTrailingSlash(value) {
+  return String(value || "").replace(/\/$/, "");
+}
+
+function socketUrlFromApiUrl(apiUrl) {
+  return stripTrailingSlash(apiUrl).replace(/\/api$/, "");
+}
+
+export const API_URL = stripTrailingSlash(import.meta.env.VITE_API_URL || "http://localhost:5000/api");
+export const SOCKET_URL = socketUrlFromApiUrl(import.meta.env.VITE_SOCKET_URL || socketUrlFromApiUrl(API_URL));
 
 export const api = axios.create({
   baseURL: API_URL

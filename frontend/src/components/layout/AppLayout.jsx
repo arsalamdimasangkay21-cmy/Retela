@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Bell, CalendarDays, MessageCircle, Moon, ShoppingCart, Sun, UserCircle } from "lucide-react";
-import { io } from "socket.io-client";
-import { api, SOCKET_URL } from "../../api/client";
+import { api } from "../../api/client";
+import { acquireSocket, releaseSocket } from "../../api/socket";
 import { logoFromSettings, RETELA_LOGO_URL } from "../../config/branding";
 import { useAuth } from "../../context/AuthContext";
 import { applyUserTheme, emitUserThemeChange, readUserTheme, saveUserTheme } from "../../utils/userTheme";
@@ -22,18 +22,27 @@ export default function AppLayout({ children, active, onChange }) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem("retela_sidebar_collapsed") === "true");
   const [logoUrl, setLogoUrl] = useState(savedLogoUrl);
   const [darkMode, setDarkMode] = useState(false);
+  const [socket, setSocket] = useState(null);
 
-  const socket = useMemo(() => token ? io(SOCKET_URL, { auth: { token } }) : null, [token]);
+  useEffect(() => {
+    if (!token) {
+      setSocket(null);
+      return undefined;
+    }
+    const nextSocket = acquireSocket(token);
+    setSocket(nextSocket);
+    return () => releaseSocket(nextSocket);
+  }, [token]);
 
   useEffect(() => {
     if (!socket) return undefined;
-    socket.on("new-registration", (payload) => {
+    const handleNewRegistration = (payload) => {
       if (user?.role !== "admin") return;
       setNotificationCount((count) => count + 1);
       setToast(payload);
       window.dispatchEvent(new CustomEvent("retela:notification-new", { detail: payload }));
-    });
-    socket.on("notification:new", (payload) => {
+    };
+    const handleNewNotification = (payload) => {
       if (user?.role === "admin" && !["customer_registration", "message", "feedback", "order", "inventory", "refund"].includes(payload?.type)) return;
       if (user?.role === "customer" && !["order", "broadcast"].includes(payload?.type)) return;
       if (payload?.type === "message" && user?.role === "admin") {
@@ -46,27 +55,44 @@ export default function AppLayout({ children, active, onChange }) {
       if (["order", "inventory", "new_product"].includes(payload?.type)) {
         window.dispatchEvent(new CustomEvent("retela:data-change", { detail: payload }));
       }
-    });
-    socket.on("order:new", (payload) => {
+    };
+    const handleNewOrder = (payload) => {
       window.dispatchEvent(new CustomEvent("retela:data-change", { detail: { type: "order", payload } }));
-    });
-    socket.on("product:new", (payload) => {
+    };
+    const handleNewProduct = (payload) => {
       window.dispatchEvent(new CustomEvent("retela:data-change", { detail: { type: "product", payload } }));
-    });
-    socket.on("product:update", (payload) => {
+    };
+    const handleProductUpdate = (payload) => {
       window.dispatchEvent(new CustomEvent("retela:data-change", { detail: { type: "inventory", payload } }));
-    });
-    socket.on("inventory:update", (payload) => {
+    };
+    const handleInventoryUpdate = (payload) => {
       window.dispatchEvent(new CustomEvent("retela:data-change", { detail: payload }));
-    });
-    socket.on("shipping:update", (payload) => {
+    };
+    const handleShippingUpdate = (payload) => {
       window.dispatchEvent(new CustomEvent("retela:shipping-change", { detail: payload }));
       window.dispatchEvent(new CustomEvent("retela:data-change", { detail: { type: "shipping", payload } }));
-    });
-    socket.on("user:status", (payload) => {
+    };
+    const handleUserStatus = (payload) => {
       window.dispatchEvent(new CustomEvent("retela:user-status", { detail: payload }));
-    });
-    return () => socket.disconnect();
+    };
+    socket.on("new-registration", handleNewRegistration);
+    socket.on("notification:new", handleNewNotification);
+    socket.on("order:new", handleNewOrder);
+    socket.on("product:new", handleNewProduct);
+    socket.on("product:update", handleProductUpdate);
+    socket.on("inventory:update", handleInventoryUpdate);
+    socket.on("shipping:update", handleShippingUpdate);
+    socket.on("user:status", handleUserStatus);
+    return () => {
+      socket.off("new-registration", handleNewRegistration);
+      socket.off("notification:new", handleNewNotification);
+      socket.off("order:new", handleNewOrder);
+      socket.off("product:new", handleNewProduct);
+      socket.off("product:update", handleProductUpdate);
+      socket.off("inventory:update", handleInventoryUpdate);
+      socket.off("shipping:update", handleShippingUpdate);
+      socket.off("user:status", handleUserStatus);
+    };
   }, [socket, user?.role]);
 
   useEffect(() => {

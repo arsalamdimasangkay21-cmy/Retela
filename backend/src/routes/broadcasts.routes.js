@@ -464,13 +464,19 @@ async function getBroadcastsResponse(app) {
   const audienceCounts = await getAudienceCounts();
   const broadcasts = await query(
     `SELECT b.*,
-       COUNT(DISTINCT bd.user_id) AS total_recipients,
-       COUNT(DISTINCT CASE WHEN bd.opened_at IS NOT NULL THEN bd.user_id END) AS opened_recipients,
-       COUNT(DISTINCT CASE WHEN bd.clicked_at IS NOT NULL THEN bd.user_id END) AS clicked_recipients
+       COALESCE(stats.total_recipients, 0) AS total_recipients,
+       COALESCE(stats.opened_recipients, 0) AS opened_recipients,
+       COALESCE(stats.clicked_recipients, 0) AS clicked_recipients
      FROM broadcasts b
-     LEFT JOIN broadcast_deliveries bd ON bd.broadcast_id = b.id
+     LEFT JOIN (
+       SELECT broadcast_id,
+         COUNT(DISTINCT user_id) AS total_recipients,
+         COUNT(DISTINCT CASE WHEN opened_at IS NOT NULL THEN user_id END) AS opened_recipients,
+         COUNT(DISTINCT CASE WHEN clicked_at IS NOT NULL THEN user_id END) AS clicked_recipients
+       FROM broadcast_deliveries
+       GROUP BY broadcast_id
+     ) stats ON stats.broadcast_id = b.id
      WHERE b.is_deleted = FALSE
-     GROUP BY b.id
      ORDER BY COALESCE(b.sent_at, b.scheduled_at, b.updated_at, b.created_at) DESC, b.id DESC`
   );
   const deliveryStats = await query(

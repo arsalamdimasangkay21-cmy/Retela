@@ -116,4 +116,17 @@ VITE_API_URL=http://localhost:5000/api
 VITE_SOCKET_URL=http://localhost:5000
 ```
 
+For Render or another production host, point both values at the same backend service:
+
+```bash
+VITE_API_URL=https://your-backend.onrender.com/api
+VITE_SOCKET_URL=https://your-backend.onrender.com
+```
+
+If `VITE_SOCKET_URL` is omitted, the frontend derives it from `VITE_API_URL` by removing the trailing `/api`, so Socket.IO connects to the API backend instead of the static frontend host. The backend must also allow the frontend origin through `CLIENT_URL`, for example:
+
+```bash
+CLIENT_URL=https://your-frontend.onrender.com
+```
+
 New product creation triggers realtime customer notifications. Admin replies set conversation takeover, and the AI assistant only suggests products and never approves orders.

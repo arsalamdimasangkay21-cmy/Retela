@@ -23,7 +23,8 @@ import adminRoutes from "./routes/admin.routes.js";
 import chatRoutes from "./routes/chat.routes.js";
 import posRoutes from "./routes/pos.routes.js";
 import customerRoutes from "./routes/customer.routes.js";
-import { requestContextMiddleware } from "./config/db.js";
+import { checkDatabaseConnection, requestContextMiddleware } from "./config/db.js";
+import { corsOrigin } from "./config/cors.js";
 
 import {
   brandsRoutes,
@@ -44,15 +45,17 @@ export function createApp(io) {
   // Trust Railway / reverse proxy
   app.set("trust proxy", 1);
 
-  const configuredOrigins = (
-    process.env.CLIENT_URL ||
-    "http://localhost:5173,http://127.0.0.1:5173,http://127.0.0.1:5174,http://127.0.0.1:5175,http://127.0.0.1:5177,https://retela-ix3c.vercel.app"
-  )
-    .split(",")
-    .map((origin) => origin.trim());
-
   app.set("io", io);
   app.use(requestContextMiddleware);
+  app.use((req, res, next) => {
+    const startedAt = process.hrtime.bigint();
+    res.on("finish", () => {
+      const durationMs = Number(process.hrtime.bigint() - startedAt) / 1_000_000;
+      const level = res.statusCode >= 500 ? "error" : res.statusCode >= 400 ? "warn" : "log";
+      console[level](`[request] ${req.method} ${req.originalUrl} ${res.statusCode} ${durationMs.toFixed(1)}ms`);
+    });
+    next();
+  });
 
   app.use(
     helmet({
@@ -64,12 +67,7 @@ export function createApp(io) {
 
   app.use(
     cors({
-      origin(origin, callback) {
-        if (!origin || configuredOrigins.includes(origin)) {
-          return callback(null, true);
-        }
-        return callback(new Error("Not allowed by CORS"));
-      },
+      origin: corsOrigin,
       credentials: true,
     })
   );
@@ -92,12 +90,19 @@ export function createApp(io) {
 
   app.use("/uploads", express.static(path.join(__dirname, "../uploads")));
 
-  app.get("/api/health", (req, res) =>
+  app.get("/api/health", async (req, res) => {
+    const database = await checkDatabaseConnection().catch((error) => ({
+      connected: false,
+      databaseName: process.env.DB_NAME || "retela_db",
+      checkedAt: new Date().toISOString(),
+      error: error.code || "database_unavailable"
+    }));
     res.json({
       status: "ok",
       service: "retela-api",
-    })
-  );
+      database
+    });
+  });
 
   app.use("/api", (req, res, next) => {
     const json = res.json.bind(res);
@@ -109,6 +114,7 @@ export function createApp(io) {
         return json({
           success: false,
           message: body?.message || body?.error || "Request failed",
+          error: body?.error || body?.code || "request_failed",
           ...(body?.errors ? { errors: body.errors } : {}),
         });
       }

@@ -494,8 +494,8 @@ router.patch("/:conversationId/takeover", requireAuth, asyncHandler(async (req, 
     "INSERT INTO messages (conversation_id, sender_id, sender_type, body, delivery_status, delivered_at, mode, ai_provider) VALUES (:conversationId, NULL, 'ai', :body, 'delivered', NOW(), 'admin', 'Admin')",
     { conversationId: req.params.conversationId, body: systemMessage }
   );
-  req.app.get("io").to(`conversation:${req.params.conversationId}`).emit("chat:control", { conversation_id: Number(req.params.conversationId), admin_takeover: active, message: systemMessage });
-  req.app.get("io").to(`user:${rows[0].customer_id}`).emit("notification:new", { type: "message", title: active ? "Admin joined chat" : "Assistant resumed", body: systemMessage });
+  req.app.get("io")?.to(`conversation:${req.params.conversationId}`).emit("chat:control", { conversation_id: Number(req.params.conversationId), admin_takeover: active, message: systemMessage });
+  req.app.get("io")?.to(`user:${rows[0].customer_id}`).emit("notification:new", { type: "message", title: active ? "Admin joined chat" : "Assistant resumed", body: systemMessage });
   res.json({ conversation_id: Number(req.params.conversationId), admin_takeover: active, message: systemMessage });
 }));
 
@@ -535,7 +535,7 @@ router.post("/", requireAuth, requireApproved, asyncHandler(async (req, res) => 
         "INSERT INTO notifications (user_id, type, title, body) VALUES (:userId, 'message', 'New admin message', :body)",
         { userId: rows[0].customer_id, body: input.body.slice(0, 240) }
       );
-      req.app.get("io").to(`user:${rows[0].customer_id}`).emit("notification:new", { type: "message", title: "New admin message", body: input.body });
+      req.app.get("io")?.to(`user:${rows[0].customer_id}`).emit("notification:new", { type: "message", title: "New admin message", body: input.body });
     }
   } else {
     await query(
@@ -546,9 +546,9 @@ router.post("/", requireAuth, requireApproved, asyncHandler(async (req, res) => 
       "INSERT INTO notifications (type, title, body) VALUES ('message', 'New customer message', :body)",
       { body: input.body.slice(0, 240) }
     );
-    req.app.get("io").to("admin").emit("notification:new", { type: "message", title: "New customer message", body: input.body });
+    req.app.get("io")?.to("admin").emit("notification:new", { type: "message", title: "New customer message", body: input.body });
   }
-  req.app.get("io").to(`conversation:${conversationId}`).emit("message:new", { conversation_id: conversationId, sender_type: sender, body: input.body, mode: input.mode });
+  req.app.get("io")?.to(`conversation:${conversationId}`).emit("message:new", { conversation_id: conversationId, sender_type: sender, body: input.body, mode: input.mode });
   res.status(201).json({ conversation_id: conversationId, sender_type: sender, body: input.body, delivery_status: "delivered" });
 }));
 
@@ -663,7 +663,7 @@ router.post("/ai", requireAuth, requireApproved, asyncHandler(async (req, res) =
        WHERE id = :conversationId`,
       { conversationId: conversation.id, aiProvider, responseTime: aiResult.responseTime, tokenUsage: aiResult.tokenUsage }
     );
-    req.app.get("io").to("admin").emit("notification:new", {
+    req.app.get("io")?.to("admin").emit("notification:new", {
       type: "message",
       title: conversation.admin_takeover ? "Customer replied" : "New customer message",
       body: input.prompt,

@@ -187,7 +187,7 @@ router.post("/", requireAuth, requireApproved, upload.single("image"), asyncHand
     "INSERT INTO notifications (type, title, body) VALUES ('feedback', 'New customer feedback', :body)",
     { body: `${req.user.username} submitted ${input.rating} star ${input.category} feedback.` }
   );
-  req.app.get("io").to("admin").emit("notification:new", { type: "feedback", title: "New customer feedback", body: `${req.user.username} submitted ${input.rating} star ${input.category} feedback.` });
+  req.app.get("io")?.to("admin").emit("notification:new", { type: "feedback", title: "New customer feedback", body: `${req.user.username} submitted ${input.rating} star ${input.category} feedback.` });
   res.status(201).json({ message: "Feedback submitted" });
 }));
 

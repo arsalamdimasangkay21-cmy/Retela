@@ -25,13 +25,77 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const backendRoot = path.join(__dirname, "../..");
 const uploadsDir = path.join(backendRoot, "uploads");
+const defaultShippingFallback = {
+  type: "fixed",
+  name: "Standard Shipping",
+  enabled: true,
+  fee: 0
+};
+
+function normalizeShippingFallbackFromConfig(config) {
+  const enabled = config.payment.shippingFeeType !== "free";
+  return {
+    type: enabled ? "fixed" : "free",
+    name: config.payment.shippingRateName || "Standard Shipping",
+    enabled,
+    fee: enabled ? Number(config.payment.shippingFee || 0) : 0
+  };
+}
+
+async function safeShippingSummary(config = null) {
+  try {
+    return await shippingSummary();
+  } catch (error) {
+    console.warn("[settings] Shipping summary unavailable; using settings fallback", {
+      code: error.code || null,
+      message: error.message
+    });
+    return config ? normalizeShippingFallbackFromConfig(config) : defaultShippingFallback;
+  }
+}
+
+async function safeActiveShippingSettings(config = null) {
+  try {
+    return await getActiveShippingSettings();
+  } catch (error) {
+    console.warn("[settings] Active shipping settings unavailable; using settings fallback", {
+      code: error.code || null,
+      message: error.message
+    });
+    const fallback = config ? normalizeShippingFallbackFromConfig(config) : defaultShippingFallback;
+    return {
+      id: null,
+      rateName: fallback.name,
+      fixedFee: fallback.fee,
+      enabled: fallback.enabled,
+      active: true,
+      updatedAt: null
+    };
+  }
+}
+
+async function safeCount(sql, field) {
+  try {
+    const [row] = await query(sql);
+    return Number(row?.[field] || 0);
+  } catch (error) {
+    console.warn("[settings] Count query failed; returning 0", {
+      field,
+      code: error.code || null,
+      message: error.message
+    });
+    return 0;
+  }
+}
 
 router.get("/public", asyncHandler(async (req, res) => {
   const { config } = await loadSystemSettings();
-  const shipping = await shippingSummary();
-  const [customers] = await query("SELECT COUNT(*) AS total_customers FROM users WHERE role = 'customer' AND status = 'approved'");
-  const [products] = await query("SELECT COUNT(*) AS total_products FROM products");
-  const [orders] = await query("SELECT COUNT(*) AS orders_completed FROM orders WHERE status = 'completed'");
+  const shipping = await safeShippingSummary(config);
+  const [totalCustomers, totalProducts, ordersCompleted] = await Promise.all([
+    safeCount("SELECT COUNT(*) AS total_customers FROM users WHERE role = 'customer' AND status = 'approved'", "total_customers"),
+    safeCount("SELECT COUNT(*) AS total_products FROM products", "total_products"),
+    safeCount("SELECT COUNT(*) AS orders_completed FROM orders WHERE status = 'completed'", "orders_completed")
+  ]);
   res.json({
     general: config.general,
     appearance: config.appearance,
@@ -46,9 +110,9 @@ router.get("/public", asyncHandler(async (req, res) => {
       shippingFee: Number(shipping.fee || 0)
     },
     stats: {
-      totalCustomers: Number(customers?.total_customers || 0),
-      totalProducts: Number(products?.total_products || 0),
-      ordersCompleted: Number(orders?.orders_completed || 0)
+      totalCustomers,
+      totalProducts,
+      ordersCompleted
     }
   });
 }));
@@ -72,20 +136,34 @@ router.post("/coupons/validate", requireAuth, asyncHandler(async (req, res) => {
 router.use(requireAuth, requireRole("admin"));
 
 async function getDatabaseStatus() {
-  const [status] = await query("SELECT DATABASE() AS database_name, NOW() AS checked_at");
-  const tables = await query("SHOW TABLES");
-  return {
-    connected: true,
-    databaseName: status?.database_name || "retela_db",
-    checkedAt: status?.checked_at,
-    tableCount: tables.length
-  };
+  try {
+    const [status] = await query("SELECT DATABASE() AS database_name, NOW() AS checked_at");
+    const tables = await query("SHOW TABLES");
+    return {
+      connected: true,
+      databaseName: status?.database_name || "retela_db",
+      checkedAt: status?.checked_at,
+      tableCount: tables.length
+    };
+  } catch (error) {
+    console.error("[settings] Database status check failed", {
+      code: error.code || null,
+      message: error.message
+    });
+    return {
+      connected: false,
+      databaseName: process.env.DB_NAME || "retela_db",
+      checkedAt: new Date().toISOString(),
+      tableCount: 0,
+      error: "database_unavailable"
+    };
+  }
 }
 
 async function buildSettingsResponse(config, encryptedOpenAiApiKey, databaseStatus = null) {
   const sanitized = sanitizeSystemSettings(config, encryptedOpenAiApiKey, databaseStatus);
   const aiProviderStatus = await getAIProviderStatus(config);
-  const shipping = await getActiveShippingSettings();
+  const shipping = await safeActiveShippingSettings(config);
   return {
     ...sanitized,
     payment: {

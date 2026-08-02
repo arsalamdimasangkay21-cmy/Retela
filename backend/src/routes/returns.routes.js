@@ -230,12 +230,12 @@ router.post("/", requireAuth, requireApproved, upload.array("images", 4), asyncH
     "INSERT INTO notifications (type, title, body) VALUES ('refund', 'New return request', :body)",
     { body: `${req.user.username} requested ${input.refund_type} for Order #${input.order_id}.` }
   );
-  req.app.get("io").to("admin").emit("notification:new", {
+  req.app.get("io")?.to("admin").emit("notification:new", {
     type: "refund",
     title: "New return request",
     body: `${req.user.username} requested ${input.refund_type} for Order #${input.order_id}.`
   });
-  req.app.get("io").to("admin").emit("return:new", {
+  req.app.get("io")?.to("admin").emit("return:new", {
     order_id: input.order_id,
     reason: input.reason_category,
     refund_type: input.refund_type
@@ -258,7 +258,7 @@ router.patch("/:id/decision", requireAuth, requireRole("admin"), asyncHandler(as
     "INSERT INTO notifications (user_id, type, title, body) VALUES (:userId, 'refund', 'Return request update', :body)",
     { userId: rows[0].user_id, body: `Your return request is now ${input.status.replace("_", " ")}.` }
   );
-  req.app.get("io").to(`user:${rows[0].user_id}`).emit("return:update", { id: Number(req.params.id), status: input.status });
+  req.app.get("io")?.to(`user:${rows[0].user_id}`).emit("return:update", { id: Number(req.params.id), status: input.status });
   res.json({ message: "Return/refund decision saved" });
 }));
 

@@ -251,12 +251,12 @@ router.post("/", requireAuth, requireApproved, asyncHandler(async (req, res) => 
       [req.user.id, `Your order #${orderResult.insertId} was placed successfully.`]
     );
     await conn.commit();
-    req.app.get("io").to("admin").emit("order:new", { id: orderResult.insertId, total_amount: pricing.total });
+    req.app.get("io")?.to("admin").emit("order:new", { id: orderResult.insertId, total_amount: pricing.total });
     inventoryUpdates.forEach((update) => {
-      req.app.get("io").emit("inventory:update", { type: "inventory", action: "ordered", ...update });
+      req.app.get("io")?.emit("inventory:update", { type: "inventory", action: "ordered", ...update });
     });
     outOfStockProducts.forEach((name) => {
-      req.app.get("io").to("admin").emit("notification:new", { type: "inventory", title: "Out of stock", body: `${name} is now out of stock.` });
+      req.app.get("io")?.to("admin").emit("notification:new", { type: "inventory", title: "Out of stock", body: `${name} is now out of stock.` });
     });
     res.status(201).json({ id: orderResult.insertId, total_amount: pricing.total, pricing, status: input.payment_method === "cod" ? "pending" : "awaiting_payment", payment_method: input.payment_method, fulfillment_method: input.fulfillment_method });
   } catch (error) {
@@ -290,7 +290,7 @@ router.patch("/:id/status", requireAuth, requireRole("admin"), asyncHandler(asyn
       { body: `Order #${req.params.id} was received by the customer. Feedback can now be collected.` }
     );
   }
-  req.app.get("io").to(`user:${orders[0].user_id}`).emit("order:update", { id: Number(req.params.id), status });
+  req.app.get("io")?.to(`user:${orders[0].user_id}`).emit("order:update", { id: Number(req.params.id), status });
   res.json({ message: "Order updated" });
 }));
 
@@ -308,7 +308,7 @@ router.patch("/:id/tracking", requireAuth, requireRole("admin"), asyncHandler(as
     "INSERT INTO notifications (user_id, type, title, body) VALUES (:userId, 'order', 'Tracking updated', :body)",
     { userId: orders[0].user_id, body: input.tracking_number ? `Tracking number: ${input.tracking_number}` : "Tracking number was cleared." }
   );
-  req.app.get("io").to(`user:${orders[0].user_id}`).emit("order:update", { id: Number(req.params.id), tracking_number: input.tracking_number || null });
+  req.app.get("io")?.to(`user:${orders[0].user_id}`).emit("order:update", { id: Number(req.params.id), tracking_number: input.tracking_number || null });
   res.json({ message: "Tracking updated", tracking_number: input.tracking_number || null });
 }));
 

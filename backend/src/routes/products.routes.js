@@ -287,8 +287,8 @@ router.post("/", requireAuth, requireRole("admin"), upload.single("image"), asyn
   const [created] = await query(`SELECT *, ${inventoryStatusSql("stock")} AS computed_status FROM products WHERE id = :id LIMIT 1`, { id: result.insertId });
   const product = { ...created, status: created.computed_status || created.status || productStatusForStock(created.stock) };
   await query("INSERT INTO notifications (type, title, body, product_id) VALUES ('new_product', 'New apparel posted!', 'View now...', :id)", { id: product.id });
-  req.app.get("io").emit("product:new", product);
-  req.app.get("io").emit("notification:new", { type: "new_product", title: "New apparel posted!", body: "View now...", product });
+  req.app.get("io")?.emit("product:new", product);
+  req.app.get("io")?.emit("notification:new", { type: "new_product", title: "New apparel posted!", body: "View now...", product });
   res.status(201).json(product);
 }));
 

@@ -29,8 +29,8 @@ import {
   Users,
   Wand2
 } from "lucide-react";
-import { io } from "socket.io-client";
-import { api, API_URL, SOCKET_URL, getApiErrorMessage } from "../api/client";
+import { api, API_URL, getApiErrorMessage } from "../api/client";
+import { acquireSocket, releaseSocket } from "../api/socket";
 import { RETELA_LOGO_URL } from "../config/branding";
 import { Button, Card, Field } from "../components/ui";
 
@@ -194,7 +194,8 @@ export default function BroadcastsPage() {
   useEffect(() => {
     const token = localStorage.getItem("retela_token");
     if (!token) return undefined;
-    const socket = io(SOCKET_URL, { auth: { token } });
+    const socket = acquireSocket(token);
+    if (!socket) return undefined;
     const handleProgress = (payload) => {
       if (!payload?.broadcast_id) return;
       setProgressByBroadcast((current) => ({
@@ -209,7 +210,7 @@ export default function BroadcastsPage() {
     socket.on("broadcast:progress", handleProgress);
     return () => {
       socket.off("broadcast:progress", handleProgress);
-      socket.disconnect();
+      releaseSocket(socket);
     };
   }, []);
 

@@ -24,6 +24,8 @@ export const pool = mysql.createPool({
   database: process.env.DB_NAME || "retela_db",
   waitForConnections: true,
   connectionLimit: 10,
+  enableKeepAlive: true,
+  keepAliveInitialDelay: 0,
   namedPlaceholders: true
 });
 
@@ -40,6 +42,36 @@ function attachSqlContext(err, sql, params) {
   err.sqlParams = params;
   err.requestContext = requestContext.getStore() || null;
   return err;
+}
+
+function sanitizeParams(params = {}) {
+  const sensitivePattern = /(password|token|secret|key|otp|authorization|cookie)/i;
+  return Object.fromEntries(Object.entries(params || {}).map(([key, value]) => [
+    key,
+    sensitivePattern.test(key) ? "[redacted]" : value
+  ]));
+}
+
+export function isDatabaseConnectionError(error) {
+  return [
+    "ECONNREFUSED",
+    "PROTOCOL_CONNECTION_LOST",
+    "ER_CON_COUNT_ERROR",
+    "ETIMEDOUT",
+    "ENOTFOUND",
+    "EAI_AGAIN"
+  ].includes(error?.code);
+}
+
+export function isDatabaseSchemaError(error) {
+  return [
+    "ER_NO_SUCH_TABLE",
+    "ER_BAD_FIELD_ERROR",
+    "ER_PARSE_ERROR",
+    "ER_NO_DEFAULT_FOR_FIELD",
+    "ER_TRUNCATED_WRONG_VALUE",
+    "ER_DATA_TOO_LONG"
+  ].includes(error?.code);
 }
 
 export async function query(sql, params = {}) {
@@ -65,7 +97,7 @@ export async function query(sql, params = {}) {
     console.error(sql);
     console.error("--------------------------------------");
     console.error("PARAMETERS:");
-    console.error(JSON.stringify(params, null, 2));
+    console.error(JSON.stringify(sanitizeParams(params), null, 2));
     console.error("--------------------------------------");
     console.error("MYSQL ERROR:");
     console.error("Code:", err.code);
@@ -104,6 +136,15 @@ export async function transaction(callback) {
   } finally {
     connection.release();
   }
+}
+
+export async function checkDatabaseConnection() {
+  const [row] = await query("SELECT DATABASE() AS database_name, NOW() AS checked_at");
+  return {
+    connected: true,
+    databaseName: row?.database_name || process.env.DB_NAME || "retela_db",
+    checkedAt: row?.checked_at || new Date().toISOString()
+  };
 }
 
 async function listTables(names) {
