@@ -38,7 +38,13 @@ const chartGlowPlugin = {
 
 ChartJS.register(ArcElement, BarElement, CategoryScale, Filler, LinearScale, LineElement, PointElement, Tooltip, Legend, chartGlowPlugin);
 
-const assetUrl = (url) => !url ? "" : url.startsWith("http") ? url : `${API_URL.replace(/\/api$/, "")}${url}`;
+const assetUrl = (url) => {
+  if (!url) return "";
+  const value = String(url).trim();
+  if (!value) return "";
+  if (/^https?:\/\//i.test(value)) return value;
+  return `${API_URL.replace(/\/api$/, "")}/${value.replace(/^\/+/, "")}`;
+};
 const fallbackApparelOptions = {
   brands: ["Nike", "Adidas", "Levi's", "Champion", "Uniqlo", "H&M", "Puma", "Lacoste", "Guess", "Other"],
   categories: ["T-Shirts", "Jackets", "Caps", "Other"],
@@ -124,15 +130,37 @@ function isDeletingProduct(product, deletingProductIds = []) {
   return Boolean(productId && deletingProductIds.includes(productId));
 }
 
+function getProductImageValue(productOrUrl) {
+  if (!productOrUrl) return "";
+  if (typeof productOrUrl === "string") return productOrUrl.trim();
+  return String(
+    productOrUrl.imageUrl
+      ?? productOrUrl.image_url
+      ?? productOrUrl.image
+      ?? productOrUrl.photo_url
+      ?? productOrUrl.photo
+      ?? productOrUrl.product_image
+      ?? ""
+  ).trim();
+}
+
+function getProductImageUrl(productOrUrl) {
+  const value = getProductImageValue(productOrUrl);
+  return value ? assetUrl(value) : null;
+}
+
 function normalizeProductRow(product) {
   const productId = validProductId(product);
   if (!productId && import.meta.env.DEV) {
     console.warn("Loaded product is missing a valid id:", product);
   }
   const barcode = product?.sku || product?.barcode || "";
+  const imageValue = getProductImageValue(product);
   return {
     ...product,
     id: productId,
+    image_url: imageValue || null,
+    image: imageValue || null,
     sku: barcode,
     barcode
   };
@@ -424,7 +452,7 @@ export default function AdminDashboard({ active, onChange }) {
       stock: product.stock || "1",
       condition: product.condition || "Good",
       description: product.description || "",
-      image_url: product.image_url || ""
+      image_url: getProductImageValue(product)
     });
     setInventoryModalOpen(true);
   }
@@ -1185,7 +1213,7 @@ function PremiumInventoryPage({
                     >
                       <td className="px-3 py-4">
                         <div className="h-14 w-14 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.06] shadow-lg shadow-black/20">
-                          <ProductImage src={product.image_url} className="h-full w-full object-cover transition duration-500 group-hover:scale-105" alt={product.name} />
+                          <ProductImage product={product} className="h-full w-full object-cover transition duration-500 group-hover:scale-105" alt={product.name} />
                         </div>
                       </td>
                       <td className="px-3 py-4">
@@ -1219,7 +1247,7 @@ function PremiumInventoryPage({
                 <article key={product.id} className="rounded-3xl border border-white/10 bg-white/[0.055] p-3">
                   <div className="flex gap-3">
                     <div className="h-20 w-20 shrink-0 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.06]">
-                      <ProductImage src={product.image_url} className="h-full w-full object-cover" alt={product.name} />
+                      <ProductImage product={product} className="h-full w-full object-cover" alt={product.name} />
                     </div>
                     <div className="min-w-0 flex-1">
                       <strong className="block break-words text-white">{product.name}</strong>
@@ -1342,13 +1370,14 @@ function InventoryStatusBadge({ stock, status }) {
   return <span className={`inline-flex rounded-full border px-3 py-1 text-xs font-bold ${styles[badgeStatus]}`}>{badgeStatus}</span>;
 }
 
-function ProductImage({ src, alt, className = "" }) {
+function ProductImage({ product, src, alt, className = "" }) {
   const [failed, setFailed] = useState(false);
-  const imageSrc = !failed && src ? assetUrl(src) : "";
+  const imageValue = getProductImageValue(product || src);
+  const imageSrc = !failed && imageValue ? assetUrl(imageValue) : "";
 
   useEffect(() => {
     setFailed(false);
-  }, [src]);
+  }, [imageValue]);
 
   if (!imageSrc) {
     return (
@@ -1362,7 +1391,7 @@ function ProductImage({ src, alt, className = "" }) {
     <img
       src={imageSrc}
       className={className}
-      alt={alt || "Retela apparel"}
+      alt={alt || product?.name || "Apparel item"}
       onError={() => {
         if (!failed) setFailed(true);
       }}
@@ -1391,7 +1420,7 @@ function InventoryActionButton({ tone, icon: Icon, children, onClick, disabled =
   const styles = {
     edit: "border-[#60A5FA] bg-[#DBEAFE] text-[#1D4ED8] hover:border-[#2563EB]",
     more: "border-[#D1D5DB] bg-[#F3F4F6] text-[#374151] hover:border-[#9CA3AF]",
-    delete: "border-[#F87171] bg-[#FEE2E2] text-[#B91C1C] hover:border-[#DC2626]"
+    delete: "border-[#fda29b] bg-[#fff1f0] text-[#b42318] hover:border-[#f97066] hover:bg-[#fee4e2] hover:text-[#912018] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[rgba(217,45,32,0.45)]"
   };
   return (
     <button type="button" disabled={disabled} title={title} onClick={onClick} className={`inline-flex min-h-11 min-w-0 items-center justify-center gap-2 whitespace-nowrap rounded-[10px] border px-3 py-2 text-sm font-semibold leading-none shadow-sm transition duration-200 hover:-translate-y-0.5 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-45 ${styles[tone] || styles.more} ${className}`}>
@@ -1484,14 +1513,27 @@ function AdminToast({ toast, onClose }) {
 
 function ProductEditorModal({ editingProductId, form, setForm, productImage, setProductImage, saveProduct, productSaving = false, optionValues, refreshApparelOptions, showProductToast, onClose }) {
   const inputClass = "rounded-2xl border border-slate-300 bg-white/90 p-3 text-sm font-semibold text-slate-950 outline-none transition placeholder:text-slate-500 focus:border-[#22C55E] focus:ring-4 focus:ring-[#DCFCE7]";
-  const secondaryButtonClass = "inline-flex items-center justify-center rounded-2xl border border-slate-300 bg-white px-5 py-3 text-sm font-bold text-slate-800 shadow-sm transition hover:bg-[#F3F4F6] active:scale-95";
-  const primaryButtonClass = "inline-flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-[#16A34A] via-[#22C55E] to-[#15803D] px-5 py-3 text-sm font-bold text-white shadow-lg shadow-emerald-700/20 transition hover:-translate-y-0.5 hover:shadow-xl hover:shadow-emerald-700/25 active:translate-y-0 active:scale-95";
+  const secondaryButtonClass = "inline-flex min-h-12 items-center justify-center rounded-2xl border border-slate-300 bg-white px-5 py-3 text-sm font-bold text-slate-800 shadow-sm transition hover:bg-[#F3F4F6] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#22C55E] active:scale-95";
+  const primaryButtonClass = "inline-flex min-h-12 items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-[#16A34A] via-[#22C55E] to-[#15803D] px-5 py-3 text-sm font-bold text-white shadow-lg shadow-emerald-700/20 transition hover:-translate-y-0.5 hover:shadow-xl hover:shadow-emerald-700/25 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#22C55E] active:translate-y-0 active:scale-95";
   const [optionModal, setOptionModal] = useState(null);
   const [otherValues, setOtherValues] = useState({ category: "", gender: "", size: "", condition: "" });
   const [otherErrors, setOtherErrors] = useState({});
   const [brandName, setBrandName] = useState("");
   const [brandError, setBrandError] = useState("");
+  const [previewUrl, setPreviewUrl] = useState("");
   const brandOptions = optionNames([form.brand], optionValues.brands);
+  const existingImageUrl = getProductImageUrl(form);
+  const displayedImageUrl = previewUrl || existingImageUrl;
+
+  useEffect(() => {
+    if (!productImage) {
+      setPreviewUrl("");
+      return undefined;
+    }
+    const objectUrl = URL.createObjectURL(productImage);
+    setPreviewUrl(objectUrl);
+    return () => URL.revokeObjectURL(objectUrl);
+  }, [productImage]);
 
   async function createAndSelectOption(kind, formKey, name, successMessage) {
     const trimmedName = name.trim();
@@ -1574,25 +1616,30 @@ function ProductEditorModal({ editingProductId, form, setForm, productImage, set
 
   return (
     <motion.div
-      className="fixed inset-0 z-[80] grid place-items-center overflow-y-auto bg-[rgba(0,0,0,0.25)] p-4 backdrop-blur-[10px]"
+      className="fixed inset-0 z-[80] grid place-items-center bg-[rgba(15,23,18,0.55)] p-3 backdrop-blur-[4px] sm:p-6"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ duration: 0.22, ease: "easeOut" }}
     >
       <motion.section
-        className="w-full max-w-2xl rounded-[24px] border border-white/40 bg-white/[0.92] p-5 text-slate-950 shadow-[0_24px_80px_rgba(15,23,42,0.22)] backdrop-blur-2xl sm:p-6"
+        className="max-h-[85vh] w-full max-w-[860px] overflow-hidden rounded-[24px] border border-white/40 bg-white text-slate-950 shadow-[0_24px_70px_rgba(15,23,18,0.28)]"
         initial={{ opacity: 0, y: 18, scale: 0.98 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
         transition={{ duration: 0.28, ease: "easeOut" }}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="apparel-editor-title"
       >
-        <div className="flex items-start justify-between gap-3 border-b border-slate-200/80 pb-4">
-          <div>
+        <div className="flex items-start justify-between gap-3 border-b border-slate-200/80 px-5 py-4 sm:px-6">
+          <div className="min-w-0">
             <p className="text-xs font-bold uppercase tracking-[0.18em] text-emerald-700">Apparel Item</p>
-            <h3 className="mt-2 font-display text-2xl font-bold text-slate-950">{editingProductId ? "Edit Apparel Item" : "Add Apparel Item"}</h3>
+            <h3 id="apparel-editor-title" className="mt-1 font-display text-2xl font-bold text-slate-950">{editingProductId ? "Edit Apparel Item" : "Add Apparel Item"}</h3>
           </div>
-          <button type="button" disabled={productSaving} onClick={onClose} className="rounded-xl border border-slate-300 bg-white/80 px-3 py-2 text-sm font-bold text-slate-700 transition hover:bg-[#F3F4F6] hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60">Close</button>
+          <button type="button" disabled={productSaving} onClick={onClose} className="grid h-11 w-11 shrink-0 place-items-center rounded-xl border border-slate-300 bg-white text-slate-700 transition hover:bg-[#F3F4F6] hover:text-slate-950 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#22C55E] disabled:cursor-not-allowed disabled:opacity-60" aria-label="Close apparel editor">
+            <X size={18} />
+          </button>
         </div>
-        <form onSubmit={handleSubmit} className="mt-5 grid gap-3 md:grid-cols-2">
+        <form onSubmit={handleSubmit} className="grid max-h-[calc(85vh-88px)] gap-3 overflow-y-auto px-5 py-5 md:grid-cols-2 sm:px-6">
           <input className={inputClass} placeholder="Apparel Name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
             <div className="grid gap-1">
               <select className={inputClass} value={form.brand} onChange={(e) => {
@@ -1717,13 +1764,25 @@ function ProductEditorModal({ editingProductId, form, setForm, productImage, set
               }}
             />
           ) : null}
-          <label className="flex cursor-pointer items-center justify-center gap-2 rounded-2xl border border-dashed border-emerald-500/45 bg-emerald-50 p-3 text-sm font-bold text-emerald-700 transition hover:bg-emerald-100">
-            <Upload size={17} />
-            {productImage ? productImage.name : "Browse apparel image"}
-            <input className="hidden" type="file" accept="image/*" onChange={(e) => setProductImage(e.target.files?.[0] || null)} />
-          </label>
+          <div className="grid gap-2">
+            <span className="text-xs font-bold text-slate-700">{editingProductId ? "Current image" : "Apparel image"}</span>
+            <div className="grid gap-3 sm:grid-cols-[112px_minmax(0,1fr)] sm:items-center md:grid-cols-1">
+              <div className="aspect-[4/3] w-full overflow-hidden rounded-2xl border border-slate-200 bg-slate-100 sm:h-28 sm:w-28 md:h-auto md:w-full">
+                {displayedImageUrl ? (
+                  <ProductImage src={displayedImageUrl} className="h-full w-full object-cover" alt={`${form.name || "Apparel"} preview`} />
+                ) : (
+                  <div className="grid h-full w-full place-items-center text-center text-xs font-bold text-slate-400">No image</div>
+                )}
+              </div>
+              <label className="flex min-h-12 cursor-pointer items-center justify-center gap-2 rounded-2xl border border-dashed border-emerald-500/45 bg-emerald-50 p-3 text-sm font-bold text-emerald-700 transition hover:bg-emerald-100 focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-[#22C55E]">
+                <Upload size={17} />
+                {productImage ? productImage.name : "Browse apparel image"}
+                <input className="hidden" type="file" accept="image/*" onChange={(e) => setProductImage(e.target.files?.[0] || null)} aria-label="Browse apparel image" />
+              </label>
+            </div>
+          </div>
           <textarea className={`${inputClass} min-h-28 resize-y md:col-span-2`} placeholder="Apparel description, fit notes, flaws, fabric, or styling details" value={form.description || ""} onChange={(e) => setForm({ ...form, description: e.target.value })} />
-          <div className="flex flex-col-reverse gap-3 border-t border-slate-200/80 pt-4 md:col-span-2 sm:flex-row sm:justify-end">
+          <div className="grid gap-3 border-t border-slate-200/80 pt-4 md:col-span-2 sm:flex sm:justify-end">
             <button type="button" disabled={productSaving} className={`${secondaryButtonClass} disabled:cursor-not-allowed disabled:opacity-60`} onClick={onClose}>Cancel</button>
             <button type="submit" disabled={productSaving} className={`${primaryButtonClass} disabled:cursor-not-allowed disabled:opacity-60`}>
               {productSaving ? <Loader2 className="animate-spin" size={17} /> : editingProductId ? <Save size={17} /> : <PackagePlus size={17} />}
@@ -2112,7 +2171,7 @@ function SalesAnalytics({ summary }) {
     category: normalizeInventoryCategory(product.category),
     units: Number(product.sold || 0),
     revenue: Number(product.revenue || 0),
-    image: assetUrl(product.image_url)
+    image: getProductImageUrl(product)
   }));
   const cards = [
     { title: "Total Sales", value: money(totalSales), change: "Live", caption: "database revenue", icon: TrendingUp },
@@ -3065,10 +3124,10 @@ function ProductGallery({ products, filters, setFilters, optionValues, onAdd, on
             {optionValues.conditions.filter((condition) => condition !== "Other").map((condition) => <option key={condition} value={condition}>{condition}</option>)}
           </select>
         </div>
-        {products.length ? <div className="grid min-w-0 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+        {products.length ? <div className="grid min-w-0 justify-start gap-5 [grid-template-columns:repeat(auto-fill,minmax(250px,300px))]">
           {products.map((p) => (
-            <motion.article key={p.id} className="min-w-0 rounded-[20px] border border-white/10 bg-white/[0.07] p-2.5 shadow-xl shadow-black/18 backdrop-blur-2xl transition duration-300 hover:-translate-y-0.5 hover:border-neonbrand/30 hover:shadow-[0_18px_55px_rgba(0,0,0,0.3),0_0_28px_rgba(56,255,136,0.08)]" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.28 }}>
-              <ProductImage src={p.image_url} className="h-36 w-full rounded-xl object-cover" alt={p.name} />
+            <motion.article key={p.id} className="w-full max-w-[300px] min-w-0 rounded-[20px] border border-white/10 bg-white/[0.07] p-2.5 shadow-xl shadow-black/18 backdrop-blur-2xl transition duration-300 hover:-translate-y-0.5 hover:border-neonbrand/30 hover:shadow-[0_18px_55px_rgba(0,0,0,0.3),0_0_28px_rgba(56,255,136,0.08)]" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.28 }}>
+              <ProductImage product={p} className="aspect-[4/3] w-full rounded-xl object-cover" alt={p.name} />
               <div className="mt-3 min-w-0">
                 <h4 className="truncate font-bold text-white" title={p.name}>{p.name}</h4>
                 <div className="mt-2 grid gap-1 text-xs text-white/52">
@@ -3087,7 +3146,7 @@ function ProductGallery({ products, filters, setFilters, optionValues, onAdd, on
                   <Edit3 size={14} />
                   Edit
                 </button>
-                <button type="button" disabled={!validProductId(p) || isDeletingProduct(p, deletingProductIds)} title={deleteDisabledReason(p)} onClick={() => onDelete?.(p)} className="inline-flex items-center justify-center gap-1 rounded-xl border border-white/10 bg-white/[0.06] px-3 py-2 text-xs font-bold text-white/72 transition hover:border-rose-400/40 hover:text-rose-300 disabled:cursor-not-allowed disabled:opacity-45">
+                <button type="button" disabled={!validProductId(p) || isDeletingProduct(p, deletingProductIds)} title={deleteDisabledReason(p)} onClick={() => onDelete?.(p)} className="inline-flex items-center justify-center gap-1 rounded-xl border border-[#fda29b] bg-[#fff1f0] px-3 py-2 text-xs font-bold text-[#b42318] transition hover:border-[#f97066] hover:bg-[#fee4e2] hover:text-[#912018] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[rgba(217,45,32,0.45)] disabled:cursor-not-allowed disabled:opacity-45">
                   <Trash2 size={14} />
                   {isDeletingProduct(p, deletingProductIds) ? "Deleting..." : "Delete"}
                 </button>
