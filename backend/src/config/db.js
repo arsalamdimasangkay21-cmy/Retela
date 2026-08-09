@@ -323,7 +323,7 @@ async function safeDataMigration(tableName, action, sql, params = {}) {
   });
 }
 
-async function ensureAutoIncrementId(tableName) {
+export async function ensureAutoIncrementId(tableName) {
   await runSchemaMigration(tableName, "id AUTO_INCREMENT", async () => {
     if (!(await baseTableExists(tableName))) return;
     const columns = await columnSet(tableName);
@@ -346,7 +346,8 @@ async function ensureAutoIncrementId(tableName) {
       return;
     }
 
-    await query(`ALTER TABLE \`${tableName}\` MODIFY id INT NOT NULL AUTO_INCREMENT`);
+    const idType = String(id.COLUMN_TYPE || "int").trim() || "int";
+    await query(`ALTER TABLE \`${tableName}\` MODIFY id ${idType} NOT NULL AUTO_INCREMENT`);
   });
 }
 

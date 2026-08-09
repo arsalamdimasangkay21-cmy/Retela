@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
-import { query } from "../config/db.js";
+import { ensureAutoIncrementId, query, requireUsableAutoIncrementId } from "../config/db.js";
 import { asyncHandler, HttpError } from "../utils/errors.js";
 import { requireApproved, requireAuth } from "../middleware/auth.js";
 import { loadSystemSettings } from "../utils/systemSettings.js";
@@ -11,6 +11,7 @@ const router = Router();
 let messageStatusColumnsReady;
 let conversationAiColumnsReady;
 let conversationLifecycleColumnsReady;
+let messagingIdentityColumnsReady;
 const aiProcessingLocks = new Set();
 
 const cannedAdminReplies = [
@@ -25,8 +26,22 @@ const cannedAdminReplies = [
 const availabilityPattern = /available|avail|stock|meron|size|do you have|mayroon|available pa|pa ba/i;
 const sizePattern = /\b(xs|s|m|l|xl|xxl|free size|free)\b/i;
 
+async function ensureMessagingIdentityColumns() {
+  messagingIdentityColumnsReady ||= (async () => {
+    await ensureAutoIncrementId("conversations");
+    await ensureAutoIncrementId("messages");
+    await requireUsableAutoIncrementId("conversations");
+    await requireUsableAutoIncrementId("messages");
+  })().catch((error) => {
+    messagingIdentityColumnsReady = undefined;
+    throw error;
+  });
+  return messagingIdentityColumnsReady;
+}
+
 async function ensureMessageStatusColumns() {
   messageStatusColumnsReady ||= (async () => {
+    await ensureMessagingIdentityColumns();
     const rows = await query(
       `SELECT COLUMN_NAME
        FROM INFORMATION_SCHEMA.COLUMNS
@@ -72,6 +87,7 @@ async function ensureMessageStatusColumns() {
 
 async function ensureConversationAiMetadataColumns() {
   conversationAiColumnsReady ||= (async () => {
+    await ensureMessagingIdentityColumns();
     const rows = await query(
       `SELECT COLUMN_NAME
        FROM INFORMATION_SCHEMA.COLUMNS
@@ -98,6 +114,7 @@ async function ensureConversationAiMetadataColumns() {
 
 async function ensureConversationLifecycleColumns() {
   conversationLifecycleColumnsReady ||= (async () => {
+    await ensureMessagingIdentityColumns();
     const rows = await query(
       `SELECT COLUMN_NAME
        FROM INFORMATION_SCHEMA.COLUMNS
@@ -507,6 +524,8 @@ router.post("/", requireAuth, requireApproved, asyncHandler(async (req, res) => 
     mode: z.enum(["ai", "admin"]).default("admin")
   });
   const input = schema.parse(req.body);
+  await ensureConversationLifecycleColumns();
+  await ensureMessageStatusColumns();
   let conversationId = input.conversation_id;
   if (!conversationId && req.user.role === "admin" && input.customer_id) {
     const existing = await query("SELECT id FROM conversations WHERE customer_id = :customerId ORDER BY id DESC LIMIT 1", { customerId: input.customer_id });
@@ -520,9 +539,13 @@ router.post("/", requireAuth, requireApproved, asyncHandler(async (req, res) => 
     const conversation = await getOrCreateCustomerConversation(req.user.id);
     conversationId = conversation.id;
   }
+  if (!conversationId) throw new HttpError(400, "Conversation is required.");
+  const allowedConversation = req.user.role === "admin"
+    ? (await query("SELECT id FROM conversations WHERE id = :conversationId AND is_deleted = FALSE", { conversationId }))[0]
+    : (await query("SELECT id FROM conversations WHERE id = :conversationId AND customer_id = :customerId AND is_deleted = FALSE", { conversationId, customerId: req.user.id }))[0];
+  if (!allowedConversation) throw new HttpError(404, "Conversation not found");
   const sender = req.user.role === "admin" ? "admin" : "customer";
   const provider = req.user.role === "admin" ? "Admin" : "Customer";
-  await ensureMessageStatusColumns();
   await query(
     "INSERT INTO messages (conversation_id, sender_id, sender_type, body, delivery_status, delivered_at, mode, ai_provider) VALUES (:conversationId, :senderId, :sender, :body, 'delivered', NOW(), :mode, :provider)",
     { conversationId, senderId: req.user.id, sender, body: input.body, mode: input.mode, provider }
@@ -563,6 +586,61 @@ router.post("/ai", requireAuth, requireApproved, asyncHandler(async (req, res) =
     ? (await query("SELECT id, admin_takeover, ai_processing, is_archived FROM conversations WHERE id = :id AND customer_id = :customerId AND is_deleted = FALSE", { id: input.conversation_id, customerId: req.user.id }))[0]
     : await getOrCreateCustomerConversation(req.user.id);
   if (!conversation) return res.status(404).json({ message: "Conversation not found" });
+
+  const historyBefore = await getConversationHistory(conversation.id);
+  const latestCustomer = [...historyBefore].reverse().find((message) => message.sender_type === "customer");
+  const latestAi = [...historyBefore].reverse().find((message) => message.sender_type === "ai");
+  const duplicateCustomer = await recentDuplicateMessage({ conversationId: conversation.id, senderType: "customer", body: input.prompt, seconds: 90 });
+  if (!duplicateCustomer) {
+    await query(
+      "INSERT INTO messages (conversation_id, sender_id, sender_type, body, delivery_status, delivered_at, mode, ai_provider) VALUES (:conversationId, :senderId, 'customer', :body, 'delivered', NOW(), 'ai', 'Customer')",
+      { conversationId: conversation.id, senderId: req.user.id, body: input.prompt }
+    );
+    req.app.get("io")?.to(`conversation:${conversation.id}`).emit("message:new", {
+      conversation_id: conversation.id,
+      sender_type: "customer",
+      body: input.prompt,
+      mode: "ai"
+    });
+  }
+
+  await query(
+    "UPDATE conversations SET is_archived = FALSE, archived_at = NULL, updated_at = NOW() WHERE id = :conversationId",
+    { conversationId: conversation.id }
+  );
+
+  if (conversation.admin_takeover) {
+    req.app.get("io")?.to("admin").emit("notification:new", {
+      type: "message",
+      title: "Customer replied",
+      body: input.prompt,
+      conversation_id: conversation.id,
+      suggestions: []
+    });
+    return res.status(202).json({
+      conversation_id: conversation.id,
+      body: "",
+      provider: "",
+      admin_takeover: true,
+      awaiting_admin: true,
+      duplicate: Boolean(duplicateCustomer),
+      suggestions: [],
+      products: []
+    });
+  }
+
+  if (latestCustomer && normalizeText(latestCustomer.body) === normalizeText(input.prompt) && latestAi?.body) {
+    return res.json({
+      conversation_id: conversation.id,
+      body: latestAi.body,
+      provider: latestAi.ai_provider || "unknown",
+      admin_takeover: false,
+      duplicate: true,
+      suggestions: [],
+      products: []
+    });
+  }
+
   const lockKey = Number(conversation.id);
   if (aiProcessingLocks.has(lockKey) || conversation.ai_processing) {
     const latestAi = (await query(
@@ -587,31 +665,8 @@ router.post("/ai", requireAuth, requireApproved, asyncHandler(async (req, res) =
   await query("UPDATE conversations SET ai_processing = TRUE WHERE id = :conversationId", { conversationId: conversation.id });
 
   try {
-    const historyBefore = await getConversationHistory(conversation.id);
-    const latestCustomer = [...historyBefore].reverse().find((message) => message.sender_type === "customer");
-    const latestAi = [...historyBefore].reverse().find((message) => message.sender_type === "ai");
-    if (latestCustomer && normalizeText(latestCustomer.body) === normalizeText(input.prompt) && latestAi?.body) {
-      return res.json({
-        conversation_id: conversation.id,
-        body: latestAi.body,
-        provider: latestAi.ai_provider || "unknown",
-        admin_takeover: false,
-        duplicate: true,
-        suggestions: [],
-        products: []
-      });
-    }
-
-    const duplicateCustomer = await recentDuplicateMessage({ conversationId: conversation.id, senderType: "customer", body: input.prompt, seconds: 90 });
-    if (!duplicateCustomer) {
-      await query(
-        "INSERT INTO messages (conversation_id, sender_id, sender_type, body, delivery_status, delivered_at, mode, ai_provider) VALUES (:conversationId, :senderId, 'customer', :body, 'delivered', NOW(), 'ai', 'Customer')",
-        { conversationId: conversation.id, senderId: req.user.id, body: input.prompt }
-      );
-    }
-
     await query(
-      "UPDATE conversations SET admin_takeover = false, is_archived = FALSE, archived_at = NULL, updated_at = NOW() WHERE id = :conversationId",
+      "UPDATE conversations SET is_archived = FALSE, archived_at = NULL, updated_at = NOW() WHERE id = :conversationId",
       { conversationId: conversation.id }
     );
     const products = await query(
