@@ -1,17 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as faceapi from "face-api.js";
-import { ArrowLeft, Check, RotateCcw } from "lucide-react";
+import { ArrowLeft, Camera, Check, CheckCircle2, RotateCcw, ShieldCheck } from "lucide-react";
 import { Button } from "../ui";
+import { detectFacesInImage, loadFaceModels } from "../auth/FaceRecognition";
 import { captureVideoFrame, compressImage } from "../auth/imageTools";
 import SegmentedProgressRing from "./SegmentedProgressRing";
 
-const MODEL_URL = "/models/face-api";
-const SUCCESS_ADVANCE_MS = 700;
 const DETECTION_INTERVAL_MS = 250;
-const CENTER_HOLD_MS = 450;
-const CAPTURE_HOLD_MS = 350;
-const BLINK_MIN_CLOSED_FRAMES = 2;
-const BLINK_MAX_DURATION_MS = 900;
 const TINY_OPTIONS = new faceapi.TinyFaceDetectorOptions({
   inputSize: 160,
   scoreThreshold: 0.45
@@ -27,15 +22,24 @@ const CAMERA_CONSTRAINTS = {
   }
 };
 
-let liveModelPromise;
+const initialStatus = {
+  phase: "starting",
+  title: "Position your face inside the frame",
+  detail: "Make sure your face is centered and clearly visible.",
+  progress: 0,
+  validFace: false,
+  error: "",
+  retryVisible: false,
+  lastFaceScore: 0
+};
 
-function loadLiveFaceModels() {
-  liveModelPromise ||= Promise.all([
-    faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
-    faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL)
-  ]);
-  return liveModelPromise;
-}
+const progressSteps = [
+  { number: 1, label: "Fill Up Info", status: "Completed" },
+  { number: 2, label: "Face Recognition", status: "In Progress", current: true },
+  { number: 3, label: "Government ID", status: "Upcoming" },
+  { number: 4, label: "Email Verification", status: "Upcoming" },
+  { number: 5, label: "Complete", status: "Upcoming" }
+];
 
 function waitForVideoReady(video) {
   if (video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0) {
@@ -79,90 +83,108 @@ function cameraErrorMessage(error) {
   return error?.message || "Unable to start camera.";
 }
 
-function distance(a, b) {
-  return Math.hypot(a.x - b.x, a.y - b.y);
+function pointInsideCircle(point, center, radius) {
+  return Math.hypot(point.x - center.x, point.y - center.y) <= radius;
 }
 
-function eyeAspectRatio(points = []) {
-  if (points.length < 6) return 0;
-  return (distance(points[1], points[5]) + distance(points[2], points[4])) / (2 * Math.max(distance(points[0], points[3]), 1));
-}
+function analyzeDetectedFace(detection, video) {
+  if (!video || video.readyState < 2 || !video.videoWidth || !video.videoHeight) {
+    return {
+      valid: false,
+      title: "Position your face inside the frame",
+      detail: "Make sure your face is centered and clearly visible.",
+      progress: 0
+    };
+  }
 
-function createBlinkState() {
+  const box = detection.detection.box;
+  const score = detection.detection.score || 0;
+  const videoWidth = Math.max(video.videoWidth, 1);
+  const videoHeight = Math.max(video.videoHeight, 1);
+  const center = { x: videoWidth / 2, y: videoHeight / 2 };
+  const guideRadius = Math.min(videoWidth, videoHeight) * 0.42;
+  const faceCenter = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+  const widthRatio = box.width / videoWidth;
+  const heightRatio = box.height / videoHeight;
+  const offsetX = Math.abs(faceCenter.x - center.x) / videoWidth;
+  const offsetY = Math.abs(faceCenter.y - center.y) / videoHeight;
+
+  if (score < 0.45) {
+    return {
+      valid: false,
+      title: "Position your face inside the frame",
+      detail: "Make sure your face is centered and clearly visible.",
+      progress: 0.1
+    };
+  }
+
+  if (widthRatio < 0.28 || heightRatio < 0.24) {
+    return {
+      valid: false,
+      title: "Move closer to the camera",
+      detail: "Your face should fill more of the circular guide.",
+      progress: 0.22
+    };
+  }
+
+  if (widthRatio > 0.78 || heightRatio > 0.72) {
+    return {
+      valid: false,
+      title: "Move back slightly",
+      detail: "Keep your full face visible inside the circle.",
+      progress: 0.3
+    };
+  }
+
+  if (offsetX > 0.18 || offsetY > 0.18) {
+    return {
+      valid: false,
+      title: "Center your face inside the circle",
+      detail: "Move your face toward the middle of the frame.",
+      progress: 0.42
+    };
+  }
+
+  const guidePoints = [
+    { x: box.x + box.width / 2, y: box.y },
+    { x: box.x + box.width, y: box.y + box.height / 2 },
+    { x: box.x + box.width / 2, y: box.y + box.height },
+    { x: box.x, y: box.y + box.height / 2 }
+  ];
+  const insideCount = guidePoints.filter((point) => pointInsideCircle(point, center, guideRadius)).length;
+
+  if (insideCount < 3) {
+    return {
+      valid: false,
+      title: "Center your face inside the circle",
+      detail: "Keep your entire face within the circular guide.",
+      progress: 0.52
+    };
+  }
+
   return {
-    phase: "CALIBRATING",
-    samples: [],
-    baselineEar: 0,
-    closeThreshold: 0.18,
-    openThreshold: 0.21,
-    closedFrames: 0,
-    closedAt: 0,
-    detected: false
+    valid: true,
+    title: "You're ready!",
+    detail: "Your face is centered and clearly visible.",
+    progress: 1,
+    score
   };
 }
 
-function updateBlink(blink, landmarks, now) {
-  if (blink.detected) return blink;
-
-  const leftEar = eyeAspectRatio(landmarks.getLeftEye());
-  const rightEar = eyeAspectRatio(landmarks.getRightEye());
-  const averageEar = (leftEar + rightEar) / 2;
-
-  if (blink.phase === "CALIBRATING") {
-    if (averageEar > 0.16) {
-      blink.samples.push(averageEar);
-      if (blink.samples.length > 10) blink.samples.shift();
-      blink.baselineEar = blink.samples.reduce((sum, value) => sum + value, 0) / blink.samples.length;
-      blink.closeThreshold = Math.max(0.15, Math.min(0.26, blink.baselineEar * 0.72));
-      blink.openThreshold = blink.closeThreshold + 0.025;
-      if (blink.samples.length >= 4) blink.phase = "WAITING_CLOSE";
-    }
-    return blink;
-  }
-
-  const bothEyesClosed = leftEar <= blink.closeThreshold && rightEar <= blink.closeThreshold + 0.015;
-  const bothEyesOpen = leftEar >= blink.openThreshold && rightEar >= blink.openThreshold;
-
-  if (blink.phase === "WAITING_CLOSE") {
-    if (bothEyesClosed) {
-      blink.phase = "WAITING_REOPEN";
-      blink.closedFrames = 1;
-      blink.closedAt = now;
-    }
-    return blink;
-  }
-
-  if (blink.phase === "WAITING_REOPEN") {
-    const duration = now - blink.closedAt;
-    if (bothEyesClosed) blink.closedFrames += 1;
-    if (duration > BLINK_MAX_DURATION_MS) {
-      blink.phase = "WAITING_CLOSE";
-      blink.closedFrames = 0;
-      blink.closedAt = 0;
-      return blink;
-    }
-    if (blink.closedFrames >= BLINK_MIN_CLOSED_FRAMES && bothEyesOpen) {
-      blink.phase = "BLINK_CONFIRMED";
-      blink.detected = true;
-    }
-  }
-
-  return blink;
-}
-
-function analyzeFace(detection, video) {
-  const box = detection.detection.box;
-  const centerX = box.x + box.width / 2;
-  const centerY = box.y + box.height / 2;
-  const offsetX = Math.abs(centerX - video.videoWidth / 2) / video.videoWidth;
-  const offsetY = Math.abs(centerY - video.videoHeight / 2) / video.videoHeight;
-  const widthRatio = box.width / video.videoWidth;
-
-  if (widthRatio < 0.28) return { valid: false, message: "Move a little closer" };
-  if (widthRatio > 0.78) return { valid: false, message: "Move slightly farther away" };
-  if (offsetX > 0.18 || offsetY > 0.2) return { valid: false, message: "Center your face" };
-
-  return { valid: true, message: "Blink once" };
+function ProgressTracker() {
+  return (
+    <ol className="retela-face-progress" aria-label="Registration progress">
+      {progressSteps.map((step) => (
+        <li key={step.label} className={step.current ? "is-current" : step.status === "Completed" ? "is-complete" : ""}>
+          <span>{step.number}</span>
+          <div>
+            <strong>{step.label}</strong>
+            <small>{step.status}</small>
+          </div>
+        </li>
+      ))}
+    </ol>
+  );
 }
 
 export default function CircularFaceScanner({ selfie, selfiePreview, livenessVerified = false, onCaptured, onBack, onNext }) {
@@ -173,24 +195,28 @@ export default function CircularFaceScanner({ selfie, selfiePreview, livenessVer
   const processingRef = useRef(false);
   const stoppedRef = useRef(false);
   const modelReadyRef = useRef(false);
-  const centeredSinceRef = useRef(0);
-  const readySinceRef = useRef(0);
-  const blinkRef = useRef(createBlinkState());
   const captureLockRef = useRef(false);
-  const successLockRef = useRef(false);
-  const successTimerRef = useRef(0);
+  const mountedRef = useRef(false);
+  const capturedPreviewRef = useRef("");
 
-  const [ui, setUi] = useState({
-    phase: selfiePreview && livenessVerified ? "success" : "starting",
-    instruction: selfiePreview && livenessVerified ? "Face verified" : "Position your face inside the circle",
-    progress: selfiePreview && livenessVerified ? 1 : 0,
-    error: "",
-    retryVisible: false
-  });
+  const [ui, setUi] = useState(() => (
+    selfiePreview && livenessVerified
+      ? {
+        ...initialStatus,
+        phase: "success",
+        title: "Face captured successfully",
+        detail: "Review your captured photo, then continue.",
+        progress: 1,
+        validFace: false
+      }
+      : initialStatus
+  ));
 
-  const complete = ui.phase === "success" || Boolean(selfie && livenessVerified);
+  const captured = Boolean(selfie && selfiePreview && livenessVerified);
+  const captureDisabled = !ui.validFace || ui.phase === "capturing" || ui.phase === "error" || captured;
 
   const publishUi = useCallback((updates) => {
+    if (!mountedRef.current) return;
     setUi((previous) => {
       const next = { ...previous, ...updates };
       return Object.keys(next).some((key) => next[key] !== previous[key]) ? next : previous;
@@ -200,7 +226,6 @@ export default function CircularFaceScanner({ selfie, selfiePreview, livenessVer
   const stopAll = useCallback(() => {
     stoppedRef.current = true;
     window.cancelAnimationFrame(frameRef.current);
-    window.clearTimeout(successTimerRef.current);
     frameRef.current = 0;
     processingRef.current = false;
     streamRef.current?.getTracks().forEach((track) => track.stop());
@@ -208,53 +233,16 @@ export default function CircularFaceScanner({ selfie, selfiePreview, livenessVer
     if (videoRef.current) videoRef.current.srcObject = null;
   }, []);
 
-  const resetLiveState = useCallback(() => {
-    centeredSinceRef.current = 0;
-    readySinceRef.current = 0;
-    blinkRef.current = createBlinkState();
+  const resetScannerState = useCallback(() => {
     captureLockRef.current = false;
-    successLockRef.current = false;
+    lastDetectionRef.current = 0;
     publishUi({
-      phase: "scanning",
-      instruction: modelReadyRef.current ? "Position your face inside the circle" : "Loading verifier while camera starts...",
-      progress: 0,
-      error: "",
-      retryVisible: false
+      ...initialStatus,
+      phase: modelReadyRef.current ? "scanning" : "starting",
+      title: modelReadyRef.current ? "Position your face inside the frame" : "Loading camera verifier",
+      detail: modelReadyRef.current ? "Make sure your face is centered and clearly visible." : "Camera will start as soon as the verifier is ready."
     });
   }, [publishUi]);
-
-  const captureFinalSelfie = useCallback(async () => {
-    const video = videoRef.current;
-    if (captureLockRef.current || !video || video.readyState < 2) return;
-
-    captureLockRef.current = true;
-    publishUi({ phase: "capturing", instruction: "Capturing...", progress: 1, error: "" });
-    try {
-      const raw = captureVideoFrame(video, "selfie-verification.jpg");
-      const compressed = await compressImage(raw, 1200, 0.86);
-      const preview = URL.createObjectURL(compressed);
-      stopAll();
-      onCaptured(compressed, preview, {
-        blinkVerified: true,
-        liveCapture: true,
-        confidence: 0.95
-      });
-      if (!successLockRef.current) {
-        successLockRef.current = true;
-        if (navigator.vibrate) navigator.vibrate(100);
-        publishUi({ phase: "success", instruction: "Face verified", progress: 1 });
-        successTimerRef.current = window.setTimeout(() => onNext(), SUCCESS_ADVANCE_MS);
-      }
-    } catch (error) {
-      captureLockRef.current = false;
-      publishUi({
-        phase: "scanning",
-        instruction: "Hold still",
-        error: error?.message || "Capture failed. Please try again.",
-        retryVisible: true
-      });
-    }
-  }, [onCaptured, onNext, publishUi, stopAll]);
 
   const analyzeFrame = useCallback(async (timestamp) => {
     const video = videoRef.current;
@@ -275,74 +263,65 @@ export default function CircularFaceScanner({ selfie, selfiePreview, livenessVer
     lastDetectionRef.current = timestamp;
 
     try {
-      const detections = await faceapi.detectAllFaces(video, TINY_OPTIONS).withFaceLandmarks();
-      const strongDetections = detections.filter((item) => {
-        const box = item.detection.box;
-        const score = item.detection.score || 0;
-        const widthRatio = box.width / Math.max(video.videoWidth, 1);
-        return score >= 0.45 && widthRatio >= 0.18;
-      });
+      const detections = await faceapi.detectAllFaces(video, TINY_OPTIONS);
 
-      if (strongDetections.length > 1) {
-        centeredSinceRef.current = 0;
-        readySinceRef.current = 0;
-        publishUi({ phase: "scanning", instruction: "Only one person should be visible", progress: 0.05, error: "" });
-        return;
-      }
-
-      if (strongDetections.length !== 1) {
-        centeredSinceRef.current = 0;
-        readySinceRef.current = 0;
-        blinkRef.current = createBlinkState();
-        publishUi({ phase: "scanning", instruction: "Position your face inside the circle", progress: 0.05, error: "" });
-        return;
-      }
-
-      const face = strongDetections[0];
-      const faceState = analyzeFace(face, video);
-      if (!faceState.valid) {
-        centeredSinceRef.current = 0;
-        readySinceRef.current = 0;
-        publishUi({ phase: "scanning", instruction: faceState.message, progress: 0.18, error: "" });
-        return;
-      }
-
-      if (!centeredSinceRef.current) centeredSinceRef.current = timestamp;
-      if (timestamp - centeredSinceRef.current < CENTER_HOLD_MS) {
-        publishUi({ phase: "scanning", instruction: "Hold still", progress: 0.36, error: "" });
-        return;
-      }
-
-      updateBlink(blinkRef.current, face.landmarks, timestamp);
-      if (!blinkRef.current.detected) {
+      if (detections.length > 1) {
         publishUi({
           phase: "scanning",
-          instruction: blinkRef.current.phase === "CALIBRATING" ? "Open your eyes normally" : "Blink once",
-          progress: 0.62,
-          error: ""
+          title: "Only one person should be visible",
+          detail: "Ask anyone nearby to step out of the camera view.",
+          progress: 0.12,
+          validFace: false,
+          error: "",
+          retryVisible: false,
+          lastFaceScore: 0
         });
         return;
       }
 
-      if (!readySinceRef.current) readySinceRef.current = timestamp;
-      publishUi({ phase: "scanning", instruction: "Blink detected. Capturing...", progress: 0.9, error: "" });
-      if (timestamp - readySinceRef.current >= CAPTURE_HOLD_MS) captureFinalSelfie();
+      if (detections.length === 0) {
+        publishUi({
+          phase: "scanning",
+          title: "Position your face inside the frame",
+          detail: "Make sure your face is centered and clearly visible.",
+          progress: 0.06,
+          validFace: false,
+          error: "",
+          retryVisible: false,
+          lastFaceScore: 0
+        });
+        return;
+      }
+
+      const faceState = analyzeDetectedFace(detections[0], video);
+      publishUi({
+        phase: "scanning",
+        title: faceState.title,
+        detail: faceState.detail,
+        progress: faceState.progress,
+        validFace: faceState.valid,
+        error: "",
+        retryVisible: false,
+        lastFaceScore: faceState.score || detections[0].detection.score || 0
+      });
     } catch (error) {
       publishUi({
         phase: "error",
-        instruction: "Face verifier paused. Tap Retry.",
+        title: "Face verifier paused. Tap Retry.",
+        detail: "Camera detection needs to restart.",
         error: error?.message || "Face detection failed.",
-        retryVisible: true
+        retryVisible: true,
+        validFace: false
       });
     } finally {
       processingRef.current = false;
     }
-  }, [captureFinalSelfie, publishUi]);
+  }, [publishUi]);
 
   const startLoop = useCallback(() => {
     window.cancelAnimationFrame(frameRef.current);
     const loop = (timestamp) => {
-      analyzeFrame(timestamp);
+      void analyzeFrame(timestamp);
       if (!stoppedRef.current) frameRef.current = window.requestAnimationFrame(loop);
     };
     frameRef.current = window.requestAnimationFrame(loop);
@@ -351,16 +330,28 @@ export default function CircularFaceScanner({ selfie, selfiePreview, livenessVer
   const openCamera = useCallback(async () => {
     stopAll();
     stoppedRef.current = false;
-    resetLiveState();
+    resetScannerState();
 
     try {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        throw new Error("Camera is not available in this browser.");
+      }
+
       const video = videoRef.current;
       const stream = await navigator.mediaDevices.getUserMedia(CAMERA_CONSTRAINTS);
       streamRef.current = stream;
 
       stream.getVideoTracks().forEach((track) => {
         track.addEventListener("ended", () => {
-          if (!stoppedRef.current) publishUi({ phase: "error", instruction: "Camera stopped. Tap Retry.", retryVisible: true });
+          if (!stoppedRef.current) {
+            publishUi({
+              phase: "error",
+              title: "Camera stopped. Tap Retry.",
+              detail: "Camera access ended before capture.",
+              retryVisible: true,
+              validFace: false
+            });
+          }
         }, { once: true });
       });
 
@@ -374,32 +365,133 @@ export default function CircularFaceScanner({ selfie, selfiePreview, livenessVer
         await waitForVideoReady(video);
       }
 
-      publishUi({ phase: "scanning", instruction: "Position your face inside the circle", error: "" });
+      publishUi({
+        phase: "scanning",
+        title: "Position your face inside the frame",
+        detail: "Make sure your face is centered and clearly visible.",
+        error: "",
+        retryVisible: false
+      });
       startLoop();
     } catch (error) {
-      publishUi({ phase: "error", instruction: cameraErrorMessage(error), error: cameraErrorMessage(error), retryVisible: true });
+      const message = cameraErrorMessage(error);
+      publishUi({
+        phase: "error",
+        title: message,
+        detail: "Check your camera permission and try again.",
+        error: message,
+        retryVisible: true,
+        validFace: false
+      });
     }
-  }, [publishUi, resetLiveState, startLoop, stopAll]);
+  }, [publishUi, resetScannerState, startLoop, stopAll]);
+
+  const handleCapture = useCallback(async () => {
+    const video = videoRef.current;
+    if (captureDisabled || captureLockRef.current || !video || video.readyState < 2) return;
+
+    captureLockRef.current = true;
+    publishUi({
+      phase: "capturing",
+      title: "Capturing face",
+      detail: "Hold still while we save this frame.",
+      progress: 1,
+      validFace: false,
+      error: "",
+      retryVisible: false
+    });
+
+    try {
+      const liveDetections = await faceapi.detectAllFaces(video, TINY_OPTIONS);
+      if (liveDetections.length !== 1) {
+        throw new Error(liveDetections.length > 1 ? "Only one person should be visible" : "Position your face inside the frame");
+      }
+
+      const liveFaceState = analyzeDetectedFace(liveDetections[0], video);
+      if (!liveFaceState.valid) {
+        throw new Error(liveFaceState.title);
+      }
+
+      const raw = captureVideoFrame(video, "selfie-verification.jpg");
+      const compressed = await compressImage(raw, 1200, 0.86);
+      const descriptorFaces = await detectFacesInImage(compressed);
+
+      if (descriptorFaces.length !== 1) {
+        throw new Error(descriptorFaces.length > 1 ? "Only one person should be visible" : "Position your face inside the frame");
+      }
+
+      const faceDescriptor = Array.from(descriptorFaces[0].descriptor);
+      const preview = URL.createObjectURL(compressed);
+      capturedPreviewRef.current = preview;
+      stopAll();
+
+      onCaptured(compressed, preview, {
+        manualCaptureVerified: true,
+        liveCapture: true,
+        confidence: Math.max(0.8, Math.min(1, ui.lastFaceScore || descriptorFaces[0].detection.score || 0.95)),
+        faceDescriptor
+      });
+
+      if (navigator.vibrate) navigator.vibrate(80);
+      publishUi({
+        phase: "success",
+        title: "Face captured successfully",
+        detail: "Review your captured photo, then continue.",
+        progress: 1,
+        validFace: false,
+        error: "",
+        retryVisible: false
+      });
+    } catch (error) {
+      captureLockRef.current = false;
+      publishUi({
+        phase: "scanning",
+        title: error?.message || "Capture failed. Please try again.",
+        detail: "Reposition your face and press Capture Face again.",
+        progress: 0.34,
+        validFace: false,
+        error: "",
+        retryVisible: false
+      });
+    }
+  }, [captureDisabled, onCaptured, publishUi, stopAll, ui.lastFaceScore]);
 
   useEffect(() => {
-    let cancelled = false;
+    mountedRef.current = true;
     modelReadyRef.current = false;
-    publishUi({ instruction: "Loading verifier while camera starts..." });
-    loadLiveFaceModels()
+    publishUi({
+      phase: "starting",
+      title: "Loading camera verifier",
+      detail: "Camera will start as soon as the verifier is ready."
+    });
+
+    loadFaceModels()
       .then(() => {
-        if (cancelled) return;
+        if (!mountedRef.current) return;
         modelReadyRef.current = true;
-        publishUi({ instruction: "Position your face inside the circle" });
+        publishUi({
+          title: "Position your face inside the frame",
+          detail: "Make sure your face is centered and clearly visible."
+        });
       })
       .catch((error) => {
-        if (cancelled) return;
+        if (!mountedRef.current) return;
         console.error("Face verifier model failed to load", error);
-        publishUi({ phase: "error", instruction: "Face verification could not start. Tap Retry.", error: "Models failed to load.", retryVisible: true });
+        publishUi({
+          phase: "error",
+          title: "Face verification could not start. Tap Retry.",
+          detail: "Models failed to load.",
+          error: "Models failed to load.",
+          retryVisible: true,
+          validFace: false
+        });
       });
+
     return () => {
-      cancelled = true;
+      mountedRef.current = false;
+      stopAll();
     };
-  }, [publishUi]);
+  }, [publishUi, stopAll]);
 
   useEffect(() => {
     if (!selfiePreview) openCamera();
@@ -419,12 +511,9 @@ export default function CircularFaceScanner({ selfie, selfiePreview, livenessVer
     return () => document.removeEventListener("visibilitychange", handleVisibility);
   }, [startLoop]);
 
-  useEffect(() => {
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = previousOverflow;
-    };
+  useEffect(() => () => {
+    if (capturedPreviewRef.current) URL.revokeObjectURL(capturedPreviewRef.current);
+    capturedPreviewRef.current = "";
   }, []);
 
   function handleCancel() {
@@ -432,73 +521,131 @@ export default function CircularFaceScanner({ selfie, selfiePreview, livenessVer
     onBack();
   }
 
-  function handleRestart() {
-    if (!modelReadyRef.current) {
-      publishUi({ phase: "starting", instruction: "Loading verifier while camera starts...", error: "", retryVisible: false });
-      loadLiveFaceModels()
-        .then(() => {
-          modelReadyRef.current = true;
-          publishUi({ phase: "scanning", instruction: "Position your face inside the circle", error: "", retryVisible: false });
-        })
-        .catch((error) => {
-          console.error("Face verifier model failed to load", error);
-          publishUi({ phase: "error", instruction: "Face verification could not start. Tap Retry.", error: "Models failed to load.", retryVisible: true });
-        });
-    }
-    openCamera();
+  async function handleRestart() {
+    await openCamera();
   }
 
   function handleRetake() {
     if (selfiePreview?.startsWith("blob:")) URL.revokeObjectURL(selfiePreview);
-    onCaptured(null, "", { blinkVerified: false, liveCapture: false, confidence: 0 });
-    handleRestart();
+    if (capturedPreviewRef.current && capturedPreviewRef.current !== selfiePreview) {
+      URL.revokeObjectURL(capturedPreviewRef.current);
+    }
+    capturedPreviewRef.current = "";
+    onCaptured(null, "", { manualCaptureVerified: false, liveCapture: false, confidence: 0, faceDescriptor: null });
+    void openCamera();
   }
 
-  const activeMessage = useMemo(() => ui.error || ui.instruction, [ui.error, ui.instruction]);
+  const statusBadge = useMemo(() => {
+    if (captured) return "Captured";
+    if (ui.validFace) return "Face detected";
+    if (ui.phase === "capturing") return "Capturing";
+    return "";
+  }, [captured, ui.phase, ui.validFace]);
 
   return (
-    <div className={`retela-face-scan-shell retela-face-scan-live${complete ? " is-complete" : ""}`}>
-      <header className="retela-face-scan-topbar">
-        <button type="button" className="retela-face-scan-text-button" onClick={handleCancel} aria-label="Cancel face verification">
-          <ArrowLeft size={20} />
-          <span>Cancel</span>
-        </button>
-        <div className="retela-face-scan-title">Face Verification</div>
-      </header>
+    <div className="retela-face-scan-shell">
+      <section className="retela-face-card" aria-labelledby="retela-face-title">
+        <header className="retela-face-header">
+          <button type="button" className="retela-face-back" onClick={handleCancel} aria-label="Back to registration information">
+            <ArrowLeft size={19} />
+          </button>
+          <div>
+            <h1 id="retela-face-title">Face Recognition</h1>
+            <p>Position your face within the frame. When ready, capture your photo.</p>
+          </div>
+        </header>
 
-      <main className="retela-face-scan-main">
-        <div className="retela-face-camera-wrap" onContextMenu={(event) => event.preventDefault()}>
-          <div className="retela-face-camera-circle">
-            {selfiePreview ? (
-              <img src={selfiePreview} className="retela-face-camera-media" alt="Captured selfie preview" />
+        <ProgressTracker />
+
+        <div className="retela-face-layout">
+          <main className="retela-face-primary">
+            <div className={`retela-face-camera-wrap${ui.validFace || captured ? " is-ready" : ""}${ui.phase === "error" ? " is-error" : ""}`} onContextMenu={(event) => event.preventDefault()}>
+              <div className="retela-face-camera-circle">
+                {selfiePreview ? (
+                  <img src={selfiePreview} className="retela-face-camera-media" alt="Captured selfie preview" />
+                ) : (
+                  <video ref={videoRef} autoPlay muted playsInline className="retela-face-camera-media is-live" aria-label="Live selfie camera" />
+                )}
+                <span className="retela-face-guide retela-face-guide-top-left" aria-hidden="true" />
+                <span className="retela-face-guide retela-face-guide-top-right" aria-hidden="true" />
+                <span className="retela-face-guide retela-face-guide-bottom-left" aria-hidden="true" />
+                <span className="retela-face-guide retela-face-guide-bottom-right" aria-hidden="true" />
+                {statusBadge ? (
+                  <div className="retela-face-detected-badge">
+                    <CheckCircle2 size={15} />
+                    <span>{statusBadge}</span>
+                  </div>
+                ) : null}
+              </div>
+              <SegmentedProgressRing progress={captured ? 1 : ui.progress} currentTargetProgress={captured ? 1 : ui.progress} complete={captured} error={ui.phase === "error"} />
+            </div>
+
+            <section className={`retela-face-ready-panel${ui.validFace || captured ? " is-ready" : ""}`} role="status" aria-live="polite">
+              <h2>{ui.validFace && !captured ? <Check size={22} aria-hidden="true" /> : null}{ui.title}</h2>
+              <p>{ui.detail}</p>
+            </section>
+
+            {captured ? (
+              <div className="retela-face-actions">
+                <Button type="button" variant="secondary" onClick={handleRetake}>
+                  <RotateCcw size={17} /> Retake
+                </Button>
+                <Button type="button" className="retela-face-continue" onClick={onNext}>
+                  Continue
+                </Button>
+              </div>
             ) : (
-              <video ref={videoRef} autoPlay playsInline muted className="retela-face-camera-media is-live" aria-label="Live selfie camera" />
+              <>
+                <button type="button" className="retela-face-capture" disabled={captureDisabled} onClick={handleCapture}>
+                  <Camera size={20} />
+                  <span>Capture Face</span>
+                </button>
+                <p className="retela-face-capture-note">Photo will be captured only when you press the button.</p>
+              </>
             )}
-          </div>
-          <SegmentedProgressRing progress={complete ? 1 : ui.progress} currentTargetProgress={complete ? 1 : ui.progress} complete={complete} error={ui.phase === "error"} />
+
+            {ui.retryVisible ? (
+              <div className="retela-face-actions">
+                <Button type="button" variant="secondary" onClick={handleRestart}>
+                  <RotateCcw size={17} /> Retry
+                </Button>
+              </div>
+            ) : null}
+          </main>
+
+          <aside className="retela-face-side">
+            <section className="retela-face-info-panel">
+              <h2>How it works</h2>
+              <ol>
+                <li>
+                  <strong>Well-lit environment</strong>
+                  <span>Ensure your face is well-lit and clearly visible.</span>
+                </li>
+                <li>
+                  <strong>Face the camera</strong>
+                  <span>Look straight at the camera and keep a neutral expression.</span>
+                </li>
+                <li>
+                  <strong>Stay within the frame</strong>
+                  <span>Keep your entire face inside the circle until capture.</span>
+                </li>
+                <li>
+                  <strong>Capture manually</strong>
+                  <span>Press the capture button only when you see "Face detected".</span>
+                </li>
+              </ol>
+            </section>
+
+            <section className="retela-face-security-panel">
+              <ShieldCheck size={22} />
+              <div>
+                <h2>Your data is secure</h2>
+                <p>Your face data is used only for identity verification.</p>
+              </div>
+            </section>
+          </aside>
         </div>
-
-        <section className="retela-face-scan-status" role="status" aria-live="polite">
-          <h1>{complete ? "Face verified" : activeMessage}</h1>
-          {complete ? <div className="retela-face-scan-success-mark" aria-hidden="true"><Check size={34} /></div> : null}
-        </section>
-
-        {ui.retryVisible ? (
-          <div className="retela-face-scan-retry">
-            <Button type="button" variant="secondary" onClick={handleRestart}>
-              <RotateCcw size={16} /> Retry
-            </Button>
-          </div>
-        ) : null}
-
-        {selfie && !complete ? (
-          <div className="retela-face-scan-preview-actions">
-            <Button type="button" variant="secondary" onClick={handleRetake}>
-              <RotateCcw size={16} /> Recapture
-            </Button>
-          </div>
-        ) : null}
-      </main>
+      </section>
     </div>
   );
 }

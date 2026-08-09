@@ -176,7 +176,7 @@ function addBaseValidationErrors(input, errors, { includeIdentity = false } = {}
   if (includeIdentity) {
     if (!allowedIdTypes.includes(input.idType)) errors.idType = "Government ID type is required.";
     if (!input.idNumber || input.idNumber.length < 3) errors.idNumber = "Government ID number is required.";
-    if (!input.selfieBlinkVerified) errors.selfieImage = "Please complete selfie blink verification.";
+    if (!input.selfieBlinkVerified) errors.selfieImage = "Please complete face recognition.";
     if (!input.selfieLiveCapture) errors.selfieImage = "Live camera selfie verification is required.";
     if (!input.idQualityVerified) errors.idImage = "Please capture a clear government ID image.";
     if (input.faceMatchScore < 40 || input.faceMatchScore > 100) errors.selfieImage = "Face verification confidence is too low. Please recapture your selfie.";

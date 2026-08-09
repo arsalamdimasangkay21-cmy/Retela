@@ -110,6 +110,8 @@
 }
 
 .retela-step-pill {
+  display: inline-grid;
+  gap: 0.1rem;
   border: 1px solid #e2e8f0;
   border-radius: 999px;
   background: #f8fafc;
@@ -117,6 +119,20 @@
   color: #64748b;
   font-size: 0.74rem;
   font-weight: 800;
+}
+
+.retela-step-pill small {
+  color: inherit;
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0;
+  opacity: 0.8;
+}
+
+.retela-step-pill-complete {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+  color: #15803d;
 }
 
 .retela-step-pill-active {

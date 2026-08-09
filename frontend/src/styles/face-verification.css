@@ -1,188 +1,189 @@
+.retela-register-modal-backdrop .retela-wizard-modal.retela-wizard-modal-faceid,
 .retela-wizard-modal-faceid {
-  width: 100vw;
-  height: 100dvh;
-  max-height: 100dvh;
-  border: 0;
-  border-radius: 0;
-  background: #020617;
+  width: min(100%, 1100px);
+  max-height: calc(100dvh - 1.5rem);
+  border: 1px solid #d9efe3;
+  border-radius: 1.25rem;
+  background: #f4fbf6;
   padding: 0;
-  overflow: hidden;
-  box-shadow: none;
+  overflow: auto;
+  box-shadow: 0 28px 80px rgba(15, 23, 42, 0.2);
 }
 
 .retela-wizard-modal-faceid > .retela-wizard-step {
-  height: 100%;
   min-height: 0;
 }
 
 .retela-face-scan-shell {
+  width: 100%;
+  min-height: min(720px, calc(100dvh - 1.5rem));
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(240, 253, 244, 0.92)),
+    #f6fbf7;
+  color: #0f172a;
+  padding: clamp(0.75rem, 2.5vw, 1.25rem);
+}
+
+.retela-face-card {
   display: grid;
   width: 100%;
-  height: 100dvh;
-  min-height: 100vh;
-  grid-template-rows: auto 1fr auto;
-  overflow: hidden;
-  background:
-    radial-gradient(circle at 50% 26%, rgba(34, 197, 94, 0.16), transparent 34%),
-    linear-gradient(180deg, #07110c 0%, #020617 60%, #01040a 100%);
-  color: #ffffff;
-  padding:
-    calc(env(safe-area-inset-top) + clamp(0.55rem, 1.8vw, 0.9rem))
-    clamp(1rem, 4vw, 1.5rem)
-    calc(env(safe-area-inset-bottom) + clamp(0.75rem, 2.5vw, 1rem));
-  isolation: isolate;
+  gap: clamp(1rem, 2.4vw, 1.35rem);
+  border: 1px solid #dbeee2;
+  border-radius: 1rem;
+  background: #ffffff;
+  padding: clamp(1rem, 2.8vw, 1.45rem);
+  box-shadow: 0 18px 55px rgba(15, 23, 42, 0.11);
 }
 
-.retela-face-scan-topbar {
-  z-index: 2;
-  display: flex;
-  min-height: 48px;
+.retela-face-header {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
   align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
+  gap: 0.85rem;
 }
 
-.retela-face-scan-text-button,
-.retela-face-scan-secure {
-  display: inline-flex;
-  min-height: 44px;
-  align-items: center;
-  gap: 0.45rem;
-  border: 0;
-  border-radius: 999px;
-  color: #f8fafc;
-  font-weight: 800;
-}
-
-.retela-face-scan-text-button {
-  min-width: 44px;
-  background: rgba(255, 255, 255, 0.08);
-  padding: 0 0.85rem;
+.retela-face-back {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  border: 1px solid #d8e8de;
+  border-radius: 0.75rem;
+  background: #ffffff;
+  color: #163923;
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.08);
   cursor: pointer;
 }
 
-.retela-face-scan-text-button:hover,
-.retela-face-scan-text-button:focus-visible {
-  background: rgba(255, 255, 255, 0.14);
-  outline: none;
+.retela-face-back:hover,
+.retela-face-back:focus-visible {
+  border-color: #86efac;
+  color: #15803d;
+  outline: 3px solid rgba(34, 197, 94, 0.18);
 }
 
-.retela-face-scan-secure {
-  border: 1px solid rgba(187, 247, 208, 0.28);
-  background: rgba(22, 163, 74, 0.18);
-  padding: 0 0.8rem;
-  color: #bbf7d0;
-  font-size: clamp(0.72rem, 2.5vw, 0.8rem);
-}
-
-.retela-face-scan-title {
-  display: grid;
-  min-width: 0;
-  place-items: center;
-  color: #f8fafc;
-  font-size: clamp(0.92rem, 3.8vw, 1rem);
+.retela-face-header h1 {
+  margin: 0;
+  color: #0f172a;
+  font-family: var(--font-display, inherit);
+  font-size: clamp(1.55rem, 3vw, 2.15rem);
   font-weight: 900;
-  text-align: center;
-}
-
-.retela-face-scan-title span {
-  color: #f8fafc;
-  font-size: clamp(0.92rem, 3.8vw, 1rem);
-  font-weight: 900;
-}
-
-.retela-face-scan-title strong,
-.retela-face-scan-step {
-  color: #86efac;
-  font-size: clamp(0.72rem, 2.8vw, 0.78rem);
-  font-weight: 900;
+  line-height: 1.1;
   letter-spacing: 0;
-  text-transform: uppercase;
 }
 
-.retela-face-scan-intro-main,
-.retela-face-scan-main {
-  display: grid;
-  min-height: 0;
-  align-content: center;
-  justify-items: center;
-  gap: clamp(0.7rem, 2.4dvh, 1.2rem);
+.retela-face-header p {
+  margin: 0.35rem 0 0;
+  color: #64748b;
+  font-size: 0.96rem;
+  line-height: 1.45;
 }
 
-.retela-face-scan-intro-art {
-  position: relative;
+.retela-face-progress {
   display: grid;
-  width: min(72vw, 20rem);
-  aspect-ratio: 1;
-  place-items: center;
+  grid-template-columns: repeat(5, minmax(130px, 1fr));
+  gap: 0.65rem;
+  margin: 0;
+  padding: 0 0 0.1rem;
+  overflow-x: auto;
+  list-style: none;
+  scrollbar-width: thin;
 }
 
-.retela-face-scan-intro-icon {
-  z-index: 2;
+.retela-face-progress li {
+  display: flex;
+  min-width: 130px;
+  align-items: center;
+  gap: 0.62rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.8rem;
+  background: #f8fafc;
+  padding: 0.68rem;
+  color: #64748b;
+}
+
+.retela-face-progress li > span {
   display: grid;
-  width: 48%;
-  aspect-ratio: 1;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
   place-items: center;
   border-radius: 999px;
-  background: rgba(34, 197, 94, 0.13);
-  color: #bbf7d0;
-  box-shadow:
-    inset 0 0 0 1px rgba(187, 247, 208, 0.28),
-    0 24px 55px rgba(34, 197, 94, 0.18);
+  background: #e2e8f0;
+  color: #475569;
+  font-size: 0.82rem;
+  font-weight: 900;
 }
 
-.retela-face-scan-copy {
-  display: grid;
-  width: min(100%, 28rem);
-  gap: clamp(0.65rem, 2dvh, 0.9rem);
-  text-align: center;
+.retela-face-progress strong,
+.retela-face-progress small {
+  display: block;
+  letter-spacing: 0;
 }
 
-.retela-face-scan-copy h1,
-.retela-face-scan-status h1 {
-  margin: 0;
+.retela-face-progress strong {
+  color: inherit;
+  font-size: 0.78rem;
+  font-weight: 900;
+  line-height: 1.18;
+}
+
+.retela-face-progress small {
+  margin-top: 0.12rem;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.retela-face-progress li.is-complete {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+  color: #15803d;
+}
+
+.retela-face-progress li.is-complete > span,
+.retela-face-progress li.is-current > span {
+  background: #16a34a;
   color: #ffffff;
-  font-size: clamp(1.65rem, 7vw, 2.45rem);
-  font-weight: 950;
-  line-height: 1.08;
-  letter-spacing: 0;
 }
 
-.retela-face-scan-copy p {
-  margin: 0;
-  color: rgba(226, 232, 240, 0.86);
-  font-size: clamp(0.95rem, 3.8vw, 1.05rem);
-  line-height: 1.55;
+.retela-face-progress li.is-current {
+  border-color: #86efac;
+  background: #ecfdf5;
+  color: #166534;
+  box-shadow: 0 8px 24px rgba(34, 197, 94, 0.12);
 }
 
-.retela-face-scan-footer {
+.retela-face-layout {
   display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 330px);
+  align-items: start;
+  gap: clamp(1rem, 3vw, 1.5rem);
 }
 
-.retela-face-scan-primary {
-  min-height: 52px;
-  border-radius: 999px;
-  font-size: 1rem;
+.retela-face-primary {
+  display: grid;
+  justify-items: center;
+  gap: 1rem;
+  min-width: 0;
 }
 
 .retela-face-camera-wrap {
   position: relative;
   display: grid;
-  width: min(86vw, 470px, calc(100dvh - 10rem));
-  min-width: 15.5rem;
+  width: clamp(350px, 38vw, 420px);
   aspect-ratio: 1;
   place-items: center;
 }
 
 .retela-face-camera-circle {
   position: absolute;
-  inset: clamp(1.08rem, 4.2vw, 1.65rem);
+  inset: 1.45rem;
   overflow: hidden;
   border-radius: 999px;
-  background: #020617;
+  background: #e2e8f0;
   box-shadow:
-    0 0 0 999px rgba(2, 6, 23, 0.48),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.16);
+    inset 0 0 0 1px rgba(15, 23, 42, 0.08),
+    0 16px 42px rgba(15, 23, 42, 0.14);
 }
 
 .retela-face-camera-media {
@@ -197,18 +198,77 @@
   transform: scaleX(-1);
 }
 
+.retela-face-guide {
+  position: absolute;
+  width: 42px;
+  height: 42px;
+  border-color: rgba(255, 255, 255, 0.9);
+  pointer-events: none;
+}
+
+.retela-face-guide-top-left {
+  top: 20%;
+  left: 20%;
+  border-top: 3px solid;
+  border-left: 3px solid;
+  border-top-left-radius: 13px;
+}
+
+.retela-face-guide-top-right {
+  top: 20%;
+  right: 20%;
+  border-top: 3px solid;
+  border-right: 3px solid;
+  border-top-right-radius: 13px;
+}
+
+.retela-face-guide-bottom-left {
+  bottom: 20%;
+  left: 20%;
+  border-bottom: 3px solid;
+  border-left: 3px solid;
+  border-bottom-left-radius: 13px;
+}
+
+.retela-face-guide-bottom-right {
+  right: 20%;
+  bottom: 20%;
+  border-right: 3px solid;
+  border-bottom: 3px solid;
+  border-bottom-right-radius: 13px;
+}
+
+.retela-face-detected-badge {
+  position: absolute;
+  left: 50%;
+  bottom: 12%;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border: 1px solid rgba(187, 247, 208, 0.9);
+  border-radius: 999px;
+  background: rgba(22, 163, 74, 0.94);
+  padding: 0.42rem 0.72rem;
+  color: #ffffff;
+  font-size: 0.78rem;
+  font-weight: 900;
+  transform: translateX(-50%);
+  box-shadow: 0 12px 28px rgba(22, 163, 74, 0.28);
+  white-space: nowrap;
+}
+
 .retela-scan-ring {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
-  filter: drop-shadow(0 0 24px rgba(34, 197, 94, 0.28));
+  filter: drop-shadow(0 0 14px rgba(34, 197, 94, 0.22));
   pointer-events: none;
 }
 
 .retela-scan-ring-segment {
   fill: none;
-  stroke: rgba(226, 232, 240, 0.34);
+  stroke: rgba(148, 163, 184, 0.34);
   transition: stroke 160ms ease, opacity 160ms ease, stroke-width 160ms ease;
 }
 
@@ -223,16 +283,16 @@
 }
 
 .retela-scan-ring.is-error .retela-scan-ring-segment {
-  stroke: rgba(248, 113, 113, 0.8);
+  stroke: rgba(248, 113, 113, 0.86);
 }
 
 .retela-scan-ring.is-complete .retela-scan-ring-segment {
-  stroke: #22c55e;
+  stroke: #16a34a;
 }
 
 .retela-scan-check circle {
-  fill: #22c55e;
-  filter: drop-shadow(0 18px 34px rgba(34, 197, 94, 0.42));
+  fill: #16a34a;
+  filter: drop-shadow(0 18px 34px rgba(34, 197, 94, 0.36));
   animation: retelaScanCheckPop 440ms cubic-bezier(0.2, 1.2, 0.24, 1) both;
 }
 
@@ -244,40 +304,193 @@
   color: #ffffff;
 }
 
-.retela-face-scan-status {
+.retela-face-ready-panel {
   display: grid;
-  width: min(100%, 28rem);
-  justify-items: center;
-  gap: 0.65rem;
+  width: min(100%, 31rem);
+  gap: 0.3rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.9rem;
+  background: #f8fafc;
+  padding: 0.95rem 1rem;
   text-align: center;
 }
 
-.retela-face-scan-success-mark {
+.retela-face-ready-panel.is-ready {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+}
+
+.retela-face-ready-panel h2 {
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0;
+  color: #0f172a;
+  font-family: var(--font-display, inherit);
+  font-size: 1.2rem;
+  font-weight: 900;
+  line-height: 1.25;
+  letter-spacing: 0;
+}
+
+.retela-face-ready-panel.is-ready h2 {
+  color: #15803d;
+}
+
+.retela-face-ready-panel p {
+  margin: 0;
+  color: #64748b;
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+
+.retela-face-capture {
+  display: inline-flex;
+  width: min(100%, 22rem);
+  min-height: 54px;
+  align-items: center;
+  justify-content: center;
+  gap: 0.55rem;
+  border: 0;
+  border-radius: 0.9rem;
+  background: #16a34a;
+  color: #ffffff;
+  font-size: 1rem;
+  font-weight: 900;
+  box-shadow: 0 14px 30px rgba(22, 163, 74, 0.25);
+  cursor: pointer;
+  transition: transform 150ms ease, background 150ms ease, box-shadow 150ms ease;
+}
+
+.retela-face-capture:not(:disabled):hover {
+  background: #15803d;
+  box-shadow: 0 18px 36px rgba(22, 163, 74, 0.32);
+  transform: translateY(-1px);
+}
+
+.retela-face-capture:focus-visible {
+  outline: 3px solid rgba(34, 197, 94, 0.28);
+  outline-offset: 3px;
+}
+
+.retela-face-capture:disabled {
+  background: #9cc9ad;
+  color: rgba(255, 255, 255, 0.86);
+  box-shadow: none;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.retela-face-capture-note {
+  margin: -0.35rem 0 0;
+  color: #64748b;
+  font-size: 0.82rem;
+  font-weight: 700;
+  text-align: center;
+}
+
+.retela-face-actions {
+  display: flex;
+  width: min(100%, 25rem);
+  justify-content: center;
+  gap: 0.75rem;
+}
+
+.retela-face-actions .btn {
+  min-height: 50px;
+  flex: 1 1 0;
+  border-radius: 0.9rem;
+}
+
+.retela-face-continue {
+  background: #16a34a;
+  color: #ffffff;
+}
+
+.retela-face-side {
   display: grid;
-  width: 54px;
-  height: 54px;
+  gap: 1rem;
+  min-width: 0;
+}
+
+.retela-face-info-panel,
+.retela-face-security-panel {
+  border: 1px solid #dbeee2;
+  border-radius: 0.95rem;
+  background: #f8fdf9;
+  padding: 1rem;
+}
+
+.retela-face-info-panel h2,
+.retela-face-security-panel h2 {
+  margin: 0;
+  color: #0f172a;
+  font-family: var(--font-display, inherit);
+  font-size: 1.02rem;
+  font-weight: 900;
+  line-height: 1.2;
+  letter-spacing: 0;
+}
+
+.retela-face-info-panel ol {
+  display: grid;
+  gap: 0.85rem;
+  margin: 0.9rem 0 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: face-tip;
+}
+
+.retela-face-info-panel li {
+  position: relative;
+  display: grid;
+  gap: 0.18rem;
+  min-height: 42px;
+  padding-left: 2.45rem;
+  counter-increment: face-tip;
+}
+
+.retela-face-info-panel li::before {
+  position: absolute;
+  left: 0;
+  top: 0.05rem;
+  display: grid;
+  width: 1.75rem;
+  height: 1.75rem;
   place-items: center;
   border-radius: 999px;
-  background: #22c55e;
-  color: #ffffff;
-  box-shadow: 0 18px 38px rgba(34, 197, 94, 0.38);
-  animation: retelaScanCheckPop 440ms cubic-bezier(0.2, 1.2, 0.24, 1) both;
+  background: #dcfce7;
+  color: #15803d;
+  content: counter(face-tip);
+  font-size: 0.78rem;
+  font-weight: 900;
 }
 
-.retela-face-scan-status h1 {
-  font-size: clamp(1.28rem, 5.7vw, 2rem);
+.retela-face-info-panel strong {
+  color: #163923;
+  font-size: 0.9rem;
+  font-weight: 900;
+  line-height: 1.25;
 }
 
-.retela-face-scan-retry,
-.retela-face-scan-preview-actions {
-  display: grid;
-  width: min(100%, 20rem);
+.retela-face-info-panel span,
+.retela-face-security-panel p {
+  color: #64748b;
+  font-size: 0.84rem;
+  line-height: 1.42;
 }
 
-.retela-face-scan-retry .btn,
-.retela-face-scan-preview-actions .btn {
-  min-height: 48px;
-  border-radius: 999px;
+.retela-face-security-panel {
+  display: flex;
+  gap: 0.8rem;
+  align-items: flex-start;
+  background: #eefdf3;
+  color: #15803d;
+}
+
+.retela-face-security-panel p {
+  margin: 0.24rem 0 0;
 }
 
 @keyframes retelaScanPulse {
@@ -300,45 +513,121 @@
   }
 }
 
-@media (max-width: 420px) {
-  .retela-face-scan-shell {
-    padding-inline: 0.85rem;
+@media (max-width: 767px) {
+  .retela-register-modal-backdrop .retela-wizard-modal.retela-wizard-modal-faceid,
+  .retela-wizard-modal-faceid {
+    width: calc(100vw - 20px);
+    max-height: calc(100dvh - 20px);
+    border-radius: 1rem;
   }
 
-  .retela-face-scan-secure span,
-  .retela-face-scan-text-button span {
-    display: none;
+  .retela-face-scan-shell {
+    min-height: auto;
+    padding: 0.65rem;
+  }
+
+  .retela-face-card {
+    gap: 0.9rem;
+    padding: 0.85rem;
+  }
+
+  .retela-face-header {
+    grid-template-columns: 40px minmax(0, 1fr);
+  }
+
+  .retela-face-back {
+    width: 40px;
+    height: 40px;
+    border-radius: 0.7rem;
+  }
+
+  .retela-face-header h1 {
+    font-size: 1.35rem;
+  }
+
+  .retela-face-header p {
+    font-size: 0.86rem;
+  }
+
+  .retela-face-progress {
+    grid-template-columns: repeat(5, minmax(118px, 1fr));
+    margin-inline: -0.1rem;
+    padding-bottom: 0.15rem;
+  }
+
+  .retela-face-progress li {
+    min-width: 118px;
+    padding: 0.55rem;
+  }
+
+  .retela-face-layout {
+    grid-template-columns: 1fr;
   }
 
   .retela-face-camera-wrap {
-    width: min(88vw, calc(100dvh - 9.25rem));
-    min-width: 14.2rem;
+    width: min(78vw, 320px);
+    min-width: 230px;
+  }
+
+  .retela-face-camera-circle {
+    inset: 1.05rem;
+  }
+
+  .retela-face-guide {
+    width: 34px;
+    height: 34px;
+  }
+
+  .retela-face-detected-badge {
+    bottom: 10%;
+    font-size: 0.74rem;
+  }
+
+  .retela-face-ready-panel {
+    padding: 0.85rem;
+  }
+
+  .retela-face-ready-panel h2 {
+    font-size: 1.06rem;
+  }
+
+  .retela-face-capture,
+  .retela-face-actions {
+    width: 100%;
+  }
+
+  .retela-face-actions {
+    flex-direction: column;
   }
 }
 
-@media (min-width: 768px) {
-  .retela-face-scan-shell {
-    padding-inline: clamp(2rem, 6vw, 4rem);
+@media (max-width: 420px) {
+  .retela-face-progress li {
+    min-width: 112px;
   }
 
-  .retela-face-camera-wrap {
-    width: min(48vw, 480px, calc(100dvh - 10rem));
+  .retela-face-progress strong {
+    font-size: 0.72rem;
+  }
+
+  .retela-face-progress small {
+    font-size: 0.68rem;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .retela-scan-ring-segment,
   .retela-scan-ring-segment.is-current,
-  .retela-scan-check circle {
+  .retela-scan-check circle,
+  .retela-face-capture {
     animation: none;
     transition: none;
   }
 }
 
 @supports not (height: 100dvh) {
-  .retela-wizard-modal-faceid,
-  .retela-face-scan-shell {
-    height: 100vh;
-    max-height: 100vh;
+  .retela-register-modal-backdrop .retela-wizard-modal.retela-wizard-modal-faceid,
+  .retela-wizard-modal-faceid {
+    max-height: calc(100vh - 1.5rem);
   }
 }

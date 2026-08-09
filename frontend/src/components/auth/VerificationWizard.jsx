@@ -7,7 +7,14 @@ import GovernmentIDStep from "./GovernmentIDStep";
 import OTPVerification from "./OTPVerification";
 import SelfieCaptureStep from "./SelfieCaptureStep";
 
-const steps = ["Personal Info", "Selfie", "Government ID", "OTP", "Completed"];
+const steps = ["Fill Up Info", "Face Recognition", "Government ID", "Email Verification", "Complete"];
+
+function getStepStatus(index, currentStep) {
+  if (index === 0) return "Completed";
+  if (index < currentStep) return "Completed";
+  if (index === currentStep) return "In Progress";
+  return "Upcoming";
+}
 
 export default function VerificationWizard({ open, registration, onClose, onComplete }) {
   const [step, setStep] = useState(1);
@@ -31,7 +38,7 @@ export default function VerificationWizard({ open, registration, onClose, onComp
 
   const sendOtpAfterId = useCallback(async () => {
     if (!verification.selfieImage || !verification.selfieBlinkVerified || !verification.selfieLiveCapture || !verification.idImage || !verification.idQualityVerified) {
-      setError("Complete selfie liveness and government ID capture before OTP verification.");
+      setError("Complete face recognition and government ID capture before email verification.");
       return;
     }
     setLoading(true);
@@ -71,7 +78,7 @@ export default function VerificationWizard({ open, registration, onClose, onComp
 
   return createPortal(
     <div className="retela-register-modal-backdrop retela-wizard-backdrop" role="presentation" onMouseDown={close}>
-      <section className={`retela-wizard-modal ${step === 1 ? "retela-wizard-modal-faceid" : ""}`} role="dialog" aria-modal="true" aria-labelledby={step === 1 ? undefined : "verification-title"} aria-label={step === 1 ? "Face Verification" : undefined} onMouseDown={(event) => event.stopPropagation()}>
+      <section className={`retela-wizard-modal ${step === 1 ? "retela-wizard-modal-faceid" : ""}`} role="dialog" aria-modal="true" aria-labelledby={step === 1 ? undefined : "verification-title"} aria-label={step === 1 ? "Face Recognition" : undefined} onMouseDown={(event) => event.stopPropagation()}>
         {step !== 1 ? (
           <div className="flex items-start justify-between gap-3">
             <div>
@@ -86,9 +93,15 @@ export default function VerificationWizard({ open, registration, onClose, onComp
 
         {step !== 1 ? (
           <div className="retela-stepper">
-            {steps.map((label, index) => (
-              <span key={label} className={`retela-step-pill ${index <= step ? "retela-step-pill-active" : ""}`}>{index + 1}. {label}</span>
-            ))}
+            {steps.map((label, index) => {
+              const status = getStepStatus(index, step);
+              return (
+                <span key={label} className={`retela-step-pill ${status === "In Progress" ? "retela-step-pill-active" : ""}${status === "Completed" ? " retela-step-pill-complete" : ""}`}>
+                  {index + 1}. {label}
+                  <small>{status}</small>
+                </span>
+              );
+            })}
           </div>
         ) : null}
 
@@ -103,7 +116,7 @@ export default function VerificationWizard({ open, registration, onClose, onComp
                 ...value,
                 selfieImage: file,
                 selfiePreview: preview,
-                selfieBlinkVerified: Boolean(meta.blinkVerified),
+                selfieBlinkVerified: Boolean(meta.blinkVerified || meta.manualCaptureVerified),
                 selfieLiveCapture: Boolean(meta.liveCapture),
                 faceMatchScore: meta.confidence ? Math.round(meta.confidence * 100) : value.faceMatchScore
               }))}
