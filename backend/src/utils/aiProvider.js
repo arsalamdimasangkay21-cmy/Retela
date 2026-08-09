@@ -9,6 +9,21 @@ const PROVIDERS = new Set(["openai", "gemini", "auto"]);
 let lastProviderUsed = "";
 let lastProviderStatus = "Not checked";
 let lastProviderCheckedAt = null;
+let startupDiagnosticsLogged = false;
+
+function logAIStartupDiagnostics() {
+  if (startupDiagnosticsLogged) return;
+  startupDiagnosticsLogged = true;
+  console.info("[AI config]", {
+    geminiApiKeyEnvConfigured: Boolean(process.env.GEMINI_API_KEY),
+    googleApiKeyEnvConfigured: Boolean(process.env.GOOGLE_API_KEY),
+    openaiApiKeyEnvConfigured: Boolean(process.env.OPENAI_API_KEY),
+    geminiModel: process.env.GEMINI_MODEL || "gemini-2.5-flash",
+    openaiModel: process.env.OPENAI_MODEL || "gpt-4o-mini",
+    providerSelection: "system_settings.ai.aiProvider",
+    providerSelectionEnvConfigured: false
+  });
+}
 
 function normalizeProvider(value) {
   const provider = String(value || "auto").trim().toLowerCase();
@@ -59,22 +74,86 @@ function markProviderFailure(error) {
   lastProviderCheckedAt = new Date().toISOString();
 }
 
+function redactProviderMessage(value) {
+  return String(value || "")
+    .replace(/sk-[A-Za-z0-9_-]{12,}/g, "[redacted-openai-key]")
+    .replace(/AIza[0-9A-Za-z_-]{20,}/g, "[redacted-google-key]")
+    .replace(/Bearer\s+[A-Za-z0-9._~+/-]+=*/gi, "Bearer [redacted]")
+    .replace(/x-goog-api-key['":\s]+[A-Za-z0-9_-]+/gi, "x-goog-api-key [redacted]")
+    .slice(0, 240);
+}
+
+function classifyProviderFailure(provider, error) {
+  const status = Number(error?.providerStatus || error?.status || 0);
+  const message = redactProviderMessage(error?.message || error?.cause?.message || "");
+  const lower = message.toLowerCase();
+
+  if (/api key is missing|missing api key|not configured/.test(lower)) {
+    return { category: "missing_api_key", status: status || null, detail: message };
+  }
+  if (status === 401 || status === 403 || /invalid api key|api key not valid|incorrect api key|permission denied|unauthorized|forbidden/.test(lower)) {
+    return { category: "invalid_api_key", status: status || null, detail: message };
+  }
+  if (status === 404 || /model.*not found|not found.*model|model.*does not exist|unsupported model|invalid model/.test(lower)) {
+    return { category: "unsupported_or_incorrect_model", status: status || null, detail: message };
+  }
+  if (status === 429 || /quota|rate.?limit|resource_exhausted|too many requests|insufficient_quota/.test(lower)) {
+    return { category: "quota_or_rate_limit", status: status || null, detail: message };
+  }
+  if (/fetch failed|network|enotfound|eai_again|econnreset|etimedout|timeout|socket|tls/.test(lower) || ["ENOTFOUND", "EAI_AGAIN", "ECONNRESET", "ETIMEDOUT"].includes(error?.code)) {
+    return { category: "network_error", status: status || null, detail: message || error?.code || "Network request failed" };
+  }
+  if (status >= 400) {
+    return { category: "provider_api_request_failure", status, detail: message };
+  }
+  return { category: "provider_unavailable", status: status || null, detail: message || "Provider failed without details" };
+}
+
+function logProviderFailure(provider, error, context = "") {
+  const failure = classifyProviderFailure(provider, error);
+  const label = providerLabel(provider);
+  const suffix = context ? ` ${context}` : "";
+  console.warn(`[AI] ${label} failed${suffix}: ${failure.category}`, {
+    status: failure.status,
+    detail: failure.detail
+  });
+  return failure;
+}
+
+logAIStartupDiagnostics();
+
 export async function generateAIResponse(message, context = {}) {
+  logAIStartupDiagnostics();
   const start = Date.now();
   const selectedProvider = await getProviderConfig(context.provider);
 
   try {
     let result;
     if (selectedProvider === "openai") {
-      result = await runOpenAi(message, context);
+      try {
+        result = await runOpenAi(message, context);
+      } catch (openAiError) {
+        logProviderFailure("openai", openAiError);
+        throw openAiError;
+      }
     } else if (selectedProvider === "gemini") {
-      result = await runGemini(message, context);
+      try {
+        result = await runGemini(message, context);
+      } catch (geminiError) {
+        logProviderFailure("gemini", geminiError);
+        throw geminiError;
+      }
     } else {
       try {
         result = await runOpenAi(message, context);
       } catch (openAiError) {
-        console.warn(`[AI] OpenAI failed in auto mode. Falling back to Gemini: ${openAiError.message}`);
-        result = await runGemini(message, context);
+        logProviderFailure("openai", openAiError, "in auto mode; falling back to Gemini");
+        try {
+          result = await runGemini(message, context);
+        } catch (geminiError) {
+          logProviderFailure("gemini", geminiError, "after OpenAI fallback");
+          throw geminiError;
+        }
       }
     }
 

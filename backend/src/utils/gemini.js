@@ -2,6 +2,13 @@ import { HttpError } from "./errors.js";
 
 const DEFAULT_MODEL = "gemini-2.5-flash";
 
+function safeProviderErrorText(value) {
+  return String(value || "")
+    .replace(/AIza[0-9A-Za-z_-]{20,}/g, "[redacted-google-key]")
+    .replace(/x-goog-api-key['":\s]+[A-Za-z0-9_-]+/gi, "x-goog-api-key [redacted]")
+    .slice(0, 180);
+}
+
 function getGeminiApiKey() {
   return process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "";
 }
@@ -89,7 +96,11 @@ export async function generateGeminiResult({ prompt, products, history, orders =
 
   if (!response.ok) {
     const errorBody = await response.text();
-    throw new HttpError(502, `Gemini rejected the request: ${errorBody.slice(0, 180)}`);
+    const error = new HttpError(502, `Gemini rejected the request: ${safeProviderErrorText(errorBody)}`);
+    error.provider = "gemini";
+    error.providerStatus = response.status;
+    error.providerStatusText = response.statusText;
+    throw error;
   }
 
   const data = await response.json();

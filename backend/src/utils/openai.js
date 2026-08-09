@@ -3,6 +3,13 @@ import { getOpenAiRuntimeSettings } from "./systemSettings.js";
 
 const DEFAULT_MODEL = "gpt-4o-mini";
 
+function safeProviderErrorText(value) {
+  return String(value || "")
+    .replace(/sk-[A-Za-z0-9_-]{12,}/g, "[redacted-openai-key]")
+    .replace(/Bearer\s+[A-Za-z0-9._~+/-]+=*/gi, "Bearer [redacted]")
+    .slice(0, 180);
+}
+
 function productLine(product) {
   const stock = Number(product.stock || 0);
   return [
@@ -91,7 +98,11 @@ export async function generateOpenAiResult({ prompt, products, history, orders =
 
   if (!response.ok) {
     const errorBody = await response.text();
-    throw new HttpError(502, `OpenAI rejected the request: ${errorBody.slice(0, 180)}`);
+    const error = new HttpError(502, `OpenAI rejected the request: ${safeProviderErrorText(errorBody)}`);
+    error.provider = "openai";
+    error.providerStatus = response.status;
+    error.providerStatusText = response.statusText;
+    throw error;
   }
 
   const data = await response.json();
