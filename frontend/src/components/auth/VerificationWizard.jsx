@@ -27,7 +27,7 @@ export default function VerificationWizard({ open, registration, onClose, onComp
     idLiveCapture: false,
     selfieImage: null,
     selfiePreview: "",
-    selfieBlinkVerified: false,
+    selfieManualCaptureVerified: false,
     selfieLiveCapture: false,
     faceMatchScore: 0
   });
@@ -37,7 +37,7 @@ export default function VerificationWizard({ open, registration, onClose, onComp
   const [error, setError] = useState("");
 
   const sendOtpAfterId = useCallback(async () => {
-    if (!verification.selfieImage || !verification.selfieBlinkVerified || !verification.selfieLiveCapture || !verification.idImage || !verification.idQualityVerified) {
+    if (!verification.selfieImage || !verification.selfieManualCaptureVerified || !verification.selfieLiveCapture || !verification.idImage || !verification.idQualityVerified) {
       setError("Complete face recognition and government ID capture before email verification.");
       return;
     }
@@ -49,7 +49,7 @@ export default function VerificationWizard({ open, registration, onClose, onComp
         idType: verification.idType,
         idNumber: verification.idNumber,
         faceMatchScore: verification.faceMatchScore,
-        selfieBlinkVerified: verification.selfieBlinkVerified,
+        selfieBlinkVerified: verification.selfieManualCaptureVerified,
         selfieLiveCapture: verification.selfieLiveCapture,
         idQualityVerified: verification.idQualityVerified,
         idLiveCapture: verification.idLiveCapture,
@@ -68,7 +68,7 @@ export default function VerificationWizard({ open, registration, onClose, onComp
     } finally {
       setLoading(false);
     }
-  }, [registration, verification.faceMatchScore, verification.idImage, verification.idLiveCapture, verification.idNumber, verification.idQualityVerified, verification.idType, verification.selfieBlinkVerified, verification.selfieImage, verification.selfieLiveCapture]);
+  }, [registration, verification.faceMatchScore, verification.idImage, verification.idLiveCapture, verification.idNumber, verification.idQualityVerified, verification.idType, verification.selfieImage, verification.selfieLiveCapture, verification.selfieManualCaptureVerified]);
 
   if (!open) return null;
 
@@ -110,13 +110,13 @@ export default function VerificationWizard({ open, registration, onClose, onComp
             <SelfieCaptureStep
               selfie={verification.selfieImage}
               selfiePreview={verification.selfiePreview}
-              livenessVerified={verification.selfieBlinkVerified}
+              captureVerified={verification.selfieManualCaptureVerified}
               onBack={onClose}
               onCaptured={(file, preview, meta = {}) => setVerification((value) => ({
                 ...value,
                 selfieImage: file,
                 selfiePreview: preview,
-                selfieBlinkVerified: Boolean(meta.blinkVerified || meta.manualCaptureVerified),
+                selfieManualCaptureVerified: Boolean(meta.manualCaptureVerified),
                 selfieLiveCapture: Boolean(meta.liveCapture),
                 faceMatchScore: meta.confidence ? Math.round(meta.confidence * 100) : value.faceMatchScore
               }))}
