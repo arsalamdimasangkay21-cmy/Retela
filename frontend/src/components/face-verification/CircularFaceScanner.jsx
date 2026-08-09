@@ -174,7 +174,7 @@ export default function CircularFaceScanner({
       onCaptured(compressed, preview, {
         manualCaptureVerified: true,
         liveCapture: true,
-        confidence: 100
+        confidence: 1
       });
 
       if (navigator.vibrate) navigator.vibrate(80);

@@ -1,8 +1,8 @@
 import { createPortal } from "react-dom";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2, X } from "lucide-react";
 import { sendRegistrationOtp } from "../../api/registration";
-import { getApiErrorMessage } from "../../api/client";
+import { API_URL, getApiErrorMessage } from "../../api/client";
 import GovernmentIDStep from "./GovernmentIDStep";
 import OTPVerification from "./OTPVerification";
 import SelfieCaptureStep from "./SelfieCaptureStep";
@@ -16,8 +16,64 @@ function getStepStatus(index, currentStep) {
   return "Upcoming";
 }
 
+function firstValidationMessage(errors = {}) {
+  const priority = [
+    "displayName",
+    "email",
+    "phone",
+    "location",
+    "birthday",
+    "gender",
+    "password",
+    "confirmPassword",
+    "accepted",
+    "selfieImage",
+    "idImage",
+    "idType",
+    "idNumber"
+  ];
+  for (const key of priority) {
+    if (errors[key]) return errors[key];
+  }
+  return Object.values(errors).find(Boolean) || "";
+}
+
+function validateRegistrationContinue(registration, verification) {
+  const email = String(registration.email || "").trim();
+  const governmentIdVerified = Boolean(verification.idQualityVerified);
+  const checks = [
+    [String(registration.displayName || "").trim(), "Display Name is required."],
+    [/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email), "Please enter a valid email address."],
+    [/^09\d{9}$/.test(String(registration.phone || "")), "Please enter a valid phone number."],
+    [String(registration.location || "").trim(), "Location is required."],
+    [registration.birthday, "Birthday is required."],
+    [registration.gender, "Gender is required."],
+    [registration.password, "Password is required."],
+    [registration.confirmPassword && registration.password === registration.confirmPassword, "Passwords do not match."],
+    [registration.accepted, "Please accept the Terms & Conditions."],
+    [verification.selfieImage, "Please capture your face before continuing."],
+    [verification.selfieManualCaptureVerified, "Please capture your face before continuing."],
+    [verification.selfieLiveCapture, "Please capture your face before continuing."],
+    [verification.idImage, "Please upload or capture your Government ID."],
+    [governmentIdVerified, "Government ID verification is not complete."],
+    [verification.idType, "Government ID type is required."],
+    [String(verification.idNumber || "").trim(), "Government ID number is required."]
+  ];
+
+  const failed = checks.find(([valid]) => !valid);
+  return failed ? failed[1] : "";
+}
+
+function normalizeFaceMatchScore(confidence, fallback = 100) {
+  const value = Number(confidence);
+  if (!Number.isFinite(value) || value <= 0) return fallback;
+  return Math.round(Math.max(40, Math.min(100, value <= 1 ? value * 100 : value)));
+}
+
 export default function VerificationWizard({ open, registration, onClose, onComplete }) {
   const [step, setStep] = useState(1);
+  const sendingOtpRef = useRef(false);
+  const sendOtpAbortRef = useRef(null);
   const [verification, setVerification] = useState({
     idType: "",
     idNumber: "",
@@ -37,14 +93,40 @@ export default function VerificationWizard({ open, registration, onClose, onComp
   const [error, setError] = useState("");
 
   const sendOtpAfterId = useCallback(async () => {
-    if (!verification.selfieImage || !verification.selfieManualCaptureVerified || !verification.selfieLiveCapture || !verification.idImage || !verification.idQualityVerified) {
-      setError("Complete face recognition and government ID capture before email verification.");
+    if (sendingOtpRef.current) return;
+
+    const governmentIdVerified = Boolean(verification.idQualityVerified);
+    console.log("[registration continue]", {
+      currentStep: step,
+      apiUrl: API_URL,
+      otpEndpoint: "/auth/register/send-otp",
+      hasPersonalInfo: Boolean(registration.displayName && registration.email && registration.phone && registration.location),
+      hasDisplayName: Boolean(registration.displayName),
+      hasEmail: Boolean(registration.email),
+      hasPhone: Boolean(registration.phone),
+      hasAddress: Boolean(registration.location),
+      hasFaceCapture: Boolean(verification.selfieImage && verification.selfieManualCaptureVerified),
+      hasFaceDescriptor: false,
+      hasGovernmentId: Boolean(verification.idImage),
+      governmentIdVerified,
+      hasGovernmentIdType: Boolean(verification.idType),
+      hasGovernmentIdNumber: Boolean(verification.idNumber)
+    });
+
+    const validationError = validateRegistrationContinue(registration, verification);
+    if (validationError) {
+      console.warn("[registration continue] blocked by frontend validation", { currentStep: step, reason: validationError });
+      setError(validationError);
       return;
     }
+
+    const controller = new AbortController();
+    sendOtpAbortRef.current = controller;
+    sendingOtpRef.current = true;
     setLoading(true);
     setError("");
     try {
-      const { data } = await sendRegistrationOtp({
+      const payload = {
         ...registration,
         idType: verification.idType,
         idNumber: verification.idNumber,
@@ -55,6 +137,30 @@ export default function VerificationWizard({ open, registration, onClose, onComp
         idLiveCapture: verification.idLiveCapture,
         idImage: verification.idImage,
         selfieImage: verification.selfieImage
+      };
+
+      console.log("[registration continue] sending otp request", {
+        currentStep: step,
+        endpoint: "/auth/register/send-otp",
+        hasEmail: Boolean(payload.email),
+        hasFaceCapture: Boolean(payload.selfieImage),
+        hasGovernmentId: Boolean(payload.idImage),
+        governmentIdVerified: Boolean(payload.idQualityVerified)
+      });
+
+      const { data } = await sendRegistrationOtp(payload, {
+        signal: controller.signal,
+        timeout: 60000
+      });
+
+      if (data?.success === false) {
+        throw new Error(data.message || "Unable to send verification code. Please try again.");
+      }
+
+      console.log("[registration continue] otp request succeeded", {
+        currentStep: step,
+        hasEmail: Boolean(data?.email || registration.email),
+        expiresInSeconds: data?.expiresInSeconds || 300
       });
       setOtpEmail(data.email || registration.email);
       setOtpMeta({
@@ -64,11 +170,32 @@ export default function VerificationWizard({ open, registration, onClose, onComp
       });
       setStep(3);
     } catch (requestError) {
-      setError(getApiErrorMessage(requestError, "Could not send OTP after registration review"));
+      if (requestError?.code === "ERR_CANCELED") {
+        setError("Verification request was cancelled. Please try again.");
+        return;
+      }
+
+      const responseErrors = requestError?.response?.data?.errors;
+      const fieldMessage = responseErrors ? firstValidationMessage(responseErrors) : "";
+      const message = fieldMessage || getApiErrorMessage(requestError, "Unable to send verification code. Please try again.");
+      console.error("[registration continue] otp request failed", {
+        currentStep: step,
+        status: requestError?.response?.status || null,
+        code: requestError?.code || null,
+        message,
+        errorFields: responseErrors ? Object.keys(responseErrors) : []
+      });
+      setError(message);
     } finally {
+      sendingOtpRef.current = false;
+      if (sendOtpAbortRef.current === controller) sendOtpAbortRef.current = null;
       setLoading(false);
     }
-  }, [registration, verification.faceMatchScore, verification.idImage, verification.idLiveCapture, verification.idNumber, verification.idQualityVerified, verification.idType, verification.selfieImage, verification.selfieLiveCapture, verification.selfieManualCaptureVerified]);
+  }, [registration, step, verification.faceMatchScore, verification.idImage, verification.idLiveCapture, verification.idNumber, verification.idQualityVerified, verification.idType, verification.selfieImage, verification.selfieLiveCapture, verification.selfieManualCaptureVerified]);
+
+  useEffect(() => () => {
+    sendOtpAbortRef.current?.abort();
+  }, []);
 
   if (!open) return null;
 
@@ -118,7 +245,7 @@ export default function VerificationWizard({ open, registration, onClose, onComp
                 selfiePreview: preview,
                 selfieManualCaptureVerified: Boolean(meta.manualCaptureVerified),
                 selfieLiveCapture: Boolean(meta.liveCapture),
-                faceMatchScore: meta.confidence ? Math.round(meta.confidence * 100) : value.faceMatchScore
+                faceMatchScore: meta.confidence ? normalizeFaceMatchScore(meta.confidence, value.faceMatchScore || 100) : value.faceMatchScore
               }))}
               onNext={() => setStep(2)}
             />

@@ -217,7 +217,7 @@ async function getRegistrationErrors(body, options = {}) {
 
 function throwValidationErrors(errors) {
   if (Object.keys(errors).length) {
-    throw new HttpError(400, "Registration validation failed.", errors);
+    throw new HttpError(400, Object.values(errors).find(Boolean) || "Please check your registration details.", errors);
   }
 }
 
@@ -430,96 +430,144 @@ export const checkRegistrationField = asyncHandler(async (req, res) => {
 });
 
 export const sendRegistrationOtp = asyncHandler(async (req, res) => {
-  await ensureVerificationTables();
-  await cleanupExpiredRegistrationOtps();
-  const { input, errors } = await getRegistrationErrors(req.body, { includeIdentity: true });
-  const idImage = req.files?.idImage?.[0];
-  const selfieImage = req.files?.selfieImage?.[0];
-  if (!idImage) errors.idImage = "Government ID image is required.";
-  if (!selfieImage) errors.selfieImage = "Selfie image is required.";
-  addImageValidationError(idImage, errors, "idImage", "Government ID", { minWidth: 720, minHeight: 420 });
-  addImageValidationError(selfieImage, errors, "selfieImage", "Selfie", { minWidth: 480, minHeight: 480 });
-  if (idImage?.buffer && selfieImage?.buffer && sha256(idImage.buffer) === sha256(selfieImage.buffer)) {
-    errors.idImage = "Government ID image must be different from the selfie.";
-  }
-  throwValidationErrors(errors);
-
-  const latest = await query(
-    `SELECT id, resend_available_at, consumed_at
-     FROM otp_codes
-     WHERE contact = :email AND purpose = 'registration'
-     ORDER BY id DESC
-     LIMIT 1`,
-    { email: input.email }
-  );
-  if (latest[0]?.consumed_at === null && new Date(latest[0].resend_available_at) > new Date()) {
-    throw new HttpError(429, "Please wait 60 seconds before requesting another OTP");
-  }
-
-  const otp = createOtp();
-  const otpHash = await hashPassword(otp);
-  const payload = {
-    username: input.username,
-    display_name: input.displayName,
-    email: input.email,
-    phone_number: input.phone,
-    location: input.location,
-    birthday: normalizeBirthday(input.birthday),
-    gender: input.gender,
-    password_hash: await hashPassword(input.password),
-    id_type: input.idType,
-    id_number: input.idNumber
-  };
-  const [idImagePath, selfieImagePath] = await Promise.all([
-    saveBufferedUpload(idImage),
-    saveBufferedUpload(selfieImage)
-  ]);
-
-  let insertedOtpId;
   try {
-    const result = await query(
-      `INSERT INTO otp_codes
-        (contact, purpose, otp_code, expires_at, resend_available_at, max_resends, registration_payload, id_image_path, selfie_image_path, face_match_score)
-       VALUES
-        (:email, 'registration', :otp, :expiresAt, :resendAvailableAt, :maxResends, :payload, :idImage, :selfieImage, :faceMatchScore)`,
-      {
-        email: input.email,
-        otp: otpHash,
-        expiresAt: getOtpExpiry(),
-        resendAvailableAt: getResendAvailableAt(),
-        maxResends: getOtpMaxResends(),
-        payload: JSON.stringify(payload),
-        idImage: idImagePath,
-        selfieImage: selfieImagePath,
-        faceMatchScore: input.faceMatchScore
-      }
-    );
-    insertedOtpId = result.insertId;
+    console.log("[registration otp] request received", {
+      hasEmail: Boolean(req.body?.email),
+      purpose: req.body?.purpose || "registration",
+      hasIdImage: Boolean(req.files?.idImage?.[0]),
+      hasSelfieImage: Boolean(req.files?.selfieImage?.[0]),
+      hasIdType: Boolean(req.body?.idType),
+      hasIdNumber: Boolean(req.body?.idNumber),
+      selfieManualCaptureVerified: normalizeBoolean(req.body?.selfieBlinkVerified),
+      governmentIdVerified: normalizeBoolean(req.body?.idQualityVerified)
+    });
 
-    await sendEmail(
-      input.email,
-      "Your RETELA verification OTP",
-      `Your RETELA OTP is ${otp}. It expires in ${getOtpTtlMinutes()} minutes.`
-    );
-    logRegistrationEvent("OTP sent", { email: input.email, otpId: insertedOtpId });
-  } catch (err) {
-    if (insertedOtpId) {
-      await query("DELETE FROM otp_codes WHERE id = :id", { id: insertedOtpId }).catch((error) => {
-        console.warn(`[registration] OTP rollback skipped: ${error.message}`);
-      });
+    await ensureVerificationTables();
+    await cleanupExpiredRegistrationOtps();
+    const { input, errors } = await getRegistrationErrors(req.body, { includeIdentity: true });
+    const idImage = req.files?.idImage?.[0];
+    const selfieImage = req.files?.selfieImage?.[0];
+    if (!idImage) errors.idImage = "Government ID image is required.";
+    if (!selfieImage) errors.selfieImage = "Selfie image is required.";
+    addImageValidationError(idImage, errors, "idImage", "Government ID", { minWidth: 720, minHeight: 420 });
+    addImageValidationError(selfieImage, errors, "selfieImage", "Selfie", { minWidth: 480, minHeight: 480 });
+    if (idImage?.buffer && selfieImage?.buffer && sha256(idImage.buffer) === sha256(selfieImage.buffer)) {
+      errors.idImage = "Government ID image must be different from the selfie.";
     }
-    await removeUploadedFiles([idImagePath, selfieImagePath]);
-    throw err;
-  }
+    if (Object.keys(errors).length) {
+      console.warn("[registration otp] validation failed", { fields: Object.keys(errors), message: Object.values(errors).find(Boolean) });
+    }
+    throwValidationErrors(errors);
 
-  res.status(201).json({
-    message: "OTP generated successfully.",
-    email: input.email,
-    expiresInSeconds: getOtpTtlSeconds(),
-    resendAfterSeconds: 60,
-    maxAttempts: 5,
-    maxResends: getOtpMaxResends()
-  });
+    const latest = await query(
+      `SELECT id, resend_available_at, consumed_at, id_image_path, selfie_image_path
+       FROM otp_codes
+       WHERE contact = :email AND purpose = 'registration'
+       ORDER BY id DESC
+       LIMIT 1`,
+      { email: input.email }
+    );
+    if (latest[0]?.consumed_at === null && new Date(latest[0].resend_available_at) > new Date()) {
+      throw new HttpError(429, "Please wait 60 seconds before requesting another OTP");
+    }
+    if (latest[0]?.consumed_at === null) {
+      await query(
+        `DELETE FROM otp_codes
+         WHERE contact = :email
+           AND purpose = 'registration'
+           AND consumed_at IS NULL`,
+        { email: input.email }
+      );
+      await removeUploadedFiles([latest[0].id_image_path, latest[0].selfie_image_path]);
+      console.log("[registration otp] previous pending OTP invalidated", { hasEmail: Boolean(input.email) });
+    }
+
+    const otp = createOtp();
+    const otpHash = await hashPassword(otp);
+    const payload = {
+      username: input.username,
+      display_name: input.displayName,
+      email: input.email,
+      phone_number: input.phone,
+      location: input.location,
+      birthday: normalizeBirthday(input.birthday),
+      gender: input.gender,
+      password_hash: await hashPassword(input.password),
+      id_type: input.idType,
+      id_number: input.idNumber
+    };
+    const [idImagePath, selfieImagePath] = await Promise.all([
+      saveBufferedUpload(idImage),
+      saveBufferedUpload(selfieImage)
+    ]);
+
+    let insertedOtpId;
+    try {
+      const result = await query(
+        `INSERT INTO otp_codes
+          (contact, purpose, otp_code, expires_at, resend_available_at, max_resends, registration_payload, id_image_path, selfie_image_path, face_match_score)
+         VALUES
+          (:email, 'registration', :otp, :expiresAt, :resendAvailableAt, :maxResends, :payload, :idImage, :selfieImage, :faceMatchScore)`,
+        {
+          email: input.email,
+          otp: otpHash,
+          expiresAt: getOtpExpiry(),
+          resendAvailableAt: getResendAvailableAt(),
+          maxResends: getOtpMaxResends(),
+          payload: JSON.stringify(payload),
+          idImage: idImagePath,
+          selfieImage: selfieImagePath,
+          faceMatchScore: input.faceMatchScore
+        }
+      );
+      insertedOtpId = result.insertId;
+      console.log("[registration otp] pending registration saved", { otpId: insertedOtpId, hasEmail: Boolean(input.email) });
+
+      await sendEmail(
+        input.email,
+        "Your RETELA verification OTP",
+        `Your RETELA OTP is ${otp}. It expires in ${getOtpTtlMinutes()} minutes.`
+      );
+      logRegistrationEvent("OTP sent", { hasEmail: Boolean(input.email), otpId: insertedOtpId });
+    } catch (err) {
+      if (insertedOtpId) {
+        await query("DELETE FROM otp_codes WHERE id = :id", { id: insertedOtpId }).catch((error) => {
+          console.warn(`[registration] OTP rollback skipped: ${error.message}`);
+        });
+      }
+      await removeUploadedFiles([idImagePath, selfieImagePath]);
+      throw err;
+    }
+
+    res.status(201).json({
+      success: true,
+      message: "OTP generated successfully.",
+      email: input.email,
+      expiresInSeconds: getOtpTtlSeconds(),
+      resendAfterSeconds: 60,
+      maxAttempts: 5,
+      maxResends: getOtpMaxResends()
+    });
+  } catch (error) {
+    console.error("[registration otp] failed", {
+      message: error.message,
+      code: error.code,
+      errno: error.errno,
+      responseCode: error.responseCode,
+      command: error.command,
+      stack: error.stack
+    });
+
+    if (error instanceof HttpError && error.status < 500) {
+      throw error;
+    }
+
+    if (error instanceof HttpError && [502, 503].includes(error.status)) {
+      throw new HttpError(500, "Unable to send verification code. Please try again.");
+    }
+
+    throw error;
+  }
 });
 
 export const resendRegistrationOtp = asyncHandler(async (req, res) => {

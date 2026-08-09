@@ -78,11 +78,12 @@ function publicErrorFor(err, status, req = null) {
     };
   }
   if (err?.code === "ER_DUP_ENTRY") {
+    const errors = duplicateEntryErrors(err);
     return {
       status: 409,
-      message: "Registration validation failed.",
+      message: Object.values(errors).find(Boolean) || "A registration value already exists.",
       error: "duplicate_entry",
-      errors: duplicateEntryErrors(err)
+      errors
     };
   }
   if (err instanceof HttpError || err?.status || err?.statusCode) {

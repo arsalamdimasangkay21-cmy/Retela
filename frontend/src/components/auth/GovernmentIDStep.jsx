@@ -306,7 +306,22 @@ export default function GovernmentIDStep({ data, onChange, onNext, onBack, loadi
     openCamera();
   }
 
-  const canContinue = data.idType && data.idNumber?.trim() && data.idImage && data.idQualityVerified && !idNumberError && !idNumberChecking && !loading;
+  const governmentIdVerified = Boolean(data.idQualityVerified);
+  const canContinue = Boolean(data.idType && data.idNumber?.trim() && data.idImage && governmentIdVerified && !idNumberError && !idNumberChecking && !loading);
+
+  function handleContinue() {
+    console.log("[registration government-id] continue pressed", {
+      hasGovernmentId: Boolean(data.idImage),
+      hasGovernmentIdPreview: Boolean(data.idPreview),
+      governmentIdVerified,
+      hasGovernmentIdType: Boolean(data.idType),
+      hasGovernmentIdNumber: Boolean(data.idNumber?.trim()),
+      idNumberChecking,
+      hasIdNumberError: Boolean(idNumberError)
+    });
+    if (!canContinue) return;
+    onNext();
+  }
 
   return (
     <div className="retela-wizard-step">
@@ -346,8 +361,8 @@ export default function GovernmentIDStep({ data, onChange, onNext, onBack, loadi
 
         <div className={`retela-live-status ${data.idQualityVerified ? "retela-live-status-ok" : ""}`} role="status" aria-live="polite">
           {cameraOpen && !data.idPreview ? <Loader2 className="animate-spin" size={16} /> : data.idQualityVerified ? <CheckCircle2 size={17} /> : <Camera size={17} />}
-          <span>{data.idQualityVerified ? "Government ID verified" : status}</span>
-          {!data.idQualityVerified && quality.score ? <strong>{quality.score}%</strong> : null}
+          <span>{governmentIdVerified ? "Government ID verified" : status}</span>
+          {!governmentIdVerified && quality.score ? <strong>{quality.score}%</strong> : null}
         </div>
 
         <div className="flex flex-wrap gap-2">
@@ -364,7 +379,7 @@ export default function GovernmentIDStep({ data, onChange, onNext, onBack, loadi
       {error ? <p className="retela-register-alert"><TriangleAlert size={16} /> {error}</p> : null}
       <div className="retela-wizard-actions">
         <Button type="button" variant="secondary" onClick={onBack}>Back</Button>
-        <Button type="button" disabled={!canContinue} onClick={onNext}>
+        <Button type="button" disabled={!canContinue} onClick={handleContinue}>
           {loading ? <><Loader2 className="animate-spin" size={16} /> Sending OTP</> : "Continue"}
         </Button>
       </div>

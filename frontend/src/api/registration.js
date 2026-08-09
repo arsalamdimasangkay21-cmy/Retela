@@ -8,12 +8,13 @@ export function checkRegistrationField(field, value) {
   return api.post("/auth/register/check", { field, value });
 }
 
-export function sendRegistrationOtp(payload) {
+export function sendRegistrationOtp(payload, config = {}) {
   const formData = new FormData();
   Object.entries(payload).forEach(([key, value]) => {
     if (value !== undefined && value !== null) formData.append(key, value);
   });
   return api.post("/auth/register/send-otp", formData, {
+    ...config,
     headers: { "Content-Type": "multipart/form-data" }
   });
 }

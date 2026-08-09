@@ -5,8 +5,10 @@ const SMTP_HOST = process.env.EMAIL_HOST || "smtp.gmail.com";
 const SMTP_PORT = Number(process.env.EMAIL_PORT || 587);
 const SMTP_SECURE = String(process.env.EMAIL_SECURE || "").toLowerCase() === "true" || SMTP_PORT === 465;
 const SMTP_TIMEOUT_MS = Number(process.env.EMAIL_TIMEOUT_MS || 30000);
+const SMTP_FAMILY = Number(process.env.EMAIL_FAMILY || 4);
 
 let gmailTransporter;
+let gmailVerifyStarted = false;
 
 function hasGmailCredentials() {
   return Boolean(process.env.EMAIL_USER && process.env.EMAIL_PASS);
@@ -18,6 +20,7 @@ function getGmailTransporter() {
     host: SMTP_HOST,
     port: SMTP_PORT,
     secure: SMTP_SECURE,
+    ...(Number.isFinite(SMTP_FAMILY) ? { family: SMTP_FAMILY } : {}),
     auth: {
       user: process.env.EMAIL_USER,
       pass: process.env.EMAIL_PASS
@@ -26,6 +29,17 @@ function getGmailTransporter() {
     greetingTimeout: SMTP_TIMEOUT_MS,
     socketTimeout: SMTP_TIMEOUT_MS
   });
+  if (!gmailVerifyStarted) {
+    gmailVerifyStarted = true;
+    gmailTransporter.verify()
+      .then(() => console.log("[email] SMTP verified before first send", {
+        host: SMTP_HOST,
+        port: SMTP_PORT,
+        secure: SMTP_SECURE,
+        family: Number.isFinite(SMTP_FAMILY) ? SMTP_FAMILY : null
+      }))
+      .catch((error) => logEmailError("[email] SMTP verification diagnostic failed", error));
+  }
   return gmailTransporter;
 }
 
