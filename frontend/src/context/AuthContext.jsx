@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { api, cachedGet } from "../api/client";
+import { disconnectSocket } from "../api/socket";
 
 const AuthContext = createContext(null);
 
@@ -31,6 +32,7 @@ export function AuthProvider({ children }) {
       })
       .catch(() => {
         if (cancelled) return;
+        disconnectSocket("auth verification failed");
         localStorage.removeItem("retela_token");
         localStorage.removeItem("retela_user");
         setToken(null);
@@ -43,6 +45,7 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     function handleAuthExpired() {
+      disconnectSocket("auth expired");
       setToken(null);
       setUser(null);
     }
@@ -71,6 +74,7 @@ export function AuthProvider({ children }) {
   }
 
   function logout() {
+    disconnectSocket("logout");
     localStorage.removeItem("retela_token");
     localStorage.removeItem("retela_user");
     setToken(null);

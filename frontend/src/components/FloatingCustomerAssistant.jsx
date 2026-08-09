@@ -36,6 +36,14 @@ export function FloatingCustomerAssistant({ hidden = false }) {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages.length, open]);
 
+  useEffect(() => {
+    function openAssistant() {
+      setOpen(true);
+    }
+    window.addEventListener("retela:open-customer-assistant", openAssistant);
+    return () => window.removeEventListener("retela:open-customer-assistant", openAssistant);
+  }, []);
+
   async function sendMessage(event) {
     event?.preventDefault();
     const text = prompt.trim();

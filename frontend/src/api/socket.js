@@ -4,7 +4,6 @@ import { SOCKET_URL } from "./client";
 let socket = null;
 let socketToken = "";
 let consumers = 0;
-let disconnectTimer = null;
 
 const socketOptions = {
   path: "/socket.io",
@@ -25,19 +24,44 @@ function handleConnectError(error) {
   });
 }
 
+function handleConnect() {
+  console.info("[socket] connected", {
+    socketId: socket?.id || null
+  });
+}
+
+function handleDisconnect(reason) {
+  console.info("[socket] disconnected", {
+    reason
+  });
+}
+
+function handleReconnectAttempt(attempt) {
+  console.info("[socket] reconnecting", {
+    attempt
+  });
+}
+
+function bindLifecycleLogging(instance) {
+  instance.on("connect", handleConnect);
+  instance.on("disconnect", handleDisconnect);
+  instance.on("connect_error", handleConnectError);
+  instance.io?.on("reconnect_attempt", handleReconnectAttempt);
+}
+
+function unbindLifecycleLogging(instance) {
+  instance.off("connect", handleConnect);
+  instance.off("disconnect", handleDisconnect);
+  instance.off("connect_error", handleConnectError);
+  instance.io?.off("reconnect_attempt", handleReconnectAttempt);
+}
+
 export function acquireSocket(token) {
   const nextToken = String(token || "").trim();
   if (!nextToken) return null;
 
-  if (disconnectTimer) {
-    window.clearTimeout(disconnectTimer);
-    disconnectTimer = null;
-  }
-
   if (socket && socketToken !== nextToken) {
-    socket.disconnect();
-    socket = null;
-    consumers = 0;
+    disconnectSocket("auth token changed");
   }
 
   if (!socket) {
@@ -45,7 +69,7 @@ export function acquireSocket(token) {
       ...socketOptions,
       auth: { token: nextToken }
     });
-    socket.on("connect_error", handleConnectError);
+    bindLifecycleLogging(socket);
     socketToken = nextToken;
   }
 
@@ -59,15 +83,19 @@ export function acquireSocket(token) {
 export function releaseSocket(instance) {
   if (!instance || instance !== socket) return;
   consumers = Math.max(0, consumers - 1);
-  if (consumers > 0) return;
+}
 
-  disconnectTimer = window.setTimeout(() => {
-    if (consumers === 0 && socket) {
-      socket.off("connect_error", handleConnectError);
-      socket.disconnect();
-      socket = null;
-      socketToken = "";
-    }
-    disconnectTimer = null;
-  }, 500);
+export function disconnectSocket(reason = "explicit disconnect") {
+  if (!socket) return;
+  const current = socket;
+  unbindLifecycleLogging(current);
+  current.disconnect();
+  console.info("[socket] disconnected", {
+    reason
+  });
+  if (current === socket) {
+    socket = null;
+    socketToken = "";
+    consumers = 0;
+  }
 }

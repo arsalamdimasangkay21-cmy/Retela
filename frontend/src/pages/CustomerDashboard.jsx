@@ -715,6 +715,7 @@ export default function CustomerDashboard({ active, onChange }) {
         rows={notifications}
         onRead={(id) => setNotifications((items) => items.map((item) => Number(item.id) === Number(id) ? { ...item, is_read: true } : item))}
         onShopSale={openSaleProducts}
+        onNavigate={onChange}
       />
     );
   }
@@ -1591,7 +1592,7 @@ function PaymentLoadingOverlay({ method }) {
   );
 }
 
-function Notifications({ rows, onRead, onShopSale }) {
+function Notifications({ rows, onRead, onShopSale, onNavigate }) {
   const [selectedNotification, setSelectedNotification] = useState(null);
   const [toast, setToast] = useState("");
 
@@ -1602,11 +1603,20 @@ function Notifications({ rows, onRead, onShopSale }) {
   }, [toast]);
 
   async function openNotification(notification) {
-    setSelectedNotification({ ...notification, is_read: true });
+    const nextNotification = { ...notification, is_read: true };
+    const target = notificationNavigationTarget(nextNotification);
+    setSelectedNotification(target.openModal ? nextNotification : null);
     if (!notification.is_read) {
       onRead?.(notification.id);
       window.dispatchEvent(new CustomEvent("retela:notification-read", { detail: { id: notification.id } }));
       await api.patch(`/notifications/${notification.id}/read`).catch(() => {});
+    }
+    if (target.section) onNavigate?.(target.section);
+    if (target.openAssistant) {
+      window.dispatchEvent(new CustomEvent("retela:open-customer-assistant"));
+    }
+    if (!target.openModal && target.saleProductIds?.length) {
+      onShopSale?.(target.saleProductIds);
     }
   }
 
@@ -1691,6 +1701,30 @@ function notificationPromoStatus(notification) {
   if (expired) return { label: "Expired Promo", expired: true, active: false };
   if (upcoming) return { label: "Scheduled Promo", expired: false, active: false };
   return { label: "Active Promo", expired: false, active: true };
+}
+
+function notificationSaleProductIds(notification) {
+  const relatedProducts = Array.isArray(notification?.related_products) ? notification.related_products : [];
+  const sourceIds = relatedProducts.length
+    ? relatedProducts.map((item) => item.id)
+    : notification?.broadcast?.product_ids || [];
+  return sourceIds.map(Number).filter(Boolean);
+}
+
+function notificationNavigationTarget(notification) {
+  const type = notification?.type;
+  const displayType = notificationDisplayType(notification);
+  const saleProductIds = notificationSaleProductIds(notification);
+  const promotional = displayType === "promo" || Boolean(notificationPromoStatus(notification));
+
+  if (type === "message") return { section: "Home", openAssistant: true, openModal: false };
+  if (type === "order") return { section: "Orders", openModal: false };
+  if (type === "refund") return { section: "Returns", openModal: false };
+  if (type === "feedback") return { section: "Feedback", openModal: false };
+  if (type === "new_product") return { section: "Shop", openModal: false };
+  if (type === "approval") return { section: "Profile", openModal: false };
+  if (type === "broadcast" || promotional) return { openModal: true, saleProductIds };
+  return { openModal: true };
 }
 
 function NotificationDetailModal({ notification, onClose, onCopyPromo, onShopSale }) {
