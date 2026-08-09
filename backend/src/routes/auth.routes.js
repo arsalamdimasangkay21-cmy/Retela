@@ -3,7 +3,7 @@ import { z } from "zod";
 import { query, safeModifyColumn } from "../config/db.js";
 import { asyncHandler, HttpError } from "../utils/errors.js";
 import { comparePassword, createOtp, hashPassword, signToken } from "../utils/auth.js";
-import { sendEmail } from "../utils/email.js";
+import { sendOtpEmail } from "../utils/email.js";
 import { sendSms } from "../utils/sms.js";
 import { registrationUpload } from "../middleware/upload.js";
 import { checkRegistrationField, completeRegistration, resendRegistrationOtp, sendRegistrationOtp, validateRegistration } from "../controllers/registration.controller.js";
@@ -77,11 +77,11 @@ function parseContact(contact) {
 }
 
 async function sendOtpToContact(contact, channel, otp) {
-  const body = `Your Retela OTP is ${otp}. It expires in 5 minutes.`;
   if (channel === "email") {
-    await sendEmail(contact, "Your Retela OTP", body);
+    await sendOtpEmail(contact, otp);
     return true;
   }
+  const body = `Your Retela OTP is ${otp}. It expires in 5 minutes.`;
   return sendSms(formatSmsPhoneNumber(contact), body);
 }
 
@@ -295,19 +295,22 @@ router.post("/register", asyncHandler(async (req, res) => {
     status: user.status,
     created_at: user.created_at
   };
-  console.log("Generated OTP:", otp);
-  console.log("Sending OTP to:", email);
+  console.log("[auth otp] sending registration OTP", { hasEmail: Boolean(email) });
   try {
     await sendOtpToContact(email, "email", otp);
   } catch (error) {
-    console.error("OTP SEND FAILED:", error);
+    console.error("Failed to send OTP with Resend:", {
+      message: error?.message || null,
+      code: error?.code || null,
+      statusCode: error?.statusCode || error?.status || null
+    });
 
     throw new HttpError(
       500,
-      "Failed to send OTP email. Check Gmail App Password configuration."
+      "Unable to send verification code. Please try again."
     );
   }
-  console.log("OTP email successfully sent");
+  console.log("[auth otp] OTP email successfully sent", { hasEmail: Boolean(email) });
 
   res.status(201).json({
     message: "Registration received. Enter the OTP sent to your email to activate your account.",

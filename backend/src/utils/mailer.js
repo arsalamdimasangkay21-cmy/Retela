@@ -1,12 +1,5 @@
-import { Resend } from "resend";
+import { sendEmail as sendEmailWithResend } from "../services/emailService.js";
 
-const resend = new Resend(process.env.RESEND_API_KEY);
-
-export async function sendEmail({ to, subject, html }) {
-  return await resend.emails.send({
-    from: "Retela <onboarding@resend.dev>",
-    to,
-    subject,
-    html,
-  });
+export async function sendEmail({ to, subject, html, text }) {
+  return sendEmailWithResend({ to, subject, html, text });
 }

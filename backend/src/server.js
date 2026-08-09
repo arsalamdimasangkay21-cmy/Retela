@@ -6,6 +6,7 @@ import { createApp } from "./app.js";
 import { initializeDatabase } from "./config/db.js";
 import { corsOrigin } from "./config/cors.js";
 import { configureSocket } from "./socket.js";
+import { validateEmailConfiguration } from "./services/emailService.js";
 
 if (!process.env.PAYMONGO_SECRET_KEY && !globalThis.__RETELA_PAYMONGO_WARNING_LOGGED__) {
   globalThis.__RETELA_PAYMONGO_WARNING_LOGGED__ = true;
@@ -27,6 +28,7 @@ async function initializeDatabaseOrExit() {
 }
 
 await initializeDatabaseOrExit();
+validateEmailConfiguration();
 
 const app = createApp();
 const httpServer = createServer(app);

@@ -5,7 +5,7 @@ import { fileURLToPath } from "url";
 import { z } from "zod";
 import { query, safeModifyColumn, transaction } from "../config/db.js";
 import { comparePassword, createOtp, hashPassword, isBcryptHash } from "../utils/auth.js";
-import { sendEmail } from "../utils/email.js";
+import { sendOtpEmail } from "../utils/email.js";
 import { asyncHandler, HttpError } from "../utils/errors.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -523,11 +523,7 @@ export const sendRegistrationOtp = asyncHandler(async (req, res) => {
       insertedOtpId = result.insertId;
       console.log("[registration otp] pending registration saved", { otpId: insertedOtpId, hasEmail: Boolean(input.email) });
 
-      await sendEmail(
-        input.email,
-        "Your RETELA verification OTP",
-        `Your RETELA OTP is ${otp}. It expires in ${getOtpTtlMinutes()} minutes.`
-      );
+      await sendOtpEmail(input.email, otp);
       logRegistrationEvent("OTP sent", { hasEmail: Boolean(input.email), otpId: insertedOtpId });
     } catch (err) {
       if (insertedOtpId) {
@@ -619,7 +615,7 @@ export const resendRegistrationOtp = asyncHandler(async (req, res) => {
        WHERE id = :id`,
       { id: pending.id, otp: otpHash, expiresAt, resendAvailableAt }
     );
-    await sendEmail(normalizedEmail, "Your RETELA verification OTP", `Your RETELA OTP is ${otp}. It expires in ${getOtpTtlMinutes()} minutes.`);
+    await sendOtpEmail(normalizedEmail, otp);
   } catch (error) {
     await query(
       `UPDATE otp_codes
@@ -644,7 +640,7 @@ export const resendRegistrationOtp = asyncHandler(async (req, res) => {
   }
   logRegistrationEvent("OTP resent", { email: normalizedEmail, otpId: pending.id, resendCount: Number(pending.resend_count || 0) + 1 });
   res.json({
-    message: "OTP resent to your Gmail address.",
+    message: "OTP resent to your email address.",
     expiresInSeconds: getOtpTtlSeconds(),
     resendAfterSeconds: 60,
     maxAttempts: Number(pending.max_attempts || 5),
