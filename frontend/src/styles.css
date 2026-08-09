@@ -1428,3 +1428,324 @@ button {
     max-height: 0;
   }
 }
+
+.ai-chat-shell {
+  position: fixed;
+  right: 16px;
+  left: auto;
+  bottom: calc(90px + env(safe-area-inset-bottom));
+  z-index: 1000;
+  max-width: calc(100vw - 32px);
+}
+
+.ai-chat-button {
+  position: relative;
+}
+
+.ai-chat-window {
+  position: fixed;
+  right: 16px;
+  left: auto;
+  bottom: calc(160px + env(safe-area-inset-bottom));
+  width: min(420px, calc(100vw - 32px));
+  height: min(65dvh, 560px);
+  max-width: calc(100vw - 32px);
+  max-height: calc(100dvh - 190px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  z-index: 999;
+}
+
+.ai-chat-messages {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.ai-chat-input-container {
+  flex-shrink: 0;
+  display: flex;
+  gap: 8px;
+}
+
+.ai-chat-input-container input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.ai-chat-input-container button {
+  width: 52px;
+  min-width: 52px;
+}
+
+.retela-order-summary-row,
+.retela-summary-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.retela-order-summary-row span,
+.retela-summary-line span {
+  min-width: 0;
+}
+
+.retela-order-summary-row strong,
+.retela-summary-line strong {
+  flex-shrink: 0;
+  text-align: right;
+}
+
+@media (max-width: 768px) {
+  html,
+  body,
+  #root {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: hidden;
+  }
+
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
+  .retela-page-content {
+    width: 100%;
+    max-width: 100%;
+    padding-left: 16px !important;
+    padding-right: 16px !important;
+    padding-bottom: calc(120px + env(safe-area-inset-bottom)) !important;
+  }
+
+  .retela-customer-checkout-layout,
+  .retela-checkout-card {
+    width: calc(100% - 24px);
+    max-width: 100%;
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  .payment-methods {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 12px;
+  }
+
+  .payment-method-option {
+    min-height: 52px;
+    width: 100%;
+    white-space: normal;
+    text-align: center;
+  }
+
+  .retela-coupon-row {
+    display: flex;
+    gap: 10px;
+    width: 100%;
+  }
+
+  .retela-coupon-row input {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .retela-order-summary-total strong,
+  .retela-summary-line strong {
+    font-size: clamp(0.95rem, 4vw, 1.45rem);
+  }
+
+  .retela-featured-hero > .relative {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding-bottom: 12px;
+  }
+
+  .retela-featured-swiper {
+    flex: 0 0 100%;
+  }
+
+  .retela-featured-swiper button {
+    min-height: 0 !important;
+  }
+
+  .retela-featured-swiper button > div:first-child {
+    min-height: 0 !important;
+  }
+
+  .retela-featured-swiper img {
+    aspect-ratio: 1 / 1;
+    height: auto !important;
+    max-height: 420px;
+    min-height: 0 !important;
+    object-fit: contain;
+  }
+
+  .retela-featured-prev,
+  .retela-featured-next {
+    position: static !important;
+    inset: auto !important;
+    transform: none !important;
+    flex: 1 1 calc(50% - 6px);
+    justify-content: center;
+    min-width: 0;
+  }
+
+  .retela-featured-pagination {
+    position: static !important;
+    flex: 0 0 100%;
+    order: 4;
+  }
+
+  .retela-product-card {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .retela-product-card img {
+    aspect-ratio: 1 / 1;
+    height: auto !important;
+    max-height: 420px;
+    object-fit: contain;
+  }
+
+  .retela-product-card-actions {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .retela-product-card-actions > button {
+    flex: 1 1 calc(50% - 10px);
+    min-width: 128px;
+  }
+
+  .retela-product-details-backdrop {
+    padding: 10px !important;
+    align-items: start;
+    padding-top: calc(10px + env(safe-area-inset-top)) !important;
+    padding-bottom: calc(18px + env(safe-area-inset-bottom)) !important;
+  }
+
+  .retela-product-details-modal {
+    width: calc(100% - 24px) !important;
+    max-width: calc(100vw - 20px) !important;
+    max-height: calc(100dvh - 28px) !important;
+    border-radius: 18px !important;
+  }
+
+  .retela-product-details-grid {
+    gap: 14px !important;
+    padding: 14px !important;
+  }
+
+  .retela-product-image-frame {
+    min-height: 0 !important;
+    aspect-ratio: 1 / 1;
+    width: 100%;
+    max-height: 420px;
+  }
+
+  .retela-product-details-image {
+    width: 100%;
+    height: 100% !important;
+    max-height: 420px !important;
+    object-fit: contain;
+  }
+
+  .retela-product-action-row {
+    position: static !important;
+    padding: 14px !important;
+  }
+
+  .retela-product-action-row button {
+    width: 100%;
+  }
+
+  .retela-checkout-modal-backdrop {
+    padding: 10px !important;
+    align-items: start;
+    padding-top: calc(12px + env(safe-area-inset-top)) !important;
+    padding-bottom: calc(20px + env(safe-area-inset-bottom)) !important;
+  }
+
+  .retela-checkout-summary-modal {
+    width: calc(100vw - 20px) !important;
+    max-width: calc(100vw - 20px) !important;
+    max-height: calc(100dvh - 32px) !important;
+    overflow-y: auto;
+    border-radius: 18px !important;
+    padding: 16px !important;
+  }
+
+  .retela-checkout-summary-items {
+    max-height: min(34dvh, 220px) !important;
+  }
+
+  .retela-checkout-modal-actions button {
+    width: 100%;
+  }
+
+  .ai-chat-shell {
+    right: 16px !important;
+    left: auto !important;
+    bottom: calc(90px + env(safe-area-inset-bottom)) !important;
+    max-width: calc(100vw - 32px);
+  }
+
+  .ai-chat-window {
+    right: 16px !important;
+    left: auto !important;
+    bottom: calc(160px + env(safe-area-inset-bottom)) !important;
+    width: min(420px, calc(100vw - 32px));
+    height: min(65dvh, 560px);
+    max-width: calc(100vw - 32px);
+    max-height: calc(100dvh - 190px);
+  }
+}
+
+@media (max-width: 480px) {
+  .retela-page-content {
+    padding-left: 12px !important;
+    padding-right: 12px !important;
+  }
+
+  .retela-customer-checkout-layout,
+  .retela-checkout-card {
+    width: calc(100% - 8px);
+  }
+
+  .retela-coupon-row {
+    flex-direction: column;
+  }
+
+  .retela-coupon-row button {
+    width: 100%;
+  }
+
+  .retela-product-card-actions > button {
+    flex-basis: 100%;
+  }
+
+  .payment-methods {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  .ai-chat-shell {
+    right: 12px !important;
+    left: auto !important;
+    bottom: calc(85px + env(safe-area-inset-bottom)) !important;
+  }
+
+  .ai-chat-window {
+    left: 12px !important;
+    right: 12px !important;
+    width: auto;
+    bottom: calc(155px + env(safe-area-inset-bottom)) !important;
+    height: min(60dvh, 520px);
+    max-height: calc(100dvh - 180px);
+  }
+}

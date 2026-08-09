@@ -40,6 +40,10 @@ const paymentNumberHelp = {
   maya: "This number is sent to the secure checkout before opening Maya."
 };
 
+function paymentCheckoutUrl(payload) {
+  return payload?.checkoutUrl || payload?.checkout_url || payload?.url || "";
+}
+
 function stockStatus(stock) {
   const quantity = Number(stock || 0);
   if (quantity <= 0) return "Out of Stock";
@@ -441,6 +445,7 @@ export default function CustomerDashboard({ active, onChange }) {
   }
 
   async function checkout() {
+    if (checkoutLoading) return;
     const stockOk = await recheckCartStock({ productIds: selectedCartIds });
     if (!stockOk) return;
     const billingPhone = paymentMethod === "cod" ? "" : (paymentDetails[paymentNumberKey(paymentMethod)] || "").trim();
@@ -474,16 +479,30 @@ export default function CustomerDashboard({ active, onChange }) {
       setAppliedCoupon(null);
       setCouponCode("");
       if (paymentMethod !== "cod") {
+        console.log("Selected payment method:", paymentMethod);
+        console.log("Starting GCash checkout");
         setRedirectingPayment(paymentMethod);
         const checkoutRes = await api.post("/payments/create-gcash-checkout", { orderId: data.id, paymentMethod, billingPhone });
+        console.log("GCash API response:", checkoutRes.data);
+        const checkoutUrl = paymentCheckoutUrl(checkoutRes.data);
+        if (!checkoutUrl) {
+          throw new Error("GCash checkout URL was not returned by the server.");
+        }
         didRedirect = true;
-        window.location.href = checkoutRes.data.checkoutUrl;
+        window.location.href = checkoutUrl;
         return;
       }
       notifyCart("Checkout submitted.");
       await load(filtersRef.current, { force: true });
     } catch (error) {
-      notifyCart(error?.response?.data?.message || "Checkout failed. Please try again.");
+      if (paymentMethod !== "cod") {
+        console.error("GCash checkout failed:", error);
+        console.error("GCash server response:", error?.response?.data);
+      } else {
+        console.error("Checkout failed:", error);
+      }
+      const fallback = paymentMethod !== "cod" ? "Unable to continue to GCash payment." : "Checkout failed. Please try again.";
+      notifyCart(error?.response?.data?.message || error?.message || fallback);
     } finally {
       if (!didRedirect) {
         setCheckoutLoading(false);
@@ -804,7 +823,7 @@ function CartPage({
   const allSelected = Boolean(cart.length) && selectedCartIds.length === cart.length;
   const selectedCount = selectedItems.length;
   return (
-    <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
+    <div className="retela-customer-checkout-layout grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
       <Card>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -865,13 +884,13 @@ function CartPage({
         </div>
       </Card>
 
-      <Card className="h-fit">
+      <Card className="retela-checkout-card h-fit">
         <h3 className="font-display text-xl font-bold text-slate-950">Checkout</h3>
         <div className="mt-4 grid gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-3">
           <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">Payment Method</p>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="payment-methods grid grid-cols-2 gap-2">
             {[["cod", "COD"], ["gcash", "GCash"], ["debit", "Debit"], ["credit", "Credit"], ["maya", "Maya"]].map(([value, label]) => (
-              <button key={value} type="button" onClick={() => selectPaymentMethod(value)} className={`inline-flex items-center justify-center gap-1 rounded-xl px-2 py-2 text-xs font-bold transition ${paymentMethod === value ? "bg-emerald-600 text-white" : "bg-white text-slate-600 hover:text-emerald-700"}`}>
+              <button key={value} type="button" onClick={() => selectPaymentMethod(value)} className={`payment-method-option inline-flex items-center justify-center gap-1 rounded-xl px-2 py-2 text-xs font-bold transition ${paymentMethod === value ? "bg-emerald-600 text-white" : "bg-white text-slate-600 hover:text-emerald-700"}`}>
                 {value === "debit" ? <CreditCard size={14} /> : <WalletCards size={14} />}{label}
               </button>
             ))}
@@ -879,38 +898,38 @@ function CartPage({
         </div>
         <div className="mt-4 grid gap-2 rounded-2xl border border-slate-200 bg-white p-3">
           <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">Coupon Code</p>
-          <div className="flex gap-2">
+          <div className="retela-coupon-row flex gap-2">
             <input value={couponCode} onChange={(event) => setCouponCode(event.target.value.toUpperCase())} placeholder="ENTER CODE" className="min-w-0 flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-900 outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100" />
             <button type="button" onClick={applyCoupon} className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white">Apply</button>
           </div>
           {appliedCoupon ? <p className="text-xs font-bold text-emerald-700">{appliedCoupon.code} applied{appliedCoupon.freeShipping ? " with free shipping" : ""}.</p> : null}
           {couponError ? <p className="text-xs font-bold text-rose-600">{couponError}</p> : null}
         </div>
-        <div className="mt-4 grid gap-2 rounded-2xl border border-slate-200 bg-white p-4">
-          <div className="flex items-center justify-between text-sm text-slate-600">
+        <div className="retela-order-summary mt-4 grid gap-2 rounded-2xl border border-slate-200 bg-white p-4">
+          <div className="retela-order-summary-row flex items-center justify-between text-sm text-slate-600">
             <span>Subtotal</span>
             <strong className="text-slate-900">{money(pricing.subtotal)}</strong>
           </div>
-          <div className="flex items-center justify-between text-sm text-slate-600">
+          <div className="retela-order-summary-row flex items-center justify-between text-sm text-slate-600">
             <span>Coupon Discount</span>
             <strong className="text-emerald-700">-{money(pricing.couponDiscount)}</strong>
           </div>
-          <div className="flex items-center justify-between text-sm text-slate-600">
+          <div className="retela-order-summary-row flex items-center justify-between text-sm text-slate-600">
             <span>Sales Discount</span>
             <strong className="text-emerald-700">-{money(pricing.saleDiscount)}</strong>
           </div>
-          <div className="flex items-center justify-between text-sm text-slate-600">
+          <div className="retela-order-summary-row flex items-center justify-between text-sm text-slate-600">
             <span>Shipping Fee</span>
             <strong className="text-slate-900">{money(pricing.shippingFee)}</strong>
           </div>
-          <div className="flex items-center justify-between border-t border-slate-200 pt-3">
+          <div className="retela-order-summary-row retela-order-summary-total flex items-center justify-between border-t border-slate-200 pt-3">
             <span className="text-sm font-bold text-slate-700">Total</span>
             <strong className="font-display text-2xl text-emerald-700">{money(pricing.total)}</strong>
           </div>
         </div>
         {!selectedCount ? <p className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm font-bold text-amber-700">Please select at least one item.</p> : null}
-        <Button className="mt-4 w-full" disabled={!selectedCount || checkoutLoading} onClick={openCheckoutSummary}>
-          <ShoppingCart size={17} /> {checkoutLoading ? "Preparing..." : paymentMethod === "cod" ? "Checkout" : `Checkout with ${paymentLabel(paymentMethod)}`}
+        <Button className="retela-checkout-button mt-4 w-full" disabled={!selectedCount || checkoutLoading} onClick={openCheckoutSummary}>
+          <ShoppingCart size={17} /> {checkoutLoading && paymentMethod !== "cod" ? `Redirecting to ${paymentLabel(paymentMethod)}...` : checkoutLoading ? "Preparing..." : paymentMethod === "cod" ? "Checkout" : `Checkout with ${paymentLabel(paymentMethod)}`}
         </Button>
       </Card>
     </div>
@@ -1067,9 +1086,9 @@ function FeaturedApparelDetailsModal({ item, onClose, onAddToCart }) {
   }, [gallery]);
 
   return createPortal(
-    <div className="fixed inset-0 z-[220] grid place-items-center bg-black/70 p-4 backdrop-blur-sm" onMouseDown={onClose} role="presentation">
+    <div className="retela-product-details-backdrop fixed inset-0 z-[220] grid place-items-center bg-black/70 p-4 backdrop-blur-sm" onMouseDown={onClose} role="presentation">
       <section
-        className="max-h-[92vh] w-[96vw] max-w-[1080px] overflow-y-auto rounded-[28px] border border-emerald-100 bg-white shadow-[0_28px_90px_rgba(0,0,0,0.42)]"
+        className="retela-product-details-modal max-h-[92vh] w-[96vw] max-w-[1080px] overflow-y-auto rounded-[28px] border border-emerald-100 bg-white shadow-[0_28px_90px_rgba(0,0,0,0.42)]"
         onMouseDown={(event) => event.stopPropagation()}
         role="dialog"
         aria-modal="true"
@@ -1085,11 +1104,11 @@ function FeaturedApparelDetailsModal({ item, onClose, onAddToCart }) {
           </button>
         </div>
 
-        <div className="grid gap-6 p-5 lg:grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)]">
+        <div className="retela-product-details-grid grid gap-6 p-5 lg:grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)]">
           <div className="grid gap-3">
-            <div className="grid min-h-[320px] place-items-center overflow-hidden rounded-3xl bg-slate-100">
+            <div className="retela-product-image-frame grid min-h-[320px] place-items-center overflow-hidden rounded-3xl bg-slate-100">
               {activeImage ? (
-                <img src={assetUrl(activeImage)} alt={item.name} className="max-h-[62vh] w-full object-contain" />
+                <img src={assetUrl(activeImage)} alt={item.name} className="retela-product-details-image max-h-[62vh] w-full object-contain" />
               ) : (
                 <div className="grid min-h-[320px] place-items-center text-slate-400"><FileImage size={42} /></div>
               )}
@@ -1130,7 +1149,7 @@ function FeaturedApparelDetailsModal({ item, onClose, onAddToCart }) {
           </div>
         </div>
 
-        <div className="sticky bottom-0 flex flex-col-reverse gap-2 border-t border-slate-100 bg-white/95 p-5 backdrop-blur sm:flex-row sm:justify-end">
+        <div className="retela-product-action-row sticky bottom-0 flex flex-col-reverse gap-2 border-t border-slate-100 bg-white/95 p-5 backdrop-blur sm:flex-row sm:justify-end">
           <button type="button" onClick={onClose} className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700 transition hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700">
             Close
           </button>
@@ -1213,7 +1232,7 @@ function Shop({ products, addToCart, buyNow, filters, setFilters, filterOptions,
           {purchasableProducts.map((p) => {
             const status = stockStatus(p.stock);
             return (
-              <article key={p.id} className="flex h-full min-w-0 flex-col rounded-2xl border border-slate-100 bg-white p-3 shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg">
+              <article key={p.id} className="retela-product-card flex h-full min-w-0 flex-col rounded-2xl border border-slate-100 bg-white p-3 shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg">
                 <div className="relative">
                   {p.image_url ? <img src={assetUrl(p.image_url)} className="h-48 w-full rounded-xl object-cover" alt={p.name} /> : <div className="grid h-48 place-items-center rounded-xl bg-slate-100 text-sm font-semibold text-slate-400">No image</div>}
                   <span className={`absolute right-3 top-3 rounded-full border px-3 py-1 text-xs font-black ${stockBadgeClass(p.stock)}`}>{status}</span>
@@ -1227,7 +1246,7 @@ function Shop({ products, addToCart, buyNow, filters, setFilters, filterOptions,
                   <p><span className="font-semibold text-slate-800">Status:</span> {status}</p>
                 </div>
                 {p.description ? <p className="mt-2 line-clamp-3 break-words text-xs leading-5 text-slate-500">{p.description}</p> : null}
-                <div className="mt-auto flex items-stretch justify-between gap-3 pt-4">
+                <div className="retela-product-card-actions mt-auto flex items-stretch justify-between gap-3 pt-4">
                   <button type="button" onClick={() => openDetails(p)} className="flex h-14 min-h-14 min-w-0 flex-1 items-center justify-center gap-1 whitespace-nowrap rounded-xl border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 transition hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700">
                     <Eye size={15} /> View Details
                   </button>
@@ -1294,9 +1313,9 @@ function CustomerFilters({ filters, setFilters, filterOptions }) {
 function ApparelDetailsModal({ item, onClose, onViewPhoto, onAdd, onBuyNow }) {
   const status = stockStatus(item.stock);
   return createPortal(
-    <div className="fixed inset-0 z-[200] grid place-items-center bg-black/65 p-4 backdrop-blur-sm" onMouseDown={onClose} role="presentation">
+    <div className="retela-product-details-backdrop fixed inset-0 z-[200] grid place-items-center bg-black/65 p-4 backdrop-blur-sm" onMouseDown={onClose} role="presentation">
       <section
-        className="max-h-[90vh] w-[95vw] max-w-[800px] overflow-y-auto rounded-[28px] border border-emerald-100 bg-white shadow-[0_28px_90px_rgba(0,0,0,0.38)]"
+        className="retela-product-details-modal max-h-[90vh] w-[95vw] max-w-[800px] overflow-y-auto rounded-[28px] border border-emerald-100 bg-white shadow-[0_28px_90px_rgba(0,0,0,0.38)]"
         onMouseDown={(event) => event.stopPropagation()}
         role="dialog"
         aria-modal="true"
@@ -1328,7 +1347,7 @@ function ApparelDetailsModal({ item, onClose, onViewPhoto, onAdd, onBuyNow }) {
             <p className="mt-2 text-sm leading-6 text-slate-700">{item.description || "No description provided."}</p>
           </div>
 
-          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div className="retela-product-action-row flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex flex-wrap gap-2">
               <button type="button" onClick={onClose} className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700 transition hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700">
                 Close
@@ -1465,14 +1484,14 @@ function PaymentDetailsPanel({ method, value, error, onChange }) {
 function CheckoutSummaryModal({ items, pricing, paymentMethod, paymentDetails, paymentError, updatePaymentNumber, checkout, checkoutLoading, onClose }) {
   return createPortal(
     <motion.div
-      className="fixed inset-0 z-[175] grid place-items-center overflow-y-auto bg-black/45 p-4 backdrop-blur-xl"
+      className="retela-checkout-modal-backdrop fixed inset-0 z-[175] grid place-items-center overflow-y-auto bg-black/45 p-4 backdrop-blur-xl"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       onMouseDown={onClose}
     >
       <motion.section
-        className="my-6 w-full max-w-2xl rounded-[28px] border border-neonbrand/25 bg-slate-950/92 p-5 text-white shadow-[0_30px_110px_rgba(0,0,0,0.55),0_0_55px_rgba(56,255,136,0.12)] backdrop-blur-2xl sm:p-6"
+        className="retela-checkout-summary-modal my-6 w-full max-w-2xl rounded-[28px] border border-neonbrand/25 bg-slate-950/92 p-5 text-white shadow-[0_30px_110px_rgba(0,0,0,0.55),0_0_55px_rgba(56,255,136,0.12)] backdrop-blur-2xl sm:p-6"
         initial={{ opacity: 0, y: 18, scale: 0.96 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
         exit={{ opacity: 0, y: 18, scale: 0.96 }}
@@ -1486,7 +1505,7 @@ function CheckoutSummaryModal({ items, pricing, paymentMethod, paymentDetails, p
           <button type="button" onClick={onClose} className="rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-2 text-sm font-bold text-white/65 transition hover:text-neonbrand">Cancel</button>
         </div>
 
-        <div className="mt-5 grid max-h-72 gap-3 overflow-y-auto pr-1">
+        <div className="retela-checkout-summary-items mt-5 grid max-h-72 gap-3 overflow-y-auto pr-1">
           {items.map((item) => (
             <div key={item.product_id} className="flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/[0.055] p-3">
               <div className="min-w-0">
@@ -1498,7 +1517,7 @@ function CheckoutSummaryModal({ items, pricing, paymentMethod, paymentDetails, p
           ))}
         </div>
 
-        <div className="mt-5 grid gap-2 rounded-2xl border border-white/10 bg-black/25 p-4">
+        <div className="retela-order-summary retela-checkout-summary-totals mt-5 grid gap-2 rounded-2xl border border-white/10 bg-black/25 p-4">
           <SummaryLine label="Subtotal" value={money(pricing.subtotal)} />
           <SummaryLine label="Coupon Discount" value={`-${money(pricing.couponDiscount)}`} highlight />
           <SummaryLine label="Sales Discount" value={`-${money(pricing.saleDiscount)}`} highlight />
@@ -1521,11 +1540,11 @@ function CheckoutSummaryModal({ items, pricing, paymentMethod, paymentDetails, p
           ) : null}
         </div>
 
-        <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+        <div className="retela-checkout-modal-actions mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           <button type="button" onClick={onClose} disabled={checkoutLoading} className="rounded-2xl border border-white/10 bg-white/[0.06] px-5 py-3 text-sm font-bold text-white transition hover:text-neonbrand disabled:opacity-60">Cancel</button>
           <Button type="button" onClick={checkout} disabled={checkoutLoading}>
             {checkoutLoading ? <Loader2 size={17} className="animate-spin" /> : <ShoppingCart size={17} />}
-            Confirm Checkout
+            {checkoutLoading && paymentMethod !== "cod" ? `Redirecting to ${paymentLabel(paymentMethod)}...` : "Confirm Checkout"}
           </Button>
         </div>
       </motion.section>
@@ -1536,7 +1555,7 @@ function CheckoutSummaryModal({ items, pricing, paymentMethod, paymentDetails, p
 
 function SummaryLine({ label, value, highlight = false, strong = false }) {
   return (
-    <div className={`flex items-center justify-between gap-4 ${strong ? "border-t border-white/10 pt-3" : ""}`}>
+    <div className={`retela-summary-line flex items-center justify-between gap-4 ${strong ? "border-t border-white/10 pt-3" : ""}`}>
       <span className={`${strong ? "font-bold text-white" : "text-sm text-white/58"}`}>{label}</span>
       <strong className={`${highlight ? "text-neonbrand" : "text-white"} ${strong ? "font-display text-2xl text-neonbrand" : "text-sm"}`}>{value}</strong>
     </div>
@@ -1560,7 +1579,7 @@ function PaymentLoadingOverlay({ method }) {
         <span className="mx-auto grid h-16 w-16 place-items-center rounded-3xl border border-neonbrand/30 bg-neonbrand/10 text-neonbrand shadow-[0_0_38px_rgba(56,255,136,0.18)]">
           <Loader2 size={30} className="animate-spin" />
         </span>
-        <h3 className="mt-5 font-display text-2xl font-bold">Opening {paymentLabel(method)}</h3>
+        <h3 className="mt-5 font-display text-2xl font-bold">Redirecting to {paymentLabel(method)}...</h3>
         <p className="mt-2 text-sm leading-6 text-white/58">
           Creating your secure checkout session. You will be redirected to complete payment.
         </p>
@@ -1830,7 +1849,7 @@ function Orders({ rows, profile, reviews = [], returnRequests = [], onNavigate }
 
   async function payOrder(order, event) {
     event?.stopPropagation();
-    if (!order || order.payment_method === "cod") return;
+    if (!order || order.payment_method === "cod" || payingOrderId) return;
     const billingPhone = profile?.phone_number || order.phone_number || "";
     if (!isValidPaymentNumber(billingPhone)) {
       setPaymentMessage(`Add a valid ${paymentNumberLabels[order.payment_method].toLowerCase()} in your Profile before paying.`);
@@ -1840,11 +1859,20 @@ function Orders({ rows, profile, reviews = [], returnRequests = [], onNavigate }
     setRedirectingPayment(order.payment_method);
     let didRedirect = false;
     try {
+      console.log("Selected payment method:", order.payment_method);
+      console.log("Starting GCash checkout");
       const { data } = await api.post("/payments/create-gcash-checkout", { orderId: order.id, paymentMethod: order.payment_method, billingPhone });
+      console.log("GCash API response:", data);
+      const checkoutUrl = paymentCheckoutUrl(data);
+      if (!checkoutUrl) {
+        throw new Error("GCash checkout URL was not returned by the server.");
+      }
       didRedirect = true;
-      window.location.href = data.checkoutUrl;
+      window.location.href = checkoutUrl;
     } catch (error) {
-      setPaymentMessage(error?.response?.data?.message || "Could not open the payment page.");
+      console.error("GCash checkout failed:", error);
+      console.error("GCash server response:", error?.response?.data);
+      setPaymentMessage(error?.response?.data?.message || error?.message || "Unable to continue to GCash payment.");
     } finally {
       if (!didRedirect) {
         setPayingOrderId(null);

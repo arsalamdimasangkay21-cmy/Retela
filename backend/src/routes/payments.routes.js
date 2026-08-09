@@ -45,7 +45,7 @@ function assertPaymongoConfigured() {
 }
 
 function clientUrl(path) {
-  const base = (process.env.CLIENT_URL || "http://127.0.0.1:5175").split(",")[0].trim().replace(/\/$/, "");
+  const base = (process.env.CLIENT_URL || "https://retela.shop").split(",")[0].trim().replace(/\/$/, "");
   return `${base}${path}`;
 }
 
@@ -125,6 +125,11 @@ router.post("/create-gcash-checkout", requireAuth, requireApproved, asyncHandler
     billingPhone: z.string().trim().regex(/^[0-9+\-\s()]{7,30}$/).optional().or(z.literal(""))
   });
   const input = schema.parse(req.body);
+  console.log("GCash endpoint reached", {
+    orderId: input.orderId,
+    paymentMethod: input.paymentMethod,
+    hasBillingPhone: Boolean(input.billingPhone)
+  });
   const orders = await query(
     `SELECT o.id, o.user_id, o.total_amount, o.status, o.payment_status, o.checkout_url,
        u.username, u.display_name, u.email, u.phone_number
@@ -137,6 +142,11 @@ router.post("/create-gcash-checkout", requireAuth, requireApproved, asyncHandler
   const order = orders[0];
   if (order.payment_status === "paid") throw new HttpError(400, "This order is already paid.");
   if (order.checkout_url && order.payment_status === "awaiting_payment") {
+    console.log("Payment provider status:", {
+      provider: "paymongo",
+      reusedCheckoutUrl: true,
+      orderId: order.id
+    });
     return res.json({ checkoutUrl: order.checkout_url, orderId: order.id });
   }
 
@@ -148,36 +158,76 @@ router.post("/create-gcash-checkout", requireAuth, requireApproved, asyncHandler
     ...(order.email ? { email: order.email } : {}),
     ...(billingPhone ? { phone: billingPhone } : {})
   };
-  const response = await fetch("https://api.paymongo.com/v1/checkout_sessions", {
-    method: "POST",
-    headers: {
-      Authorization: authHeader(),
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      data: {
-        attributes: {
-          billing,
-          description: `RETELA Order #${order.id}`,
-          line_items: [{
-            currency: "PHP",
-            amount,
-            name: `RETELA Order #${order.id}`,
-            quantity: 1
-          }],
-          payment_method_types: methodTypes(input.paymentMethod),
-          reference_number: reference,
-          success_url: clientUrl(`/payment/success?order=${order.id}&ref=${reference}`),
-          cancel_url: clientUrl(`/payment/cancel?order=${order.id}&ref=${reference}`)
-        }
-      }
-    })
+  console.log("Creating GCash payment", {
+    orderId: order.id,
+    paymentMethod: input.paymentMethod,
+    provider: "paymongo",
+    amount,
+    successUrl: clientUrl(`/payment/success?order=${order.id}&ref=${reference}`),
+    cancelUrl: clientUrl(`/payment/cancel?order=${order.id}&ref=${reference}`)
   });
-
-  const data = await response.json();
-  if (!response.ok) throw new HttpError(502, data?.errors?.[0]?.detail || "PayMongo rejected the checkout request.");
+  let response;
+  let data;
+  try {
+    response = await fetch("https://api.paymongo.com/v1/checkout_sessions", {
+      method: "POST",
+      headers: {
+        Authorization: authHeader(),
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        data: {
+          attributes: {
+            billing,
+            description: `RETELA Order #${order.id}`,
+            line_items: [{
+              currency: "PHP",
+              amount,
+              name: `RETELA Order #${order.id}`,
+              quantity: 1
+            }],
+            payment_method_types: methodTypes(input.paymentMethod),
+            reference_number: reference,
+            success_url: clientUrl(`/payment/success?order=${order.id}&ref=${reference}`),
+            cancel_url: clientUrl(`/payment/cancel?order=${order.id}&ref=${reference}`)
+          }
+        }
+      })
+    });
+    data = await response.json().catch(() => ({}));
+  } catch (error) {
+    console.error("GCash payment error:", {
+      provider: "paymongo",
+      message: error.message,
+      code: error.code || null
+    });
+    throw new HttpError(502, "Unable to create GCash payment.");
+  }
+  console.log("Payment provider status:", {
+    provider: "paymongo",
+    status: response.status,
+    ok: response.ok,
+    orderId: order.id
+  });
+  if (!response.ok) {
+    console.error("GCash payment error:", {
+      provider: "paymongo",
+      status: response.status,
+      detail: data?.errors?.[0]?.detail || null,
+      code: data?.errors?.[0]?.code || null
+    });
+    throw new HttpError(502, data?.errors?.[0]?.detail || "Unable to create GCash payment.");
+  }
   const checkoutUrl = data?.data?.attributes?.checkout_url;
-  if (!checkoutUrl) throw new HttpError(502, "PayMongo did not return a checkout URL.");
+  if (!checkoutUrl) {
+    console.error("GCash payment error:", {
+      provider: "paymongo",
+      status: response.status,
+      reason: "missing_checkout_url",
+      orderId: order.id
+    });
+    throw new HttpError(502, "GCash checkout URL was not returned by the payment provider.");
+  }
 
   await query(
     `UPDATE orders

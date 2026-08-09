@@ -59,9 +59,9 @@ export function FloatingCustomerAssistant({ hidden = false }) {
   if (hidden) return null;
 
   return (
-    <div className="fixed bottom-5 right-4 z-[65] sm:right-6">
+    <div className="ai-chat-shell">
       {open ? (
-        <section className="fade-slide mb-4 flex h-[min(620px,calc(100vh-7rem))] w-[calc(100vw-2rem)] max-w-[390px] flex-col overflow-hidden rounded-[28px] border border-neonbrand/25 bg-[#07110d]/95 text-white shadow-[0_24px_90px_rgba(0,0,0,0.46),0_0_42px_rgba(56,255,136,0.16)] backdrop-blur-2xl">
+        <section className="ai-chat-window fade-slide rounded-[28px] border border-neonbrand/25 bg-[#07110d]/95 text-white shadow-[0_24px_90px_rgba(0,0,0,0.46),0_0_42px_rgba(56,255,136,0.16)] backdrop-blur-2xl">
           <div className="flex items-center justify-between gap-3 border-b border-white/10 p-4">
             <div className="flex min-w-0 items-center gap-3">
               <span className="relative grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-neonbrand text-black shadow-[0_0_26px_rgba(56,255,136,0.35)]">
@@ -78,7 +78,7 @@ export function FloatingCustomerAssistant({ hidden = false }) {
             </button>
           </div>
 
-          <div ref={scrollRef} className="grid flex-1 content-start gap-3 overflow-auto p-4">
+          <div ref={scrollRef} className="ai-chat-messages grid content-start gap-3 p-4">
             {messages.length ? messages.map((message, index) => (
               <div key={message.id || index} className={`grid max-w-[84%] gap-1 ${message.sender_type === "customer" ? "ml-auto justify-items-end" : "justify-items-start"}`}>
                 <p className={`break-words rounded-2xl px-4 py-3 text-sm leading-6 shadow-sm ${message.sender_type === "customer" ? "bg-neonbrand text-black" : message.sender_type === "admin" ? "bg-emerald-500/15 text-emerald-100" : "bg-white/[0.08] text-white/82"}`}>
@@ -94,7 +94,7 @@ export function FloatingCustomerAssistant({ hidden = false }) {
             {sending ? <p className="inline-flex max-w-fit items-center gap-2 rounded-2xl bg-white/[0.08] px-4 py-3 text-sm text-white/60"><Loader2 size={15} className="animate-spin" /> Thinking</p> : null}
           </div>
 
-          <form onSubmit={sendMessage} className="flex gap-2 border-t border-white/10 p-3">
+          <form onSubmit={sendMessage} className="ai-chat-input-container border-t border-white/10 p-3">
             <input
               className="min-w-0 flex-1 rounded-2xl border border-white/10 bg-white/[0.07] px-4 py-3 text-sm text-white outline-none transition placeholder:text-white/35 focus:border-neonbrand/60"
               placeholder="Ask the assistant"
@@ -108,7 +108,7 @@ export function FloatingCustomerAssistant({ hidden = false }) {
         </section>
       ) : null}
 
-      <button type="button" onClick={() => setOpen((value) => !value)} className="float-soft relative grid h-16 w-16 place-items-center overflow-hidden rounded-full border border-neonbrand/45 bg-[#0b1510] text-neonbrand shadow-[0_20px_70px_rgba(56,255,136,0.3)] transition hover:scale-105" aria-label="Open assistant">
+      <button type="button" onClick={() => setOpen((value) => !value)} className="ai-chat-button float-soft relative grid h-16 w-16 place-items-center overflow-hidden rounded-full border border-neonbrand/45 bg-[#0b1510] text-neonbrand shadow-[0_20px_70px_rgba(56,255,136,0.3)] transition hover:scale-105" aria-label="Open assistant">
         <span className="absolute inset-1 rounded-full bg-neonbrand/10 shadow-[inset_0_0_24px_rgba(56,255,136,0.22)]" />
         {open ? <X size={25} className="relative" /> : (
           <span className="relative grid place-items-center">

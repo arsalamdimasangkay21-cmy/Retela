@@ -9,7 +9,8 @@ function socketUrlFromApiUrl(apiUrl) {
 }
 
 function normalizeApiUrl(value) {
-  const raw = stripTrailingSlash(value || "http://localhost:5000");
+  const fallbackApiUrl = import.meta.env.PROD ? "https://api.retela.shop" : "http://localhost:5000";
+  const raw = stripTrailingSlash(value || fallbackApiUrl);
   return `${raw.replace(/(\/api)+$/, "")}/api`;
 }
 
