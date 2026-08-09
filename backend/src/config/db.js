@@ -215,20 +215,44 @@ async function columnSet(tableName) {
 }
 
 async function primaryKeyColumns(tableName) {
-  const rows = await query(
-    `SELECT kcu.COLUMN_NAME
-     FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc
-     JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE kcu
-       ON tc.CONSTRAINT_SCHEMA = kcu.CONSTRAINT_SCHEMA
-      AND tc.TABLE_NAME = kcu.TABLE_NAME
-      AND tc.CONSTRAINT_NAME = kcu.CONSTRAINT_NAME
-     WHERE tc.CONSTRAINT_SCHEMA = DATABASE()
-       AND tc.TABLE_NAME = :tableName
-       AND tc.CONSTRAINT_TYPE = 'PRIMARY KEY'
-     ORDER BY kcu.ORDINAL_POSITION`,
+  const keyUsageRows = await query(
+    `SELECT COLUMN_NAME
+     FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE
+     WHERE CONSTRAINT_SCHEMA = DATABASE()
+       AND TABLE_NAME = :tableName
+       AND CONSTRAINT_NAME = 'PRIMARY'
+     ORDER BY ORDINAL_POSITION`,
     { tableName }
   );
-  return rows.map((row) => row.COLUMN_NAME);
+  if (keyUsageRows.length) return keyUsageRows.map((row) => row.COLUMN_NAME);
+
+  const statisticRows = await query(
+    `SELECT COLUMN_NAME
+     FROM INFORMATION_SCHEMA.STATISTICS
+     WHERE TABLE_SCHEMA = DATABASE()
+       AND TABLE_NAME = :tableName
+       AND INDEX_NAME = 'PRIMARY'
+     ORDER BY SEQ_IN_INDEX`,
+    { tableName }
+  );
+  if (statisticRows.length) return statisticRows.map((row) => row.COLUMN_NAME);
+
+  const columns = await columnSet(tableName);
+  return [...columns.values()]
+    .filter((column) => String(column.COLUMN_KEY || "").toUpperCase() === "PRI")
+    .map((column) => column.COLUMN_NAME);
+}
+
+async function indexSummaries(tableName) {
+  return query(
+    `SELECT INDEX_NAME, NON_UNIQUE, GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX) AS COLUMNS
+     FROM INFORMATION_SCHEMA.STATISTICS
+     WHERE TABLE_SCHEMA = DATABASE()
+       AND TABLE_NAME = :tableName
+     GROUP BY INDEX_NAME, NON_UNIQUE
+     ORDER BY INDEX_NAME`,
+    { tableName }
+  );
 }
 
 async function tableConstraints(tableName) {
@@ -370,7 +394,8 @@ export async function inspectIdentityColumn(tableName) {
     tableType: info.TABLE_TYPE,
     id: columns.get("id") || null,
     primaryKeyColumns: info.TABLE_TYPE === "BASE TABLE" ? await primaryKeyColumns(tableName) : [],
-    autoIncrementColumns: info.TABLE_TYPE === "BASE TABLE" ? await autoIncrementColumns(tableName) : []
+    autoIncrementColumns: info.TABLE_TYPE === "BASE TABLE" ? await autoIncrementColumns(tableName) : [],
+    indexes: info.TABLE_TYPE === "BASE TABLE" ? await indexSummaries(tableName) : []
   };
 }
 
@@ -379,12 +404,26 @@ export async function requireUsableAutoIncrementId(tableName) {
   if (!identity.exists || identity.tableType !== "BASE TABLE") return identity;
 
   const idExtra = String(identity.id?.EXTRA || "").toLowerCase();
+  const primaryKeyColumnsNormalized = identity.primaryKeyColumns.map((column) => String(column || "").toLowerCase());
   const isUsable = identity.id
     && identity.primaryKeyColumns.length === 1
-    && identity.primaryKeyColumns[0] === "id"
+    && primaryKeyColumnsNormalized[0] === "id"
     && idExtra.includes("auto_increment");
 
   if (!isUsable) {
+    console.error("[schema bootstrap] Identity column validation failed", {
+      tableName,
+      tableType: identity.tableType,
+      id: identity.id ? {
+        columnType: identity.id.COLUMN_TYPE,
+        extra: identity.id.EXTRA,
+        columnKey: identity.id.COLUMN_KEY,
+        nullable: identity.id.IS_NULLABLE
+      } : null,
+      primaryKeyColumns: identity.primaryKeyColumns,
+      autoIncrementColumns: identity.autoIncrementColumns,
+      indexes: identity.indexes
+    });
     const error = new Error(
       `[schema bootstrap] ${tableName}.id is not usable. Expected id as the single-column AUTO_INCREMENT PRIMARY KEY. ` +
       `Primary key: ${identity.primaryKeyColumns.join(", ") || "<none>"}. ` +
