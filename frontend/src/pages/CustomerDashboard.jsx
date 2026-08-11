@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { AlertCircle, BadgeCheck, Bell, Bot, CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, Clock3, Copy, CreditCard, Edit3, Eye, EyeOff, FileImage, Globe2, Loader2, Mail, MapPin, Megaphone, MessageCircle, Minus, PackageCheck, Phone, Plus, RotateCcw, Save, Search, Send, ShieldCheck, ShoppingCart, Star, Tag, Trash2, Upload, User, Users, WalletCards, X } from "lucide-react";
+import { AlertCircle, BadgeCheck, Bell, Bot, CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, Clock3, Copy, CreditCard, Edit3, Eye, EyeOff, FileImage, Globe2, Loader2, Mail, MapPin, Megaphone, MessageCircle, Minus, PackageCheck, Phone, Plus, RotateCcw, Save, Search, Send, ShieldCheck, ShoppingCart, Star, Tag, Trash2, Upload, User, Users, WalletCards, X, XCircle } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { A11y, Autoplay, EffectFade, Navigation, Pagination } from "swiper/modules";
 import { Swiper, SwiperSlide } from "swiper/react";
@@ -708,7 +708,20 @@ export default function CustomerDashboard({ active, onChange }) {
     );
   }
 
-  if (active === "Orders") return <Orders rows={orders} profile={profile} reviews={reviews} returnRequests={returnRequests} onNavigate={onChange} />;
+  if (active === "Orders") return (
+    <Orders
+      rows={orders}
+      profile={profile}
+      reviews={reviews}
+      returnRequests={returnRequests}
+      onNavigate={onChange}
+      onOrderCancelled={(updatedOrder) => {
+        setOrders((current) => current.map((order) => Number(order.id) === Number(updatedOrder.id) ? { ...order, ...updatedOrder } : order));
+        clearGetCache("/orders");
+        load(filtersRef.current, { force: true }).catch(() => {});
+      }}
+    />
+  );
   if (active === "Notifications") {
     return (
       <Notifications
@@ -1860,12 +1873,14 @@ function formatNotificationDate(value) {
   return date.toLocaleString(undefined, { month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
-function Orders({ rows, profile, reviews = [], returnRequests = [], onNavigate }) {
+function Orders({ rows, profile, reviews = [], returnRequests = [], onNavigate, onOrderCancelled }) {
   const flow = ["pending", "awaiting_payment", "paid", "processing", "completed"];
   const [selectedOrderId, setSelectedOrderId] = useState(null);
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [loading, setLoading] = useState(false);
   const [payingOrderId, setPayingOrderId] = useState(null);
+  const [cancellingOrderId, setCancellingOrderId] = useState(null);
+  const [cancelDialogOrder, setCancelDialogOrder] = useState(null);
   const [paymentMessage, setPaymentMessage] = useState("");
   const [redirectingPayment, setRedirectingPayment] = useState(null);
   const reviewedOrderIds = useMemo(() => new Set(reviews.map((review) => Number(review.order_id))), [reviews]);
@@ -1883,7 +1898,7 @@ function Orders({ rows, profile, reviews = [], returnRequests = [], onNavigate }
 
   async function payOrder(order, event) {
     event?.stopPropagation();
-    if (!order || order.payment_method === "cod" || payingOrderId) return;
+    if (!order || order.payment_method === "cod" || payingOrderId || isOrderCancelled(order)) return;
     const billingPhone = profile?.phone_number || order.phone_number || "";
     if (!isValidPaymentNumber(billingPhone)) {
       setPaymentMessage(`Add a valid ${paymentNumberLabels[order.payment_method].toLowerCase()} in your Profile before paying.`);
@@ -1946,10 +1961,39 @@ function Orders({ rows, profile, reviews = [], returnRequests = [], onNavigate }
     onNavigate?.(target);
   }
 
+  function openCancelDialog(order, event) {
+    event.stopPropagation();
+    if (!canCancelOrder(order)) return;
+    setCancelDialogOrder(order);
+  }
+
+  async function confirmCancelOrder() {
+    if (!cancelDialogOrder || cancellingOrderId) return;
+    setCancellingOrderId(cancelDialogOrder.id);
+    try {
+      const { data } = await api.patch(`/orders/${cancelDialogOrder.id}/cancel`);
+      const updatedOrder = data?.order || { ...cancelDialogOrder, status: "cancelled", payment_status: "cancelled", checkout_url: null };
+      onOrderCancelled?.(updatedOrder);
+      setSelectedOrder((current) => current?.order && Number(current.order.id) === Number(updatedOrder.id)
+        ? { ...current, order: { ...current.order, ...updatedOrder } }
+        : current);
+      setPaymentMessage(data?.message || "Order cancelled successfully.");
+      setCancelDialogOrder(null);
+    } catch (error) {
+      setPaymentMessage(error?.response?.data?.message || "This order can no longer be cancelled.");
+    } finally {
+      setCancellingOrderId(null);
+    }
+  }
+
   return (
     <div className="grid gap-4">
       {paymentMessage ? <CartToast message={paymentMessage} /> : null}
-      {rows.map((order) => (
+      {rows.map((order) => {
+        const cancelled = isOrderCancelled(order);
+        const canCancel = canCancelOrder(order);
+        const canPay = canPayOrder(order);
+        return (
         <div key={order.id} role="button" tabIndex={0} onClick={() => setSelectedOrderId(order.id)} onKeyDown={(event) => event.key === "Enter" ? setSelectedOrderId(order.id) : null} className="text-left outline-none">
         <Card className="rounded-[20px] border-slate-100 bg-white p-4 shadow-[0_14px_34px_rgba(15,23,42,0.07)] transition hover:-translate-y-0.5 hover:border-emerald-200 hover:shadow-[0_20px_45px_rgba(15,23,42,0.1)]">
           <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
@@ -1960,7 +2004,7 @@ function Orders({ rows, profile, reviews = [], returnRequests = [], onNavigate }
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
                   <strong className="truncate text-slate-950">{order.brands || "RETELA Apparel"}</strong>
-                  <span className={`rounded-full border px-2.5 py-1 text-[11px] font-black ${order.status === "completed" ? "border-emerald-100 bg-emerald-50 text-emerald-700" : "border-sky-100 bg-sky-50 text-sky-700"}`}>{customerOrderStatus(order.status)}</span>
+                  <span className={`rounded-full border px-2.5 py-1 text-[11px] font-black ${customerOrderStatusClass(order.status)}`}>{customerOrderStatus(order.status)}</span>
                 </div>
                 <p className="mt-1 truncate text-sm font-semibold text-slate-700">{order.first_product_name || order.product_names || "Apparel order"}</p>
                 <div className="mt-2 grid gap-2 text-xs text-slate-500 sm:grid-cols-2 lg:grid-cols-4">
@@ -1976,32 +2020,49 @@ function Orders({ rows, profile, reviews = [], returnRequests = [], onNavigate }
               <button type="button" onClick={(event) => { event.stopPropagation(); setSelectedOrderId(order.id); }} className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 transition hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700">
                 <Eye size={15} /> View Details
               </button>
-              <button type="button" disabled={order.status !== "completed" || reviewedOrderIds.has(Number(order.id))} onClick={(event) => openAction("Feedback", event)} className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 transition hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700 disabled:cursor-not-allowed disabled:opacity-45">
-                <Star size={15} /> Leave Feedback
-              </button>
-              <button type="button" disabled={!canRequestReturn(order, returnStateByOrder.get(Number(order.id)))} onClick={(event) => openAction("Returns", event)} className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 transition hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700 disabled:cursor-not-allowed disabled:opacity-45">
-                <RotateCcw size={15} /> Request Return
-              </button>
+              {!cancelled ? (
+                <button type="button" disabled={order.status !== "completed" || reviewedOrderIds.has(Number(order.id))} onClick={(event) => openAction("Feedback", event)} className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 transition hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700 disabled:cursor-not-allowed disabled:opacity-45">
+                  <Star size={15} /> Leave Feedback
+                </button>
+              ) : null}
+              {!cancelled ? (
+                <button type="button" disabled={!canRequestReturn(order, returnStateByOrder.get(Number(order.id)))} onClick={(event) => openAction("Returns", event)} className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 transition hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700 disabled:cursor-not-allowed disabled:opacity-45">
+                  <RotateCcw size={15} /> Request Return
+                </button>
+              ) : null}
             </div>
           </div>
-          <div className="mt-3 grid grid-cols-5 gap-2">{flow.map((s) => <div key={s} className={`h-1.5 rounded-full ${flow.indexOf(s) <= flow.indexOf(order.status) ? "bg-emerald-500" : "bg-slate-200"}`} />)}</div>
+          {!cancelled ? <div className="mt-3 grid grid-cols-5 gap-2">{flow.map((s) => <div key={s} className={`h-1.5 rounded-full ${flow.indexOf(s) <= flow.indexOf(normalizeOrderStatus(order.status)) ? "bg-emerald-500" : "bg-slate-200"}`} />)}</div> : null}
           <div className="mt-3 flex flex-wrap items-center gap-2">
-            {order.fulfillment_method === "delivery" ? (
-              <a onClick={(event) => event.stopPropagation()} className="inline-flex items-center gap-2 rounded-xl border border-emerald-100 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700 transition hover:bg-emerald-100" href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(order.location || "delivery location")}`} target="_blank" rel="noreferrer">
+            {!cancelled && order.fulfillment_method === "delivery" ? (
+              <a onClick={(event) => event.stopPropagation()} className="inline-flex min-h-9 min-w-[150px] items-center justify-center gap-2 rounded-xl border border-emerald-100 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700 transition hover:bg-emerald-100 max-[600px]:w-full" href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(order.location || "delivery location")}`} target="_blank" rel="noreferrer">
                 <MapPin size={15} /> Open tracking map
               </a>
             ) : null}
-            {order.payment_method !== "cod" && order.payment_status !== "paid" ? (
-              <button type="button" onClick={(event) => payOrder(order, event)} className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-3 py-2 text-xs font-bold text-white shadow-[0_12px_24px_rgba(22,163,74,0.18)]">
+            {canPay ? (
+              <button type="button" onClick={(event) => payOrder(order, event)} className="inline-flex min-h-9 min-w-[150px] items-center justify-center gap-2 rounded-xl bg-emerald-600 px-3 py-2 text-xs font-bold text-white shadow-[0_12px_24px_rgba(22,163,74,0.18)] max-[600px]:w-full">
                 <WalletCards size={15} /> {payingOrderId === order.id ? "Opening..." : `Pay with ${paymentLabel(order.payment_method)}`}
+              </button>
+            ) : null}
+            {canCancel ? (
+              <button type="button" disabled={cancellingOrderId === order.id} onClick={(event) => openCancelDialog(order, event)} className="inline-flex min-h-9 min-w-[150px] items-center justify-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700 transition hover:border-rose-300 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60 max-[600px]:w-full">
+                <XCircle size={15} /> {cancellingOrderId === order.id ? "Cancelling..." : "Cancel Order"}
               </button>
             ) : null}
           </div>
         </Card>
         </div>
-      ))}
+      );})}
       <AnimatePresence>
         {selectedOrderId ? <CustomerOrderModal loading={loading} selectedOrder={selectedOrder} displayNumber={rows.length - rows.findIndex((item) => item.id === selectedOrderId)} onPay={payOrder} payingOrderId={payingOrderId} onClose={() => setSelectedOrderId(null)} /> : null}
+        {cancelDialogOrder ? (
+          <CancelOrderDialog
+            order={cancelDialogOrder}
+            cancelling={cancellingOrderId === cancelDialogOrder.id}
+            onClose={() => setCancelDialogOrder(null)}
+            onConfirm={confirmCancelOrder}
+          />
+        ) : null}
       </AnimatePresence>
       {redirectingPayment ? <PaymentLoadingOverlay method={redirectingPayment} /> : null}
     </div>
@@ -2010,6 +2071,7 @@ function Orders({ rows, profile, reviews = [], returnRequests = [], onNavigate }
 
 function CustomerOrderModal({ loading, selectedOrder, displayNumber, onPay, payingOrderId, onClose }) {
   const order = selectedOrder?.order;
+  const cancelled = isOrderCancelled(order);
   return (
     <motion.div className="fixed inset-0 z-[120] grid place-items-center overflow-y-auto bg-black/70 p-4 backdrop-blur-xl" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onMouseDown={onClose}>
       <motion.div className="mx-4 my-6 w-full max-w-2xl overflow-hidden rounded-[28px] border border-green-400/20 bg-white/5 shadow-[0_30px_110px_rgba(0,0,0,0.55),0_0_55px_rgba(56,255,136,0.14)] backdrop-blur-xl" initial={{ opacity: 0, scale: 0.94, y: 18 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.94, y: 18 }} transition={{ duration: 0.22, ease: "easeOut" }} onMouseDown={(event) => event.stopPropagation()}>
@@ -2028,7 +2090,7 @@ function CustomerOrderModal({ loading, selectedOrder, displayNumber, onPay, payi
                   <h3 className="mt-2 font-display text-2xl font-bold text-white">My Order #{displayNumber}</h3>
                   <p className="mt-1 text-sm text-white/55">Created {new Date(order.created_at).toLocaleString()}</p>
                 </div>
-                <span className="rounded-full bg-blue-50 px-4 py-2 text-sm font-bold text-bluebrand">{order.status}</span>
+                <span className={`rounded-full border px-4 py-2 text-sm font-bold ${customerOrderStatusClass(order.status)}`}>{customerOrderStatus(order.status)}</span>
               </div>
               <div className="grid gap-3 sm:grid-cols-3">
                 <Detail label="Total" value={`PHP ${order.total_amount}`} />
@@ -2036,7 +2098,7 @@ function CustomerOrderModal({ loading, selectedOrder, displayNumber, onPay, payi
               </div>
               <Detail label="Tracking Number" value={order.tracking_number || "Waiting for admin"} />
               <Detail label="Payment Status" value={order.payment_status || "unpaid"} />
-              {order.fulfillment_method === "delivery" ? (
+              {!cancelled && order.fulfillment_method === "delivery" ? (
                 <a className="inline-flex w-fit items-center gap-2 rounded-2xl border border-neonbrand/20 bg-neonbrand/10 px-3 py-2 text-sm font-bold text-neonbrand" href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(order.location || "delivery location")}`} target="_blank" rel="noreferrer">
                   <MapPin size={16} /> Open tracking map
                 </a>
@@ -2055,7 +2117,7 @@ function CustomerOrderModal({ loading, selectedOrder, displayNumber, onPay, payi
                 ))}
               </div>
               <div className="flex flex-wrap justify-end gap-2">
-                {order.payment_method !== "cod" && order.payment_status !== "paid" ? (
+                {canPayOrder(order) ? (
                   <button type="button" onClick={(event) => onPay(order, event)} className="rounded-xl bg-neonbrand px-4 py-2 text-xs font-bold text-black">
                     {payingOrderId === order.id ? "Opening..." : `Pay with ${paymentLabel(order.payment_method)}`}
                   </button>
@@ -2064,6 +2126,34 @@ function CustomerOrderModal({ loading, selectedOrder, displayNumber, onPay, payi
               </div>
             </div>
           ) : <p className="text-white/60">Order details are not available.</p>}
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+function CancelOrderDialog({ order, cancelling, onClose, onConfirm }) {
+  return (
+    <motion.div className="fixed inset-0 z-[130] grid place-items-center bg-slate-950/55 p-4 backdrop-blur-sm" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onMouseDown={onClose}>
+      <motion.div className="w-full max-w-sm rounded-[24px] border border-rose-100 bg-white p-5 shadow-[0_24px_80px_rgba(15,23,42,0.24)]" initial={{ opacity: 0, y: 14, scale: 0.96 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 14, scale: 0.96 }} transition={{ duration: 0.18 }} onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="cancel-order-title">
+        <div className="flex items-start gap-3">
+          <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl border border-rose-200 bg-rose-50 text-rose-700">
+            <XCircle size={21} />
+          </span>
+          <div className="min-w-0">
+            <h3 id="cancel-order-title" className="font-display text-lg font-bold text-slate-950">Cancel this order?</h3>
+            <p className="mt-2 text-sm leading-6 text-slate-600">Are you sure you want to cancel this order? This action cannot be undone.</p>
+            <p className="mt-2 text-xs font-bold text-slate-400">{orderNumber(order)}</p>
+          </div>
+        </div>
+        <div className="mt-5 flex flex-wrap justify-end gap-2">
+          <button type="button" disabled={cancelling} onClick={onClose} className="inline-flex min-h-10 flex-1 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700 transition hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700 disabled:cursor-not-allowed disabled:opacity-60 sm:flex-none">
+            Keep Order
+          </button>
+          <button type="button" disabled={cancelling} onClick={onConfirm} className="inline-flex min-h-10 flex-1 items-center justify-center gap-2 rounded-xl border border-rose-200 bg-rose-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-60 sm:flex-none">
+            {cancelling ? <Loader2 className="animate-spin" size={16} /> : <XCircle size={16} />}
+            Cancel Order
+          </button>
         </div>
       </motion.div>
     </motion.div>
@@ -2820,14 +2910,43 @@ function orderNumber(order) {
 }
 
 function customerOrderStatus(status) {
-  if (status === "completed") return "Delivered";
-  if (status === "awaiting_payment") return "Awaiting Payment";
-  if (status === "payment_failed") return "Payment Failed";
-  if (status === "paid") return "Paid";
-  if (status === "processing") return "Processing";
-  if (status === "ready") return "Ready";
-  if (status === "cancelled") return "Cancelled";
-  return status ? status.charAt(0).toUpperCase() + status.slice(1) : "Pending";
+  const normalized = normalizeOrderStatus(status);
+  if (normalized === "completed") return "Delivered";
+  if (normalized === "awaiting_payment") return "Awaiting Payment";
+  if (normalized === "payment_failed") return "Payment Failed";
+  if (normalized === "paid") return "Paid";
+  if (normalized === "processing") return "Processing";
+  if (normalized === "ready") return "Ready";
+  if (normalized === "cancelled" || normalized === "canceled") return "Cancelled";
+  return normalized ? normalized.charAt(0).toUpperCase() + normalized.slice(1).replace(/_/g, " ") : "Pending";
+}
+
+function normalizeOrderStatus(status) {
+  return String(status || "").trim().toLowerCase().replace(/\s+/g, "_");
+}
+
+function isOrderCancelled(orderOrStatus) {
+  const status = typeof orderOrStatus === "object" ? orderOrStatus?.status : orderOrStatus;
+  return ["cancelled", "canceled"].includes(normalizeOrderStatus(status));
+}
+
+function canCancelOrder(order) {
+  return ["pending", "awaiting_payment"].includes(normalizeOrderStatus(order?.status));
+}
+
+function canPayOrder(order) {
+  if (!order || isOrderCancelled(order)) return false;
+  if (order.payment_method === "cod" || order.payment_status === "paid") return false;
+  return !["paid", "processing", "ready", "completed", "cancelled", "canceled", "returned"].includes(normalizeOrderStatus(order.status));
+}
+
+function customerOrderStatusClass(status) {
+  const normalized = normalizeOrderStatus(status);
+  if (normalized === "completed") return "border-emerald-100 bg-emerald-50 text-emerald-700";
+  if (normalized === "cancelled" || normalized === "canceled") return "border-rose-100 bg-rose-50 text-rose-700";
+  if (normalized === "payment_failed") return "border-rose-100 bg-rose-50 text-rose-700";
+  if (normalized === "pending" || normalized === "awaiting_payment") return "border-amber-100 bg-amber-50 text-amber-700";
+  return "border-sky-100 bg-sky-50 text-sky-700";
 }
 
 function brandInitials(value) {

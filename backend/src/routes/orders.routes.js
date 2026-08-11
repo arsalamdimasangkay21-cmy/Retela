@@ -9,7 +9,16 @@ import { ensureCartTable } from "./cart.routes.js";
 
 const router = Router();
 const statuses = ["pending", "awaiting_payment", "paid", "approved", "processing", "ready", "completed", "cancelled", "payment_failed"];
+const customerCancellableStatuses = new Set(["pending", "awaiting_payment"]);
 let orderColumnsReady;
+
+function normalizeOrderStatus(status) {
+  return String(status || "").trim().toLowerCase().replace(/\s+/g, "_");
+}
+
+function isCustomerCancellableStatus(status) {
+  return customerCancellableStatuses.has(normalizeOrderStatus(status));
+}
 
 async function ensureOrderColumns() {
   orderColumnsReady ||= (async () => {
@@ -167,6 +176,105 @@ router.get("/:id/items", requireAuth, requireApproved, asyncHandler(async (req, 
   );
 
   res.json({ order: orders[0], items });
+}));
+
+router.patch("/:id/cancel", requireAuth, requireApproved, asyncHandler(async (req, res) => {
+  await ensureOrderColumns();
+  await ensureProductInventoryColumns();
+  const orderId = Number(req.params.id);
+  if (!Number.isInteger(orderId) || orderId <= 0) throw new HttpError(400, "A valid order ID is required");
+
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const [orders] = await conn.execute(
+      `SELECT id, user_id, status, payment_status, payment_method, total_amount, checkout_url
+       FROM orders
+       WHERE id = ?
+       FOR UPDATE`,
+      [orderId]
+    );
+    if (!orders.length || Number(orders[0].user_id) !== Number(req.user.id)) {
+      throw new HttpError(404, "Order not found");
+    }
+    const order = orders[0];
+    if (!isCustomerCancellableStatus(order.status)) {
+      throw new HttpError(409, "This order can no longer be cancelled.");
+    }
+
+    const [items] = await conn.execute(
+      "SELECT product_id, quantity FROM order_items WHERE order_id = ?",
+      [orderId]
+    );
+    const inventoryUpdates = [];
+    for (const item of items) {
+      await conn.execute(
+        `UPDATE products
+         SET stock = stock + ?,
+             status = CASE
+               WHEN stock + ? <= 0 THEN 'Out of Stock'
+               WHEN stock + ? <= 5 THEN 'Low Stock'
+               ELSE 'In Stock'
+             END
+         WHERE id = ?`,
+        [item.quantity, item.quantity, item.quantity, item.product_id]
+      );
+      const [updatedProducts] = await conn.execute("SELECT id, name, stock FROM products WHERE id = ?", [item.product_id]);
+      const nextStock = Number(updatedProducts[0]?.stock || 0);
+      inventoryUpdates.push({
+        id: Number(item.product_id),
+        name: updatedProducts[0]?.name,
+        stock: nextStock,
+        status: nextStock <= 0 ? "Out of Stock" : nextStock <= 5 ? "Low Stock" : "In Stock"
+      });
+    }
+
+    await conn.execute(
+      `UPDATE orders
+       SET status = 'cancelled',
+           payment_status = 'cancelled',
+           checkout_url = NULL,
+           checkout_session_id = NULL
+       WHERE id = ?`,
+      [orderId]
+    );
+    await conn.execute(
+      "INSERT INTO notifications (user_id, type, title, body) VALUES (?, 'order', 'Order cancelled', ?)",
+      [req.user.id, `Order #${orderId} was cancelled successfully.`]
+    );
+    await conn.execute(
+      "INSERT INTO notifications (type, title, body) VALUES ('order', 'Order cancelled', ?)",
+      [`Order #${orderId} was cancelled by the customer.`]
+    );
+
+    const [updatedRows] = await conn.execute(
+      `SELECT id, user_id, order_channel, status, payment_method, payment_status, payment_reference,
+         transaction_id, paid_at, cash_received, change_amount, tracking_number, fulfillment_method,
+         subtotal_amount, coupon_discount, sale_discount, shipping_fee, coupon_code, total_amount,
+         checkout_url, created_at
+       FROM orders
+       WHERE id = ?`,
+      [orderId]
+    );
+    await conn.commit();
+
+    const cancelledOrder = updatedRows[0];
+    req.app.get("io")?.to(`user:${req.user.id}`).emit("order:update", { id: orderId, status: "cancelled", payment_status: "cancelled" });
+    req.app.get("io")?.to("admin").emit("order:update", { id: orderId, status: "cancelled", payment_status: "cancelled" });
+    inventoryUpdates.forEach((update) => {
+      req.app.get("io")?.emit("inventory:update", { type: "inventory", action: "order_cancelled", ...update });
+    });
+    req.app.get("io")?.to("admin").emit("notification:new", { type: "order", title: "Order cancelled", body: `Order #${orderId} was cancelled by the customer.` });
+    res.json({
+      message: "Order cancelled successfully.",
+      order: cancelledOrder
+    });
+  } catch (error) {
+    await conn.rollback();
+    throw error;
+  } finally {
+    conn.release();
+  }
 }));
 
 router.post("/", requireAuth, requireApproved, asyncHandler(async (req, res) => {

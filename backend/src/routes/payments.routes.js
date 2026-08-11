@@ -77,9 +77,10 @@ function verifyWebhookSignature(req) {
 }
 
 async function markOrderPaid({ orderId, transactionId, reference }) {
-  const rows = await query("SELECT id, user_id, payment_status FROM orders WHERE id = :orderId", { orderId });
+  const rows = await query("SELECT id, user_id, status, payment_status FROM orders WHERE id = :orderId", { orderId });
   if (!rows.length) return;
   if (rows[0].payment_status === "paid") return;
+  if (rows[0].status === "cancelled" || rows[0].payment_status === "cancelled") return;
   await query(
     `UPDATE orders
      SET status = 'paid',
@@ -98,8 +99,9 @@ async function markOrderPaid({ orderId, transactionId, reference }) {
 }
 
 async function markOrderFailed({ orderId, transactionId, reference }) {
-  const rows = await query("SELECT id, user_id, payment_status FROM orders WHERE id = :orderId", { orderId });
+  const rows = await query("SELECT id, user_id, status, payment_status FROM orders WHERE id = :orderId", { orderId });
   if (!rows.length || rows[0].payment_status === "paid") return;
+  if (rows[0].status === "cancelled" || rows[0].payment_status === "cancelled") return;
   await query(
     `UPDATE orders
      SET status = 'payment_failed',
@@ -140,6 +142,9 @@ router.post("/create-gcash-checkout", requireAuth, requireApproved, asyncHandler
   );
   if (!orders.length) throw new HttpError(404, "Order not found");
   const order = orders[0];
+  if (order.status === "cancelled" || order.payment_status === "cancelled") {
+    throw new HttpError(409, "This order has been cancelled and can no longer be paid.");
+  }
   if (order.payment_status === "paid") throw new HttpError(400, "This order is already paid.");
   if (order.checkout_url && order.payment_status === "awaiting_payment") {
     console.log("Payment provider status:", {
