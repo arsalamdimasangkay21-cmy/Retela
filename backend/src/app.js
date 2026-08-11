@@ -21,7 +21,8 @@ import adminRoutes from "./routes/admin.routes.js";
 import chatRoutes from "./routes/chat.routes.js";
 import posRoutes from "./routes/pos.routes.js";
 import customerRoutes from "./routes/customer.routes.js";
-import { checkDatabaseConnection, requestContextMiddleware } from "./config/db.js";
+import identityVerificationsRoutes from "./routes/identity-verifications.routes.js";
+import { checkDatabaseConnection, query, requestContextMiddleware } from "./config/db.js";
 import { allowedOrigins, corsOptions } from "./config/cors.js";
 import { PRODUCT_UPLOAD_DIR, UPLOAD_ROOT, logUploadConfig } from "./config/uploads.js";
 
@@ -83,6 +84,24 @@ export function createApp(io) {
     })
   );
 
+  app.use("/uploads", async (req, res, next) => {
+    const requestedPath = String(req.path || "").replace(/\\/g, "/").replace(/^\/+/, "");
+    if (!requestedPath) return next();
+    if (requestedPath.startsWith("verifications/")) {
+      return res.status(404).json({ success: false, message: "File not found" });
+    }
+    const uploadPath = `/uploads/${requestedPath}`;
+    const rows = await query(
+      `SELECT id
+       FROM identity_verifications
+       WHERE id_image IN (:plainPath, :uploadPath)
+          OR selfie_image IN (:plainPath, :uploadPath)
+       LIMIT 1`,
+      { plainPath: requestedPath, uploadPath }
+    ).catch(() => []);
+    if (rows.length) return res.status(404).json({ success: false, message: "File not found" });
+    return next();
+  });
   app.use("/uploads/products", express.static(PRODUCT_UPLOAD_DIR));
   app.use("/uploads", express.static(UPLOAD_ROOT));
 
@@ -131,6 +150,7 @@ export function createApp(io) {
   app.use("/api/conditions", conditionsRoutes);
   app.use("/api/users", usersRoutes);
   app.use("/api/customer", customerRoutes);
+  app.use("/api/identity-verifications", identityVerificationsRoutes);
   app.use("/api/apparel", productsRoutes);
   app.use("/api/products", productsRoutes);
   app.use("/api/orders", ordersRoutes);

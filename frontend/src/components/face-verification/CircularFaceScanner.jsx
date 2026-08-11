@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import * as faceapi from "face-api.js";
 import { ArrowLeft, Camera, RotateCcw, ShieldCheck } from "lucide-react";
 import { Button } from "../ui";
+import { loadFaceModels } from "../auth/FaceRecognition";
 import { captureVideoFrame, compressImage } from "../auth/imageTools";
 import SegmentedProgressRing from "./SegmentedProgressRing";
 
@@ -95,6 +97,7 @@ export default function CircularFaceScanner({
   const capturedPreviewRef = useRef("");
 
   const [cameraReady, setCameraReady] = useState(false);
+  const [faceDetected, setFaceDetected] = useState(false);
   const [phase, setPhase] = useState(selfiePreview && captureVerified ? "success" : "starting");
   const [message, setMessage] = useState(
     selfiePreview && captureVerified
@@ -103,7 +106,7 @@ export default function CircularFaceScanner({
   );
 
   const captured = Boolean(selfie && selfiePreview && captureVerified);
-  const captureDisabled = !cameraReady || phase === "capturing" || captured;
+  const captureDisabled = !cameraReady || !faceDetected || phase === "capturing" || captured;
 
   const stopCamera = useCallback(() => {
     streamRef.current?.getTracks().forEach((track) => track.stop());
@@ -118,6 +121,7 @@ export default function CircularFaceScanner({
     if (!mountedRef.current) return;
 
     setPhase("starting");
+    setFaceDetected(false);
     setMessage("Make sure your face is visible before capturing.");
 
     try {
@@ -147,10 +151,11 @@ export default function CircularFaceScanner({
       if (!mountedRef.current) return;
       setCameraReady(true);
       setPhase("ready");
-      setMessage("Make sure your face is visible before capturing.");
+      setMessage("Detecting your face...");
     } catch (error) {
       if (!mountedRef.current) return;
       setCameraReady(false);
+      setFaceDetected(false);
       setPhase("camera-error");
       setMessage(cameraErrorMessage(error));
     }
@@ -198,6 +203,55 @@ export default function CircularFaceScanner({
     };
   }, [openCamera, selfiePreview, stopCamera]);
 
+  useEffect(() => {
+    if (!cameraReady || selfiePreview) {
+      setFaceDetected(false);
+      return undefined;
+    }
+
+    let cancelled = false;
+    let timer = null;
+    let detecting = false;
+
+    async function detectFace() {
+      if (cancelled || detecting) return;
+      detecting = true;
+      try {
+        await loadFaceModels();
+        const video = videoRef.current;
+        if (!video || video.readyState < 2 || !video.videoWidth || !video.videoHeight) {
+          return;
+        }
+        const faces = await faceapi.detectAllFaces(
+          video,
+          new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.45 })
+        );
+        if (cancelled) return;
+        const hasOneFace = faces.length === 1;
+        setFaceDetected(hasOneFace);
+        setMessage(hasOneFace
+          ? "Face detected. Press Capture Face when you are ready."
+          : faces.length > 1
+            ? "Only one face should be visible before capturing."
+            : "Position your face in the frame before capturing.");
+      } catch (error) {
+        if (!cancelled) {
+          setFaceDetected(false);
+          setMessage("Face detection is unavailable. Please refresh and try again.");
+        }
+      } finally {
+        detecting = false;
+        if (!cancelled) timer = window.setTimeout(detectFace, 700);
+      }
+    }
+
+    void detectFace();
+    return () => {
+      cancelled = true;
+      if (timer) window.clearTimeout(timer);
+    };
+  }, [cameraReady, selfiePreview]);
+
   useEffect(() => () => {
     if (capturedPreviewRef.current) URL.revokeObjectURL(capturedPreviewRef.current);
     capturedPreviewRef.current = "";
@@ -214,6 +268,7 @@ export default function CircularFaceScanner({
       URL.revokeObjectURL(capturedPreviewRef.current);
     }
     capturedPreviewRef.current = "";
+    setFaceDetected(false);
     onCaptured(null, "", { manualCaptureVerified: false, liveCapture: false, confidence: 0 });
     void openCamera();
   }

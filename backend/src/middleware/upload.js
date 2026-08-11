@@ -57,3 +57,9 @@ export const registrationUpload = multer({
   limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: imageOnly
 });
+
+export const verificationUpload = multer({
+  storage: memoryStorage,
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: imageOnly
+});

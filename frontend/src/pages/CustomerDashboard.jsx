@@ -12,6 +12,7 @@ import { api, API_URL, cachedGet, clearGetCache } from "../api/client";
 import { fetchFeaturedApparel } from "../api/customer";
 import { ChangePasswordForm } from "../components/ChangePasswordForm";
 import ConfirmDialog from "../components/ConfirmDialog";
+import FaceVerification from "../components/FaceVerification";
 import ProductImage from "../components/ProductImage";
 import { Button, Card, Field } from "../components/ui";
 import { resolveAssetUrl } from "../config/branding";
@@ -3094,7 +3095,29 @@ function CustomerThemeSwitch({ theme, onChange }) {
 
 function Profile({ profile, setProfile, profilePhoto, setProfilePhoto, saveProfile, onReset, onDeactivate, deactivating }) {
   const [photoPreview, setPhotoPreview] = useState("");
+  const [verificationRecovery, setVerificationRecovery] = useState({ loading: true, verification: null, error: "", message: "" });
+  const [governmentIdUploading, setGovernmentIdUploading] = useState(false);
+  const [selfieCaptureOpen, setSelfieCaptureOpen] = useState(false);
+  const [selfieUploadBusy, setSelfieUploadBusy] = useState(false);
+  const [selfieFile, setSelfieFile] = useState(null);
+  const [selfiePreview, setSelfiePreview] = useState("");
+  const governmentIdInputRef = useRef(null);
   const age = calculateAge(profile?.birthday);
+
+  const loadVerificationRecovery = useCallback(async () => {
+    if (!profile?.id) return;
+    setVerificationRecovery((value) => ({ ...value, loading: true, error: "" }));
+    try {
+      const { data } = await api.get("/identity-verifications/me");
+      setVerificationRecovery({ loading: false, verification: data?.verification || null, error: "", message: "" });
+    } catch (error) {
+      if (error?.response?.status === 404) {
+        setVerificationRecovery({ loading: false, verification: null, error: "", message: "" });
+        return;
+      }
+      setVerificationRecovery((value) => ({ ...value, loading: false, error: error?.response?.data?.message || "Could not check verification images." }));
+    }
+  }, [profile?.id]);
 
   useEffect(() => {
     if (!profilePhoto) {
@@ -3106,9 +3129,66 @@ function Profile({ profile, setProfile, profilePhoto, setProfilePhoto, saveProfi
     return () => URL.revokeObjectURL(url);
   }, [profilePhoto]);
 
+  useEffect(() => {
+    void loadVerificationRecovery();
+  }, [loadVerificationRecovery]);
+
+  useEffect(() => () => {
+    if (selfiePreview?.startsWith("blob:")) URL.revokeObjectURL(selfiePreview);
+  }, [selfiePreview]);
+
   if (!profile) return <Card><p className="text-sm text-slate-500">Loading profile...</p></Card>;
   const photoUrl = photoPreview || assetUrl(profile.profile_photo_url);
   const accountStatus = profileStatusLabel(profile.status);
+  const verification = verificationRecovery.verification;
+  const governmentIdMissing = verification?.government_id_image?.reason === "FILE_MISSING";
+  const selfieMissing = verification?.selfie_verification_image?.reason === "FILE_MISSING";
+
+  async function uploadGovernmentId(event) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file || !verification?.id) return;
+    const formData = new FormData();
+    formData.append("governmentId", file);
+    setGovernmentIdUploading(true);
+    setVerificationRecovery((value) => ({ ...value, error: "", message: "" }));
+    try {
+      await api.put(`/identity-verifications/${verification.id}/government-id`, formData);
+      await loadVerificationRecovery();
+      setVerificationRecovery((value) => ({ ...value, message: "Government ID image re-uploaded." }));
+    } catch (error) {
+      setVerificationRecovery((value) => ({ ...value, error: error?.response?.data?.message || "Could not re-upload Government ID image." }));
+    } finally {
+      setGovernmentIdUploading(false);
+    }
+  }
+
+  async function uploadSelfieCapture() {
+    if (!selfieFile || !verification?.id) return;
+    const formData = new FormData();
+    formData.append("selfie", selfieFile);
+    setSelfieUploadBusy(true);
+    setVerificationRecovery((value) => ({ ...value, error: "", message: "" }));
+    try {
+      await api.put(`/identity-verifications/${verification.id}/selfie`, formData);
+      setSelfieCaptureOpen(false);
+      setSelfieFile(null);
+      setSelfiePreview("");
+      await loadVerificationRecovery();
+      setVerificationRecovery((value) => ({ ...value, message: "Selfie verification image recaptured." }));
+    } catch (error) {
+      setVerificationRecovery((value) => ({ ...value, error: error?.response?.data?.message || "Could not upload selfie verification image." }));
+    } finally {
+      setSelfieUploadBusy(false);
+    }
+  }
+
+  function closeSelfieCapture() {
+    setSelfieCaptureOpen(false);
+    setSelfieFile(null);
+    setSelfiePreview("");
+  }
+
   return (
     <motion.div className="grid gap-5" initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }}>
       <section className="relative overflow-hidden rounded-[32px] border border-white/10 bg-black/35 p-5 shadow-2xl shadow-black/30 backdrop-blur-2xl sm:p-7">
@@ -3151,49 +3231,108 @@ function Profile({ profile, setProfile, profilePhoto, setProfilePhoto, saveProfi
           </div>
         </Card>
 
-        <Card>
-          <form onSubmit={saveProfile} className="grid gap-4">
-            <div>
-              <h3 className="font-display text-xl font-bold text-white">Personal Details</h3>
-              <p className="mt-1 text-sm text-white/45">These changes are saved to your customer record and visible to the admin dashboard.</p>
-            </div>
-            <div className="grid gap-3 md:grid-cols-2">
-              <ProfileField label="Full name"><Field icon={User} placeholder="Full name" value={profile.display_name || ""} onChange={(e) => setProfile({ ...profile, display_name: e.target.value })} /></ProfileField>
-              <ProfileField label="Username"><Field icon={User} placeholder="Username" value={profile.username || ""} onChange={(e) => setProfile({ ...profile, username: e.target.value })} /></ProfileField>
-              <ProfileField label="Email"><Field icon={Mail} placeholder="Email" type="email" value={profile.email || ""} onChange={(e) => setProfile({ ...profile, email: e.target.value })} /></ProfileField>
-              <ProfileField label="Phone number"><Field icon={Phone} placeholder="Phone number" value={profile.phone_number || ""} onChange={(e) => setProfile({ ...profile, phone_number: e.target.value })} /></ProfileField>
-              <ProfileField label="Birthday">
-                <Field icon={CalendarDays} type="date" value={formatDateInput(profile.birthday)} onChange={(e) => setProfile({ ...profile, birthday: e.target.value })} />
-              </ProfileField>
-              <ProfileField label="Gender">
-                <select className="h-12 rounded-2xl border border-white/10 bg-white/[0.06] px-3 text-sm font-semibold text-white outline-none transition focus:border-neonbrand/60" value={profile.gender || ""} onChange={(e) => setProfile({ ...profile, gender: e.target.value })}>
-                  <option className="bg-slate-950 text-white" value="">Select gender</option>
-                  <option className="bg-slate-950 text-white" value="Female">Female</option>
-                  <option className="bg-slate-950 text-white" value="Male">Male</option>
-                  <option className="bg-slate-950 text-white" value="Non-binary">Non-binary</option>
-                  <option className="bg-slate-950 text-white" value="Prefer not to say">Prefer not to say</option>
-                </select>
-              </ProfileField>
-              <ProfileField label="Complete address / location" className="md:col-span-2">
-                <Field icon={MapPin} placeholder="House/Street, Barangay, City, Province" value={profile.location || ""} onChange={(e) => setProfile({ ...profile, location: e.target.value })} />
-              </ProfileField>
-            </div>
-            <div className="flex flex-col gap-2 border-t border-white/10 pt-4 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex flex-wrap gap-2">
-                <Button type="submit"><Save size={17} /> Save Profile</Button>
-                <Button type="button" variant="secondary" onClick={onReset}><RotateCcw size={17} /> Cancel / Reset</Button>
+        <div className="grid gap-5">
+          {(governmentIdMissing || selfieMissing || verificationRecovery.error || verificationRecovery.message) ? (
+            <Card>
+              <div className="grid gap-4">
+                <div>
+                  <h3 className="font-display text-xl font-bold text-white">Verification Recovery</h3>
+                  <p className="mt-1 text-sm text-white/45">Use this only when a saved verification image is unavailable.</p>
+                </div>
+                {verificationRecovery.loading ? (
+                  <p className="flex items-center gap-2 text-sm font-semibold text-white/60"><Loader2 size={16} className="animate-spin" /> Checking verification images</p>
+                ) : null}
+                {verificationRecovery.error ? <p className="rounded-2xl border border-rose-300/25 bg-rose-300/10 px-4 py-3 text-sm font-bold text-rose-100">{verificationRecovery.error}</p> : null}
+                {verificationRecovery.message ? <p className="rounded-2xl border border-neonbrand/20 bg-neonbrand/10 px-4 py-3 text-sm font-bold text-neonbrand">{verificationRecovery.message}</p> : null}
+                <div className="flex flex-wrap gap-3">
+                  {governmentIdMissing ? (
+                    <button type="button" className="inline-flex items-center justify-center gap-2 rounded-2xl border border-neonbrand/30 bg-neonbrand/10 px-4 py-3 text-sm font-bold text-neonbrand transition hover:bg-neonbrand hover:text-black disabled:opacity-60" disabled={governmentIdUploading} onClick={() => governmentIdInputRef.current?.click()}>
+                      {governmentIdUploading ? <Loader2 size={17} className="animate-spin" /> : <Upload size={17} />}
+                      {governmentIdUploading ? "Uploading..." : "Re-upload Government ID"}
+                    </button>
+                  ) : null}
+                  {selfieMissing ? (
+                    <Button type="button" onClick={() => setSelfieCaptureOpen(true)}>
+                      <CameraIcon /> Recapture Selfie
+                    </Button>
+                  ) : null}
+                </div>
+                <input ref={governmentIdInputRef} className="hidden" type="file" accept="image/jpeg,image/png,image/webp" onChange={uploadGovernmentId} />
               </div>
-              <Button type="button" variant="secondary" onClick={onDeactivate} disabled={deactivating} className="border-rose-300/25 bg-rose-300/10 text-rose-100 hover:border-rose-300/50 hover:text-white">
-                {deactivating ? <Loader2 size={17} className="animate-spin" /> : <Trash2 size={17} />}
-                Deactivate Account
-              </Button>
-            </div>
-          </form>
-          <ChangePasswordForm />
-        </Card>
+            </Card>
+          ) : null}
+
+          <Card>
+            <form onSubmit={saveProfile} className="grid gap-4">
+              <div>
+                <h3 className="font-display text-xl font-bold text-white">Personal Details</h3>
+                <p className="mt-1 text-sm text-white/45">These changes are saved to your customer record and visible to the admin dashboard.</p>
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                <ProfileField label="Full name"><Field icon={User} placeholder="Full name" value={profile.display_name || ""} onChange={(e) => setProfile({ ...profile, display_name: e.target.value })} /></ProfileField>
+                <ProfileField label="Username"><Field icon={User} placeholder="Username" value={profile.username || ""} onChange={(e) => setProfile({ ...profile, username: e.target.value })} /></ProfileField>
+                <ProfileField label="Email"><Field icon={Mail} placeholder="Email" type="email" value={profile.email || ""} onChange={(e) => setProfile({ ...profile, email: e.target.value })} /></ProfileField>
+                <ProfileField label="Phone number"><Field icon={Phone} placeholder="Phone number" value={profile.phone_number || ""} onChange={(e) => setProfile({ ...profile, phone_number: e.target.value })} /></ProfileField>
+                <ProfileField label="Birthday">
+                  <Field icon={CalendarDays} type="date" value={formatDateInput(profile.birthday)} onChange={(e) => setProfile({ ...profile, birthday: e.target.value })} />
+                </ProfileField>
+                <ProfileField label="Gender">
+                  <select className="h-12 rounded-2xl border border-white/10 bg-white/[0.06] px-3 text-sm font-semibold text-white outline-none transition focus:border-neonbrand/60" value={profile.gender || ""} onChange={(e) => setProfile({ ...profile, gender: e.target.value })}>
+                    <option className="bg-slate-950 text-white" value="">Select gender</option>
+                    <option className="bg-slate-950 text-white" value="Female">Female</option>
+                    <option className="bg-slate-950 text-white" value="Male">Male</option>
+                    <option className="bg-slate-950 text-white" value="Non-binary">Non-binary</option>
+                    <option className="bg-slate-950 text-white" value="Prefer not to say">Prefer not to say</option>
+                  </select>
+                </ProfileField>
+                <ProfileField label="Complete address / location" className="md:col-span-2">
+                  <Field icon={MapPin} placeholder="House/Street, Barangay, City, Province" value={profile.location || ""} onChange={(e) => setProfile({ ...profile, location: e.target.value })} />
+                </ProfileField>
+              </div>
+              <div className="flex flex-col gap-2 border-t border-white/10 pt-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex flex-wrap gap-2">
+                  <Button type="submit"><Save size={17} /> Save Profile</Button>
+                  <Button type="button" variant="secondary" onClick={onReset}><RotateCcw size={17} /> Cancel / Reset</Button>
+                </div>
+                <Button type="button" variant="secondary" onClick={onDeactivate} disabled={deactivating} className="border-rose-300/25 bg-rose-300/10 text-rose-100 hover:border-rose-300/50 hover:text-white">
+                  {deactivating ? <Loader2 size={17} className="animate-spin" /> : <Trash2 size={17} />}
+                  Deactivate Account
+                </Button>
+              </div>
+            </form>
+            <ChangePasswordForm />
+          </Card>
+        </div>
       </div>
+      {selfieCaptureOpen ? createPortal(
+        <div className="fixed inset-0 z-[1800] overflow-y-auto bg-slate-950/70 p-3 backdrop-blur-md sm:p-5" role="dialog" aria-modal="true">
+          <div className="mx-auto max-w-5xl">
+            <FaceVerification
+              selfie={selfieFile}
+              selfiePreview={selfiePreview}
+              captureVerified={Boolean(selfieFile && selfiePreview)}
+              onCaptured={(file, preview) => {
+                setSelfieFile(file);
+                setSelfiePreview(preview);
+              }}
+              onBack={closeSelfieCapture}
+              onNext={uploadSelfieCapture}
+            />
+            {selfieUploadBusy ? (
+              <div className="fixed inset-x-0 bottom-5 z-[1810] mx-auto flex w-[min(92vw,360px)] items-center justify-center gap-2 rounded-2xl border border-neonbrand/20 bg-black/85 px-4 py-3 text-sm font-bold text-neonbrand shadow-2xl">
+                <Loader2 size={17} className="animate-spin" /> Uploading selfie
+              </div>
+            ) : null}
+          </div>
+        </div>,
+        document.body
+      ) : null}
     </motion.div>
   );
+}
+
+function CameraIcon() {
+  return <FileImage size={17} />;
 }
 
 function ProfileField({ label, children, className = "" }) {

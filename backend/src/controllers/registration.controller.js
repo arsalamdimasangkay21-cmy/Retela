@@ -7,6 +7,7 @@ import { UPLOAD_ROOT } from "../config/uploads.js";
 import { comparePassword, createOtp, hashPassword, isBcryptHash } from "../utils/auth.js";
 import { sendOtpEmail } from "../utils/email.js";
 import { asyncHandler, HttpError } from "../utils/errors.js";
+import { verificationFileStatus } from "../utils/verificationFiles.js";
 
 const uploadDir = UPLOAD_ROOT;
 
@@ -782,20 +783,44 @@ export const getCustomerDocuments = asyncHandler(async (req, res) => {
   );
   if (!users.length) throw new HttpError(404, "Customer account not found");
   const verifications = await query(
-    `SELECT id_type, id_number, id_image, selfie_image, face_match_score, otp_verified, identity_verified, created_at, updated_at
+    `SELECT id, user_id, id_type, id_number, id_image, selfie_image, face_match_score, otp_verified, identity_verified, created_at, updated_at
      FROM identity_verifications
      WHERE user_id = :id
      LIMIT 1`,
     { id: req.params.customerId }
   );
   const verification = verifications[0] || {};
+  const governmentIdStatus = verificationFileStatus(verification.id_image);
+  const selfieStatus = verificationFileStatus(verification.selfie_image);
+  console.log("[verification paths]", {
+    verificationId: verification.id || null,
+    customerId: Number(req.params.customerId),
+    governmentIdPath: governmentIdStatus.path,
+    governmentIdExists: governmentIdStatus.exists,
+    selfiePath: selfieStatus.path,
+    selfieExists: selfieStatus.exists
+  });
   res.json({
     user: users[0],
     verification: {
+      id: verification.id || null,
+      user_id: verification.user_id || Number(req.params.customerId),
       id_type: verification.id_type || "",
       id_number: verification.id_number || "",
-      id_image: verification.id_image || "",
-      selfie_image: verification.selfie_image || "",
+      id_image: governmentIdStatus.exists ? verification.id_image || "" : "",
+      selfie_image: selfieStatus.exists ? verification.selfie_image || "" : "",
+      government_id_image: {
+        path: governmentIdStatus.path,
+        exists: governmentIdStatus.exists,
+        reason: governmentIdStatus.reason,
+        endpoint: verification.id && governmentIdStatus.exists ? `/identity-verifications/${verification.id}/government-id` : null
+      },
+      selfie_verification_image: {
+        path: selfieStatus.path,
+        exists: selfieStatus.exists,
+        reason: selfieStatus.reason,
+        endpoint: verification.id && selfieStatus.exists ? `/identity-verifications/${verification.id}/selfie` : null
+      },
       face_match_score: verification.face_match_score ?? "",
       otp_verified: Boolean(verification.otp_verified),
       identity_verified: Boolean(verification.identity_verified),

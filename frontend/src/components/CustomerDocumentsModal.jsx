@@ -1,14 +1,11 @@
 import { createPortal } from "react-dom";
-import { useEffect, useRef, useState } from "react";
-import { BadgeCheck, CalendarDays, CheckCircle2, Clock3, Download, FileCheck2, Gauge, IdCard, Loader2, Mail, Maximize2, Search, ShieldCheck, UserRound, X, ZoomIn, ZoomOut } from "lucide-react";
-import { API_URL, getApiErrorMessage } from "../api/client";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { BadgeCheck, CalendarDays, CheckCircle2, Clock3, Download, FileCheck2, Gauge, IdCard, Loader2, Mail, Maximize2, Search, ShieldCheck, Upload, UserRound, X, ZoomIn, ZoomOut } from "lucide-react";
+import { api, getApiErrorMessage } from "../api/client";
 import { getCustomerDocuments } from "../api/registration";
-import { resolveAssetUrl } from "../config/branding";
 import { useAuth } from "../context/AuthContext";
 import { Button } from "./ui";
 import "./CustomerDocumentsModal.css";
-
-const assetUrl = (url) => resolveAssetUrl(url) || (!url ? "" : `${API_URL.replace(/\/api$/, "")}${url}`);
 
 function formatDate(value) {
   if (!value) return "";
@@ -55,20 +52,75 @@ function initials(name) {
 export default function CustomerDocumentsModal({ customerId, open, onClose }) {
   const { user: viewer } = useAuth();
   const modalRef = useRef(null);
+  const idUploadRef = useRef(null);
+  const objectUrlsRef = useRef([]);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [imageState, setImageState] = useState({
+    id: { loading: false, url: "", exists: false, reason: "" },
+    selfie: { loading: false, url: "", exists: false, reason: "" }
+  });
+  const [uploadingId, setUploadingId] = useState(false);
   const [zoom, setZoom] = useState({ id: 1, selfie: 1 });
+
+  const revokeObjectUrls = useCallback(() => {
+    objectUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
+    objectUrlsRef.current = [];
+  }, []);
+
+  const loadProtectedImage = useCallback(async (endpoint) => {
+    if (!endpoint) return { loading: false, url: "", exists: false, reason: "FILE_MISSING" };
+    const response = await api.get(endpoint, { responseType: "blob" });
+    const url = URL.createObjectURL(response.data);
+    objectUrlsRef.current.push(url);
+    return { loading: false, url, exists: true, reason: "" };
+  }, []);
+
+  const loadDocuments = useCallback(async () => {
+    if (!customerId) return;
+    setLoading(true);
+    setError("");
+    revokeObjectUrls();
+    setImageState({
+      id: { loading: true, url: "", exists: false, reason: "" },
+      selfie: { loading: true, url: "", exists: false, reason: "" }
+    });
+    try {
+      const { data: response } = await getCustomerDocuments(customerId);
+      setData(response);
+      const verification = response?.verification || {};
+      const [idImage, selfieImage] = await Promise.all([
+        verification.government_id_image?.exists
+          ? loadProtectedImage(verification.government_id_image.endpoint).catch((requestError) => ({ loading: false, url: "", exists: false, reason: requestError?.response?.data?.reason || "FILE_MISSING" }))
+          : Promise.resolve({ loading: false, url: "", exists: false, reason: verification.government_id_image?.reason || "FILE_MISSING" }),
+        verification.selfie_verification_image?.exists
+          ? loadProtectedImage(verification.selfie_verification_image.endpoint).catch((requestError) => ({ loading: false, url: "", exists: false, reason: requestError?.response?.data?.reason || "FILE_MISSING" }))
+          : Promise.resolve({ loading: false, url: "", exists: false, reason: verification.selfie_verification_image?.reason || "FILE_MISSING" })
+      ]);
+      setImageState({ id: idImage, selfie: selfieImage });
+    } catch (requestError) {
+      setError(getApiErrorMessage(requestError, "Could not load verification documents"));
+      setImageState({
+        id: { loading: false, url: "", exists: false, reason: "LOAD_FAILED" },
+        selfie: { loading: false, url: "", exists: false, reason: "LOAD_FAILED" }
+      });
+    } finally {
+      setLoading(false);
+    }
+  }, [customerId, loadProtectedImage, revokeObjectUrls]);
 
   useEffect(() => {
     if (!open || !customerId) return;
-    setLoading(true);
-    setError("");
-    getCustomerDocuments(customerId)
-      .then(({ data: response }) => setData(response))
-      .catch((requestError) => setError(getApiErrorMessage(requestError, "Could not load verification documents")))
-      .finally(() => setLoading(false));
-  }, [customerId, open]);
+    let cancelled = false;
+    loadDocuments().catch(() => {
+      if (!cancelled) setError("Could not load verification documents");
+    });
+    return () => {
+      cancelled = true;
+      revokeObjectUrls();
+    };
+  }, [customerId, loadDocuments, open, revokeObjectUrls]);
 
   if (!open) return null;
 
@@ -78,8 +130,6 @@ export default function CustomerDocumentsModal({ customerId, open, onClose }) {
 
   const user = data?.user || {};
   const verification = data?.verification || {};
-  const idImageUrl = assetUrl(verification.id_image);
-  const selfieUrl = assetUrl(verification.selfie_image);
   const isAdmin = viewer?.role === "admin";
   const faceRate = clampPercent(verification.face_match_score);
   const governmentIdRate = verification.identity_verified ? 100 : 0;
@@ -98,6 +148,23 @@ export default function CustomerDocumentsModal({ customerId, open, onClose }) {
     { type: "Identity Verification", status: verification.identity_verified ? "Verified" : "Pending", rate: governmentIdRate, lastVerified: verification.identity_verified ? verificationDate : "", attempts: verification.id_number ? "1" : "0" },
     { type: "Account Status", status: isActive ? "Active" : statusText(user.status) || "Pending", rate: isActive ? 100 : 0, lastVerified: user.created_at, attempts: "-" }
   ];
+
+  async function uploadGovernmentId(event) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file || !verification.id) return;
+    const formData = new FormData();
+    formData.append("governmentId", file);
+    setUploadingId(true);
+    try {
+      await api.put(`/identity-verifications/${verification.id}/government-id`, formData);
+      await loadDocuments();
+    } catch (requestError) {
+      setError(getApiErrorMessage(requestError, "Could not update Government ID image."));
+    } finally {
+      setUploadingId(false);
+    }
+  }
 
   return createPortal(
     <div className="customer-docs-backdrop" role="presentation" onMouseDown={onClose}>
@@ -218,22 +285,28 @@ export default function CustomerDocumentsModal({ customerId, open, onClose }) {
 
             <ImageSection
               title="Government ID"
-              imageUrl={idImageUrl}
+              imageState={imageState.id}
               zoom={zoom.id}
               onZoomIn={() => setZoom((value) => ({ ...value, id: Math.min(2.5, value.id + 0.25) }))}
               onZoomOut={() => setZoom((value) => ({ ...value, id: Math.max(1, value.id - 0.25) }))}
               onFullscreen={fullscreen}
               filename={`retela-government-id-${user.id || customerId}.jpg`}
+              missingText="Government ID image unavailable"
+              recoveryLabel={isAdmin ? (uploadingId ? "Uploading..." : "Re-upload Government ID") : ""}
+              onRecovery={isAdmin && !uploadingId ? () => idUploadRef.current?.click() : null}
             />
+            <input ref={idUploadRef} type="file" className="hidden" accept="image/jpeg,image/png,image/webp" onChange={uploadGovernmentId} />
 
             <ImageSection
               title="Selfie Verification"
-              imageUrl={selfieUrl}
+              imageState={imageState.selfie}
               zoom={zoom.selfie}
               onZoomIn={() => setZoom((value) => ({ ...value, selfie: Math.min(2.5, value.selfie + 0.25) }))}
               onZoomOut={() => setZoom((value) => ({ ...value, selfie: Math.max(1, value.selfie - 0.25) }))}
               onFullscreen={fullscreen}
               filename={`retela-selfie-${user.id || customerId}.jpg`}
+              missingText="Selfie image unavailable"
+              recoveryLabel="Customer must recapture verification selfie."
             />
 
           </div>
@@ -311,24 +384,38 @@ function CustomerDocumentsSkeleton() {
   );
 }
 
-function ImageSection({ title, imageUrl, zoom, onZoomIn, onZoomOut, onFullscreen, filename }) {
+function ImageSection({ title, imageState, zoom, onZoomIn, onZoomOut, onFullscreen, filename, missingText, recoveryLabel, onRecovery }) {
+  const imageUrl = imageState?.url || "";
+  const loading = Boolean(imageState?.loading);
   return (
     <section className="customer-docs-section">
       <div className="customer-docs-section-heading">
         <h3>{title}</h3>
         <div className="customer-docs-image-actions">
-          <button type="button" onClick={onZoomIn} title="Zoom"><ZoomIn size={16} /></button>
-          <button type="button" onClick={onZoomOut} title="Zoom out"><ZoomOut size={16} /></button>
+          <button type="button" onClick={onZoomIn} disabled={!imageUrl} title="Zoom"><ZoomIn size={16} /></button>
+          <button type="button" onClick={onZoomOut} disabled={!imageUrl} title="Zoom out"><ZoomOut size={16} /></button>
           {imageUrl ? <a href={imageUrl} download={filename} title="Download"><Download size={16} /></a> : <button type="button" disabled title="Download"><Download size={16} /></button>}
-          <button type="button" onClick={onFullscreen} title="Fullscreen"><Maximize2 size={16} /></button>
+          <button type="button" onClick={onFullscreen} disabled={!imageUrl} title="Fullscreen"><Maximize2 size={16} /></button>
         </div>
       </div>
-      {imageUrl ? (
+      {loading ? (
+        <div className="customer-docs-missing"><Loader2 className="animate-spin" size={22} /> Loading image</div>
+      ) : imageUrl ? (
         <a href={imageUrl} target="_blank" rel="noreferrer" className="customer-docs-image-frame" title="Open image preview">
           <img src={imageUrl} alt={title} style={{ transform: `scale(${zoom})` }} />
         </a>
       ) : (
-        <div className="customer-docs-missing"><Search size={22} /> No image available</div>
+        <div className="customer-docs-missing">
+          <Search size={22} />
+          <span>{missingText || "Image unavailable"}</span>
+          {onRecovery ? (
+            <button type="button" className="customer-docs-recovery-button" onClick={onRecovery}>
+              <Upload size={16} /> {recoveryLabel}
+            </button>
+          ) : recoveryLabel ? (
+            <p>{recoveryLabel}</p>
+          ) : null}
+        </div>
       )}
     </section>
   );

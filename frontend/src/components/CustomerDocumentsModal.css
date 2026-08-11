@@ -550,6 +550,38 @@
   gap: 0.45rem;
   color: #6b7280;
   font-weight: 800;
+  padding: 1rem;
+  text-align: center;
+}
+
+.customer-docs-missing p {
+  margin: 0.25rem 0 0;
+  color: #6b7280;
+  font-size: 0.86rem;
+  font-weight: 750;
+}
+
+.customer-docs-recovery-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  min-height: 2.5rem;
+  margin-top: 0.35rem;
+  border: 1px solid #bbf7d0;
+  border-radius: 14px;
+  background: #f0fdf4;
+  padding: 0 0.9rem;
+  color: #15803d;
+  font-size: 0.86rem;
+  font-weight: 850;
+  transition: border-color 0.18s ease, background 0.18s ease, transform 0.18s ease;
+}
+
+.customer-docs-recovery-button:hover {
+  border-color: #16a34a;
+  background: #dcfce7;
+  transform: translateY(-1px);
 }
 
 .customer-docs-loading,
