@@ -4,6 +4,7 @@ import { pool, query, safeModifyColumn } from "../config/db.js";
 import { asyncHandler, HttpError } from "../utils/errors.js";
 import { requireApproved, requireAuth, requireRole } from "../middleware/auth.js";
 import { ensureProductInventoryColumns } from "../utils/productInventory.js";
+import { productImageExpression } from "../utils/productImages.js";
 import { calculateCheckoutPricing } from "../utils/promotions.js";
 import { ensureCartTable } from "./cart.routes.js";
 
@@ -106,7 +107,7 @@ router.get("/", requireAuth, requireApproved, asyncHandler(async (req, res) => {
     ) AS first_product_name,
 
     SUBSTRING_INDEX(
-        GROUP_CONCAT(p.image_url ORDER BY oi.id SEPARATOR '||'),
+        GROUP_CONCAT(${productImageExpression("p")} ORDER BY oi.id SEPARATOR '||'),
         '||',
         1
     ) AS first_product_image
@@ -167,7 +168,7 @@ router.get("/:id/items", requireAuth, requireApproved, asyncHandler(async (req, 
   if (!orders.length) throw new HttpError(404, "Order not found");
 
   const items = await query(
-    `SELECT oi.product_id, oi.quantity, oi.price, p.name, p.brand, p.category, p.size, p.image_url, p.\`condition\`
+    `SELECT oi.product_id, oi.quantity, oi.price, p.name, p.brand, p.category, p.size, ${productImageExpression("p")} AS image_url, p.\`condition\`
      FROM order_items oi
      JOIN products p ON p.id = oi.product_id
      WHERE oi.order_id = :id

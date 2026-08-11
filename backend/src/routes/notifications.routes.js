@@ -2,6 +2,7 @@ import { Router } from "express";
 import { query, safeModifyColumn } from "../config/db.js";
 import { asyncHandler } from "../utils/errors.js";
 import { requireAuth } from "../middleware/auth.js";
+import { productImageSelect, productImageUrlForRow } from "../utils/productImages.js";
 
 const router = Router();
 let notificationBroadcastSchemaReady;
@@ -31,12 +32,12 @@ async function attachCustomerNotificationDetails(rows) {
     const params = Object.fromEntries(ids.map((id, index) => [`id${index}`, id]));
     const placeholders = ids.map((_, index) => `:id${index}`).join(", ");
     const products = await query(
-      `SELECT id, sku, name, brand, category, size, price, stock, image_url
+      `SELECT id, sku, name, brand, category, size, price, stock, image_url, ${productImageSelect("products")}
        FROM products
        WHERE id IN (${placeholders})`,
       params
     );
-    products.forEach((product) => productsById.set(Number(product.id), product));
+    products.forEach((product) => productsById.set(Number(product.id), { ...product, image_url: productImageUrlForRow(product), imageUrl: productImageUrlForRow(product) }));
   }
 
   return rows.map((row) => {

@@ -3,6 +3,7 @@ import { query } from "../config/db.js";
 import { generateAIResponse } from "../utils/aiProvider.js";
 import { loadSystemSettings } from "../utils/systemSettings.js";
 import { ensureProductInventoryColumns, nonDeletedProductWhere } from "../utils/productInventory.js";
+import { productImageExpression } from "../utils/productImages.js";
 import { asyncHandler, HttpError } from "../utils/errors.js";
 
 const router = express.Router();
@@ -18,7 +19,7 @@ router.post("/", asyncHandler(async (req, res) => {
   const [{ config }, products] = await Promise.all([
     loadSystemSettings(),
     query(
-      `SELECT name, brand, category, gender, size, price, stock, \`condition\`, description, image_url
+      `SELECT name, brand, category, gender, size, price, stock, \`condition\`, description, ${productImageExpression("products")} AS image_url
        FROM products
        WHERE ${nonDeletedProductWhere()}
        ORDER BY created_at DESC

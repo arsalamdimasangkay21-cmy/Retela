@@ -4,6 +4,7 @@ import { pool, query, safeModifyColumn } from "../config/db.js";
 import { asyncHandler, HttpError } from "../utils/errors.js";
 import { requireAuth, requireRole } from "../middleware/auth.js";
 import { ensureProductInventoryColumns, inventoryStatusSql, nonDeletedProductWhere, productStatusForStock } from "../utils/productInventory.js";
+import { productImageSelect, productImageUrlForRow } from "../utils/productImages.js";
 import { loadSystemSettings } from "../utils/systemSettings.js";
 
 const router = Router();
@@ -91,7 +92,7 @@ router.get("/search", asyncHandler(async (req, res) => {
   const like = `%${search.toLowerCase()}%`;
   const prefix = `${search.toLowerCase()}%`;
   const rows = await query(
-    `SELECT id, sku, name, brand, category, size, price, stock, status, image_url, ${inventoryStatusSql("stock")} AS computed_status
+    `SELECT id, sku, name, brand, category, size, price, stock, status, image_url, ${productImageSelect("products")}, ${inventoryStatusSql("stock")} AS computed_status
      FROM products
      WHERE ${nonDeletedProductWhere()}
        AND (
@@ -113,7 +114,7 @@ router.get("/search", asyncHandler(async (req, res) => {
      LIMIT ${input.limit}`,
     { search, like, prefix }
   );
-  res.json(rows.map((product) => ({ ...product, status: product.computed_status || product.status || productStatusForStock(product.stock) })));
+  res.json(rows.map((product) => ({ ...product, image_url: productImageUrlForRow(product), imageUrl: productImageUrlForRow(product), status: product.computed_status || product.status || productStatusForStock(product.stock) })));
 }));
 
 router.get("/barcode/:barcode", asyncHandler(async (req, res) => {
@@ -121,7 +122,7 @@ router.get("/barcode/:barcode", asyncHandler(async (req, res) => {
   const barcode = String(req.params.barcode || "").trim();
   if (!barcode) throw new HttpError(400, "Barcode is required");
   const [product] = await query(
-    `SELECT *, ${inventoryStatusSql("stock")} AS computed_status
+    `SELECT id, sku, name, brand, category, gender, size, color, price, stock, status, image_url, ${productImageSelect("products")}, \`condition\`, description, is_active, is_deleted, created_at, updated_at, ${inventoryStatusSql("stock")} AS computed_status
      FROM products
      WHERE ${nonDeletedProductWhere()}
        AND LOWER(sku) = LOWER(:barcode)
@@ -129,7 +130,7 @@ router.get("/barcode/:barcode", asyncHandler(async (req, res) => {
     { barcode }
   );
   if (!product) throw new HttpError(404, "No product found for this barcode");
-  res.json({ ...product, status: product.computed_status || product.status || productStatusForStock(product.stock) });
+  res.json({ ...product, image_url: productImageUrlForRow(product), imageUrl: productImageUrlForRow(product), status: product.computed_status || product.status || productStatusForStock(product.stock) });
 }));
 
 router.post("/checkout", asyncHandler(async (req, res) => {
@@ -159,7 +160,7 @@ router.post("/checkout", asyncHandler(async (req, res) => {
 
     for (const item of compactItems) {
       const [rows] = await conn.execute(
-        `SELECT id, sku, name, brand, category, size, image_url, price, stock
+        `SELECT id, sku, name, brand, category, size, image_url, ${productImageSelect("products")}, price, stock
          FROM products
          WHERE id = ? AND is_deleted = FALSE
          LIMIT 1
@@ -181,7 +182,7 @@ router.post("/checkout", asyncHandler(async (req, res) => {
         brand: product.brand,
         category: product.category,
         size: product.size,
-        image_url: product.image_url,
+        image_url: productImageUrlForRow(product),
         quantity: item.quantity,
         price: unitPrice,
         subtotal: lineTotal

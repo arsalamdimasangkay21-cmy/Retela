@@ -5,6 +5,7 @@ import { asyncHandler, HttpError } from "../utils/errors.js";
 import { requireApproved, requireAuth, requireRole } from "../middleware/auth.js";
 import { productUpload } from "../middleware/upload.js";
 import { ensureApparelOptionTables } from "./apparel-options.routes.js";
+import { productImageSelect, productImageUrlForRow } from "../utils/productImages.js";
 import {
   availableProductWhere,
   ensureProductInventoryColumns,
@@ -97,7 +98,7 @@ function createdProductResponse(row) {
     throw new Error("Product response is missing a valid ID");
   }
   const barcode = row.sku || row.barcode || null;
-  const imageUrl = row.image_url || row.imageUrl || null;
+  const imageUrl = productImageUrlForRow(row);
   return {
     ...row,
     id: productId,
@@ -122,6 +123,36 @@ function createdProductResponse(row) {
 
 function productListResponse(row) {
   return createdProductResponse(row);
+}
+
+function productSelect(tableExpression = "products") {
+  const table = tableExpression.includes(".") || tableExpression.startsWith("`") ? tableExpression : `\`${tableExpression}\``;
+  return `${table}.id AS id,
+    ${table}.sku,
+    ${table}.name,
+    ${table}.brand,
+    ${table}.category,
+    ${table}.gender,
+    ${table}.size,
+    ${table}.color,
+    ${table}.price,
+    ${table}.stock,
+    ${table}.status,
+    ${table}.image_url,
+    ${productImageSelect(table)},
+    ${table}.\`condition\`,
+    ${table}.description,
+    ${table}.is_active,
+    ${table}.is_deleted,
+    ${table}.deleted_at,
+    ${table}.deleted_by,
+    ${table}.sale_enabled,
+    ${table}.sale_discount_percent,
+    ${table}.sale_product_ids_json,
+    ${table}.sale_starts_at,
+    ${table}.sale_ends_at,
+    ${table}.created_at,
+    ${table}.updated_at`;
 }
 
 function duplicateSignature(product) {
@@ -178,15 +209,16 @@ function parseProductId(value) {
   return productId;
 }
 
-function uploadedProductImageUrl(req) {
-  return req.file ? `/uploads/products/${req.file.filename}` : null;
+function uploadedProductImage(req) {
+  return req.file ? { data: req.file.buffer, mime: req.file.mimetype } : { data: null, mime: null };
 }
 
 function logProductUpload(req, imageUrl = null) {
   console.log("[PRODUCT UPLOAD]", {
     id: req.params.id || null,
     hasFile: Boolean(req.file),
-    filename: req.file?.filename || null,
+    filename: req.file?.originalname || null,
+    mimetype: req.file?.mimetype || null,
     resultingImageUrl: imageUrl || null
   });
 }
@@ -267,7 +299,7 @@ router.get("/", requireAuth, requireApproved, asyncHandler(async (req, res) => {
         ? "ORDER BY name ASC, created_at DESC"
       : "ORDER BY created_at DESC";
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
-  const products = await query(`SELECT \`${table}\`.id AS id, \`${table}\`.*, ${inventoryStatusSql("stock")} AS computed_status FROM \`${table}\` ${where} ${orderBy}`, params);
+  const products = await query(`SELECT ${productSelect(table)}, ${inventoryStatusSql("stock")} AS computed_status FROM \`${table}\` ${where} ${orderBy}`, params);
   const mapped = products.map(productListResponse);
   res.json(mapped);
 }));
@@ -275,7 +307,7 @@ router.get("/", requireAuth, requireApproved, asyncHandler(async (req, res) => {
 router.get("/inventory", requireAuth, requireRole("admin"), asyncHandler(async (req, res) => {
   const table = await productWriteTable();
   const products = await query(
-    `SELECT \`${table}\`.id AS id, \`${table}\`.*, ${inventoryStatusSql("stock")} AS computed_status
+    `SELECT ${productSelect(table)}, ${inventoryStatusSql("stock")} AS computed_status
      FROM \`${table}\`
      WHERE ${nonDeletedProductWhere()}
      ORDER BY created_at DESC`
@@ -286,7 +318,7 @@ router.get("/inventory", requireAuth, requireRole("admin"), asyncHandler(async (
 router.get("/available", requireAuth, requireApproved, asyncHandler(async (req, res) => {
   const table = await productWriteTable();
   const products = await query(
-    `SELECT \`${table}\`.id AS id, \`${table}\`.*, ${inventoryStatusSql("stock")} AS computed_status
+    `SELECT ${productSelect(table)}, ${inventoryStatusSql("stock")} AS computed_status
      FROM \`${table}\`
      WHERE ${availableProductWhere()}
      ORDER BY created_at DESC`
@@ -294,10 +326,28 @@ router.get("/available", requireAuth, requireApproved, asyncHandler(async (req, 
   res.json(products.map(productListResponse));
 }));
 
+router.get("/:id/image", asyncHandler(async (req, res) => {
+  const table = await productWriteTable();
+  const productId = parseProductId(req.params.id);
+  const rows = await query(
+    `SELECT id, image_data, image_mime
+     FROM \`${table}\`
+     WHERE id = :id
+       AND ${nonDeletedProductWhere()}
+     LIMIT 1`,
+    { id: productId }
+  );
+  const product = rows[0];
+  if (!product?.image_data) throw new HttpError(404, "Product image not found.");
+  res.setHeader("Content-Type", product.image_mime || "image/jpeg");
+  res.setHeader("Cache-Control", "public, max-age=3600");
+  res.send(product.image_data);
+}));
+
 router.get("/archived", requireAuth, requireRole("admin"), asyncHandler(async (req, res) => {
   const table = await productWriteTable();
   const products = await query(
-    `SELECT \`${table}\`.id AS id, \`${table}\`.*, ${inventoryStatusSql("stock")} AS computed_status
+    `SELECT ${productSelect(table)}, ${inventoryStatusSql("stock")} AS computed_status
      FROM \`${table}\`
      WHERE is_deleted = TRUE
      ORDER BY deleted_at DESC, updated_at DESC`
@@ -308,7 +358,7 @@ router.get("/archived", requireAuth, requireRole("admin"), asyncHandler(async (r
 router.get("/barcode/:sku", requireAuth, requireRole("admin"), asyncHandler(async (req, res) => {
   await ensureProductInventoryColumns();
   const [product] = await query(
-    `SELECT *, ${inventoryStatusSql("stock")} AS computed_status
+    `SELECT ${productSelect("products")}, ${inventoryStatusSql("stock")} AS computed_status
      FROM products
      WHERE ${nonDeletedProductWhere()}
        AND LOWER(sku) = LOWER(:sku)
@@ -345,9 +395,9 @@ router.post("/", requireAuth, requireRole("admin"), productUpload.single("image"
   });
   try {
     const table = await productWriteTable();
-    const imageUrl = uploadedProductImageUrl(req);
-    logProductUpload(req, imageUrl);
-    const rawInput = normalizeProductInput({ ...req.body, image_url: imageUrl });
+    const uploadedImage = uploadedProductImage(req);
+    logProductUpload(req, req.file ? "database:image_data" : null);
+    const rawInput = normalizeProductInput({ ...req.body, image_url: req.body.image_url || null });
     const input = productSchema.parse(rawInput);
     await ensureProductOptionValues(input);
     const duplicate = await findDuplicateActiveProduct(input);
@@ -360,18 +410,21 @@ router.post("/", requireAuth, requireRole("admin"), productUpload.single("image"
          SET stock = :stock,
              status = :status,
              updated_at = NOW(),
-             image_url = CASE WHEN (image_url IS NULL OR image_url = '') AND :imageUrl <> '' THEN :imageUrl ELSE image_url END,
+             image_data = CASE WHEN :hasImage = TRUE THEN :imageData ELSE image_data END,
+             image_mime = CASE WHEN :hasImage = TRUE THEN :imageMime ELSE image_mime END,
              description = CASE WHEN (description IS NULL OR description = '') AND :description <> '' THEN :description ELSE description END
          WHERE id = :id`,
         {
           id: duplicate.id,
           stock: nextStock,
           status: nextStatus,
-          imageUrl: input.image_url || "",
+          hasImage: Boolean(uploadedImage.data),
+          imageData: uploadedImage.data,
+          imageMime: uploadedImage.mime,
           description: input.description || ""
         }
       );
-      const [merged] = await query(`SELECT *, ${inventoryStatusSql("stock")} AS computed_status FROM products WHERE id = :id LIMIT 1`, { id: duplicate.id });
+      const [merged] = await query(`SELECT ${productSelect("products")}, ${inventoryStatusSql("stock")} AS computed_status FROM products WHERE id = :id LIMIT 1`, { id: duplicate.id });
       const item = createdProductResponse(merged);
       req.app.get("io")?.emit("inventory:update", { type: "inventory", action: "stock", id: duplicate.id, stock: nextStock, status: nextStatus });
       return res.status(200).json({
@@ -386,9 +439,9 @@ router.post("/", requireAuth, requireRole("admin"), productUpload.single("image"
     const status = productStatusForStock(input.stock);
     const product = await transaction(async (run) => {
       const result = await run(
-        `INSERT INTO \`${table}\` (name, brand, category, gender, size, color, price, stock, status, image_url, \`condition\`, description, is_active, is_deleted, deleted_at, deleted_by)
-         VALUES (:name, :brand, :category, :gender, :size, :color, :price, :stock, :status, :image_url, :condition, :description, TRUE, FALSE, NULL, NULL)`,
-        { ...input, status }
+        `INSERT INTO \`${table}\` (name, brand, category, gender, size, color, price, stock, status, image_url, image_data, image_mime, \`condition\`, description, is_active, is_deleted, deleted_at, deleted_by)
+         VALUES (:name, :brand, :category, :gender, :size, :color, :price, :stock, :status, :image_url, :image_data, :image_mime, :condition, :description, TRUE, FALSE, NULL, NULL)`,
+        { ...input, status, image_data: uploadedImage.data, image_mime: uploadedImage.mime }
       );
       const productId = Number(result.insertId);
       if (!Number.isInteger(productId) || productId <= 0) {
@@ -396,7 +449,7 @@ router.post("/", requireAuth, requireRole("admin"), productUpload.single("image"
       }
       const sku = productSkuForId(productId);
       await run(`UPDATE \`${table}\` SET sku = :sku WHERE id = :id`, { id: productId, sku });
-      const [created] = await run(`SELECT *, ${inventoryStatusSql("stock")} AS computed_status FROM \`${table}\` WHERE id = :id LIMIT 1`, { id: productId });
+      const [created] = await run(`SELECT ${productSelect(table)}, ${inventoryStatusSql("stock")} AS computed_status FROM \`${table}\` WHERE id = :id LIMIT 1`, { id: productId });
       return createdProductResponse(created);
     });
 
@@ -442,18 +495,22 @@ router.put("/:id", requireAuth, requireRole("admin"), productUpload.single("imag
     );
     if (!existingProduct) throw new HttpError(404, "Apparel item not found");
 
-    const imageUrl = req.file ? uploadedProductImageUrl(req) : existingProduct.image_url;
-    logProductUpload(req, imageUrl);
+    const uploadedImage = uploadedProductImage(req);
+    const imageUrl = existingProduct.image_url;
+    logProductUpload(req, req.file ? "database:image_data" : imageUrl);
     const input = productSchema.parse(normalizeProductInput({ ...req.body, image_url: imageUrl }));
     await ensureProductOptionValues(input);
     const status = productStatusForStock(input.stock);
     const result = await query(
       `UPDATE \`${table}\` SET name=:name, brand=:brand, category=:category, gender=:gender, size=:size, color=:color, price=:price,
-       stock=:stock, status=:status, image_url=:image_url, \`condition\`=:condition, description=:description WHERE id=:id AND ${nonDeletedProductWhere()}`,
-      { ...input, status, id: productId }
+       stock=:stock, status=:status, image_url=:image_url,
+       image_data = CASE WHEN :hasImage = TRUE THEN :imageData ELSE image_data END,
+       image_mime = CASE WHEN :hasImage = TRUE THEN :imageMime ELSE image_mime END,
+       \`condition\`=:condition, description=:description WHERE id=:id AND ${nonDeletedProductWhere()}`,
+      { ...input, status, id: productId, hasImage: Boolean(uploadedImage.data), imageData: uploadedImage.data, imageMime: uploadedImage.mime }
     );
     if (!result.affectedRows) throw new HttpError(404, "Apparel item not found");
-    const [updated] = await query(`SELECT *, ${inventoryStatusSql("stock")} AS computed_status FROM \`${table}\` WHERE id = :id LIMIT 1`, { id: productId });
+    const [updated] = await query(`SELECT ${productSelect(table)}, ${inventoryStatusSql("stock")} AS computed_status FROM \`${table}\` WHERE id = :id LIMIT 1`, { id: productId });
     const apparel = productListResponse(updated);
     req.app.get("io")?.emit("inventory:update", { type: "inventory", action: "updated", apparel });
     req.app.get("io")?.emit("product:update", apparel);
@@ -502,7 +559,7 @@ router.patch("/:id/stock", requireAuth, requireRole("admin"), asyncHandler(async
   if (nextStock === 0) {
     req.app.get("io")?.to("admin").emit("notification:new", { type: "inventory", title: "Out of stock", body: `Apparel item #${productId} is out of stock.` });
   }
-  const [updated] = await query(`SELECT *, ${inventoryStatusSql("stock")} AS computed_status FROM \`${table}\` WHERE id = :id LIMIT 1`, { id: productId });
+  const [updated] = await query(`SELECT ${productSelect(table)}, ${inventoryStatusSql("stock")} AS computed_status FROM \`${table}\` WHERE id = :id LIMIT 1`, { id: productId });
   const product = productListResponse(updated);
   req.app.get("io")?.emit("inventory:update", { type: "inventory", action: "stock", id: productId, stock: nextStock, status: nextStatus, product });
   res.json(product);

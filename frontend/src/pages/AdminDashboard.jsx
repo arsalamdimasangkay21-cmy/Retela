@@ -3068,8 +3068,8 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
   }
 
   return (
-    <motion.div className="retela-modal-backdrop z-[120]" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onMouseDown={onClose}>
-      <motion.div className="retela-modal-card retela-modal-dark modal-md" initial={{ opacity: 0, scale: 0.94, y: 18 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.94, y: 18 }} transition={{ duration: 0.22, ease: "easeOut" }} onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="admin-order-details-title">
+    <motion.div className="retela-modal-backdrop z-[120] p-3 sm:p-5" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onMouseDown={onClose}>
+      <motion.div className="retela-modal-card max-h-[88vh] w-[min(92vw,900px)] max-w-none bg-white text-[#111827]" initial={{ opacity: 0, scale: 0.94, y: 18 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.94, y: 18 }} transition={{ duration: 0.22, ease: "easeOut" }} onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="admin-order-details-title">
           {loading ? (
             <div className="retela-modal-body grid gap-4">
               <div className="skeleton h-8 w-1/2 rounded-2xl" />
@@ -3080,53 +3080,62 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
             <>
               <div className="retela-modal-header">
                 <div>
-                  <p className="text-xs font-bold uppercase tracking-[0.18em] text-neonbrand/75">{source.order_channel === "pos" ? "POS Transaction" : "Customer Order"}</p>
-                  <h3 id="admin-order-details-title" className="mt-2 font-display text-2xl font-bold text-white">Order #{source.id}</h3>
-                  <p className="mt-1 text-sm text-white/55">{source.username || "Walk-in Customer"} | {new Date(source.created_at).toLocaleString()}</p>
+                  <p className="text-xs font-bold uppercase tracking-[0.18em] text-emerald-700">{source.order_channel === "pos" ? "POS Transaction" : "Customer Order"}</p>
+                  <h3 id="admin-order-details-title" className="mt-2 font-display text-2xl font-bold text-[#111827]">Order #{source.id}</h3>
+                  <p className="mt-1 text-sm font-medium text-slate-500">{source.username || "Walk-in Customer"} | {new Date(source.created_at).toLocaleString()}</p>
                 </div>
                 <span className={`rounded-full px-3 py-2 text-xs font-bold ${orderBadgeClass(source.status)}`}>{orderStatusLabel(source.status)}</span>
               </div>
               <div className="retela-modal-body grid gap-4">
               <div className="grid gap-3 sm:grid-cols-3">
-                <Detail label="Total" value={`PHP ${source.total_amount}`} />
-                <Detail label="Items" value={selectedOrder.items.length} />
-                <Detail label="Payment" value={paymentLabel(source.payment_method)} />
+                <OrderSummaryCard label="Total" value={`PHP ${source.total_amount}`} />
+                <OrderSummaryCard label="Items" value={selectedOrder.items.length} />
+                <OrderSummaryCard label="Payment" value={paymentLabel(source.payment_method)} />
               </div>
-              <div className="rounded-3xl border border-white/10 bg-black/25 p-4">
-                <span className="block text-xs font-bold uppercase tracking-[0.16em] text-white/40">Tracking Number</span>
+              <div className="rounded-2xl border border-[#dfe9e3] bg-[#f8faf9] p-4">
+                <span className="block text-xs font-bold uppercase tracking-[0.16em] text-slate-500">Tracking Number</span>
                 <div className="mt-2 flex flex-col gap-2 sm:flex-row">
-                  <input className="min-w-0 flex-1 rounded-xl border border-white/10 bg-white/[0.06] px-3 py-2 text-sm text-white outline-none placeholder:text-white/35 focus:border-neonbrand/60" placeholder="Enter tracking number" value={trackingNumber} onChange={(event) => setTrackingNumber(event.target.value)} />
-                  <button type="button" onClick={saveTracking} className="rounded-xl bg-neonbrand px-4 py-2 text-sm font-bold text-black transition hover:scale-[1.02]">Save</button>
+                  <input className="min-w-0 flex-1 rounded-xl border border-[#dfe9e3] bg-white px-3 py-2 text-sm font-semibold text-[#111827] outline-none placeholder:text-slate-400 focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100" placeholder="Enter tracking number" value={trackingNumber} onChange={(event) => setTrackingNumber(event.target.value)} />
+                  <button type="button" onClick={saveTracking} className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-emerald-700">Save</button>
                 </div>
               </div>
               <div className="grid gap-3">
                 {selectedOrder.items.map((item) => (
-                  <div key={`${item.product_id}-${item.quantity}`} className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.055] p-3 transition hover:border-neonbrand/25">
-                    <div className="h-16 w-16 shrink-0 overflow-hidden rounded-xl bg-white/10">
-                      <ProductImage src={item.image_url} className="h-full w-full object-cover" alt={item.name} />
+                  <div key={`${item.product_id}-${item.quantity}`} className="flex items-center gap-3 rounded-2xl border border-[#dfe9e3] bg-white p-3 shadow-sm transition hover:border-emerald-200">
+                    <div className="h-16 w-16 shrink-0 overflow-hidden rounded-xl border border-slate-100 bg-slate-100">
+                      <ProductImage src={item.image_url} className="h-full w-full object-cover" placeholderClassName="text-slate-400" alt={item.name} />
                     </div>
                     <div className="min-w-0 flex-1">
-                      <strong className="block truncate text-white">{item.name}</strong>
-                      <p className="mt-1 truncate text-sm text-white/50">{item.brand || "Other Brands"} | {item.category} | {item.size}</p>
-                      <p className="mt-2 text-sm font-bold text-neonbrand">Qty {item.quantity} x PHP {item.price}</p>
+                      <strong className="block truncate text-[#111827]">{item.name}</strong>
+                      <p className="mt-1 truncate text-sm font-medium text-slate-500">{item.brand || "Other Brands"} | {item.category} | {item.size}</p>
+                      <p className="mt-2 text-sm font-bold text-emerald-700">Qty {item.quantity} x PHP {item.price}</p>
                     </div>
                   </div>
                 ))}
               </div>
               </div>
               <div className="retela-modal-footer">
-                <div className="retela-modal-actions-wrap w-full">
-                <button disabled={!["pending", "paid"].includes(source.status)} onClick={() => updateStatus(source.status === "paid" ? "processing" : "approved")} className={`rounded-xl px-4 py-2 text-xs font-bold shadow ${["pending", "paid"].includes(source.status) ? orderButtonClass("approved") : "bg-slate-100 text-slate-400"}`}>Accept</button>
-                <button disabled={!["pending", "approved", "processing", "ready"].includes(source.status)} onClick={() => updateStatus("cancelled")} className={`rounded-xl px-4 py-2 text-xs font-bold shadow ${["pending", "approved", "processing", "ready"].includes(source.status) ? orderButtonClass("cancelled") : "bg-slate-100 text-slate-400"}`}>Reject</button>
-                <button disabled={!["pending", "approved", "processing"].includes(source.status)} onClick={() => updateStatus("ready")} className={`rounded-xl px-4 py-2 text-xs font-bold shadow ${["pending", "approved", "processing"].includes(source.status) ? orderButtonClass("ready") : "bg-slate-100 text-slate-400"}`}>Out for Delivery</button>
-                <button disabled={source.status === "completed"} onClick={() => updateStatus("completed")} className={`rounded-xl px-4 py-2 text-xs font-bold shadow ${source.status !== "completed" ? orderButtonClass("completed") : "bg-slate-100 text-slate-400"}`}>Completed</button>
-                <button type="button" onClick={onClose} className="ml-auto rounded-xl border border-white/10 bg-white/[0.06] px-4 py-2 text-xs font-bold text-white/70 transition hover:text-neonbrand">Close</button>
+                <div className="flex w-full flex-wrap items-center gap-2">
+                <button disabled={!["pending", "paid"].includes(source.status)} onClick={() => updateStatus(source.status === "paid" ? "processing" : "approved")} className={`rounded-xl px-4 py-2 text-xs font-bold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-55 ${["pending", "paid"].includes(source.status) ? orderButtonClass("approved") : "bg-slate-100 text-slate-500"}`}>Accept</button>
+                <button disabled={!["pending", "approved", "processing", "ready"].includes(source.status)} onClick={() => updateStatus("cancelled")} className={`rounded-xl px-4 py-2 text-xs font-bold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-55 ${["pending", "approved", "processing", "ready"].includes(source.status) ? orderButtonClass("cancelled") : "bg-slate-100 text-slate-500"}`}>Reject</button>
+                <button disabled={!["pending", "approved", "processing"].includes(source.status)} onClick={() => updateStatus("ready")} className={`rounded-xl px-4 py-2 text-xs font-bold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-55 ${["pending", "approved", "processing"].includes(source.status) ? orderButtonClass("ready") : "bg-slate-100 text-slate-500"}`}>Out for Delivery</button>
+                <button disabled={source.status === "completed"} onClick={() => updateStatus("completed")} className={`rounded-xl px-4 py-2 text-xs font-bold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-55 ${source.status !== "completed" ? orderButtonClass("completed") : "bg-slate-100 text-slate-500"}`}>Completed</button>
+                <button type="button" onClick={onClose} className="ml-auto rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-700 transition hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700">Close</button>
                 </div>
               </div>
             </>
-          ) : <p className="text-white/60">Order details are not available.</p>}
+          ) : <p className="retela-modal-body text-slate-600">Order details are not available.</p>}
       </motion.div>
     </motion.div>
+  );
+}
+
+function OrderSummaryCard({ label, value }) {
+  return (
+    <div className="rounded-2xl border border-[#dfe9e3] bg-[#f8faf9] p-3">
+      <span className="block text-xs font-bold uppercase tracking-[0.16em] text-slate-500">{label}</span>
+      <strong className="mt-1 block break-words text-[#111827]">{value || "Not provided"}</strong>
+    </div>
   );
 }
 

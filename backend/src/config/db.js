@@ -467,6 +467,8 @@ async function ensureProductAlias(storageTable) {
         stock,
         status,
         image_url,
+        image_data,
+        image_mime,
         \`condition\`,
         description,
         is_active,
@@ -498,7 +500,9 @@ async function ensureProductColumns(storageTable) {
   await ensureColumn(storageTable, "stock", "stock INT NOT NULL DEFAULT 0 AFTER price");
   await ensureColumn(storageTable, "status", "status VARCHAR(20) NOT NULL DEFAULT 'In Stock' AFTER stock");
   await ensureColumn(storageTable, "image_url", "image_url VARCHAR(255) NULL AFTER status");
-  await ensureColumn(storageTable, "condition", "`condition` VARCHAR(120) NOT NULL DEFAULT 'Good' AFTER image_url");
+  await ensureColumn(storageTable, "image_data", "image_data LONGBLOB NULL AFTER image_url");
+  await ensureColumn(storageTable, "image_mime", "image_mime VARCHAR(100) NULL AFTER image_data");
+  await ensureColumn(storageTable, "condition", "`condition` VARCHAR(120) NOT NULL DEFAULT 'Good' AFTER image_mime");
   await ensureColumn(storageTable, "description", "description TEXT NULL AFTER `condition`");
   await ensureColumn(storageTable, "is_active", "is_active BOOLEAN NOT NULL DEFAULT TRUE AFTER description");
   await ensureColumn(storageTable, "is_deleted", "is_deleted BOOLEAN NOT NULL DEFAULT FALSE AFTER is_active");
@@ -591,6 +595,8 @@ async function ensureCoreTables() {
         stock INT NOT NULL DEFAULT 0,
         status VARCHAR(20) NOT NULL DEFAULT 'In Stock',
         image_url VARCHAR(255) NULL,
+        image_data LONGBLOB NULL,
+        image_mime VARCHAR(100) NULL,
         \`condition\` VARCHAR(120) NOT NULL DEFAULT 'Good',
         description TEXT NULL,
         is_active BOOLEAN NOT NULL DEFAULT TRUE,

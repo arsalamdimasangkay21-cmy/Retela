@@ -121,12 +121,12 @@ const getAnalyticsSummary = asyncHandler(async (req, res) => {
   const bestProducts = await query(
     `SELECT p.name,
        p.category,
-       p.image_url,
+       CASE WHEN MAX(p.image_data IS NOT NULL) THEN CONCAT('/api/products/', p.id, '/image') ELSE MAX(p.image_url) END AS image_url,
        SUM(oi.quantity) AS sold,
        COALESCE(SUM(oi.quantity * oi.price), 0) AS revenue
      FROM order_items oi JOIN products p ON p.id=oi.product_id JOIN orders o ON o.id=oi.order_id
      WHERE ${rangeSql} AND ${reportableOrderSql}
-     GROUP BY p.id, p.name, p.category, p.image_url ORDER BY sold DESC LIMIT 5`,
+     GROUP BY p.id, p.name, p.category ORDER BY sold DESC LIMIT 5`,
     rangeParams
   );
   const categorySales = await query(

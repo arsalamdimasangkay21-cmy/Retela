@@ -6,6 +6,7 @@ import { requireApproved, requireAuth } from "../middleware/auth.js";
 import { loadSystemSettings } from "../utils/systemSettings.js";
 import { generateAIResponse } from "../utils/aiProvider.js";
 import { availableProductWhere, ensureProductInventoryColumns, nonDeletedProductWhere } from "../utils/productInventory.js";
+import { productImageExpression } from "../utils/productImages.js";
 
 const router = Router();
 let messageStatusColumnsReady;
@@ -693,7 +694,7 @@ router.post("/ai", requireAuth, requireApproved, asyncHandler(async (req, res) =
       { conversationId: conversation.id }
     );
     const products = await query(
-      `SELECT name, brand, category, gender, size, price, stock, \`condition\`, description, image_url
+      `SELECT name, brand, category, gender, size, price, stock, \`condition\`, description, ${productImageExpression("products")} AS image_url
        FROM products
        WHERE ${availableProductWhere()}
        ORDER BY created_at DESC

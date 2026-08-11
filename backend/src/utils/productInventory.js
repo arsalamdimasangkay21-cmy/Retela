@@ -95,6 +95,8 @@ async function ensureProductsViewIncludesSku(storageTable) {
         stock,
         status,
         image_url,
+        image_data,
+        image_mime,
         \`condition\`,
         description,
         is_active,
@@ -124,7 +126,7 @@ export async function ensureProductInventoryColumns() {
        FROM INFORMATION_SCHEMA.COLUMNS
        WHERE TABLE_SCHEMA = DATABASE()
          AND TABLE_NAME = :storageTable
-         AND COLUMN_NAME IN ('sku', 'name', 'brand', 'category', 'gender', 'size', 'color', 'price', 'stock', 'status', 'image_url', 'condition', 'description', 'is_active', 'is_deleted', 'deleted_at', 'deleted_by', 'sale_enabled', 'sale_discount_percent', 'sale_product_ids_json', 'sale_starts_at', 'sale_ends_at', 'created_at', 'updated_at')`,
+         AND COLUMN_NAME IN ('sku', 'name', 'brand', 'category', 'gender', 'size', 'color', 'price', 'stock', 'status', 'image_url', 'image_data', 'image_mime', 'condition', 'description', 'is_active', 'is_deleted', 'deleted_at', 'deleted_by', 'sale_enabled', 'sale_discount_percent', 'sale_product_ids_json', 'sale_starts_at', 'sale_ends_at', 'created_at', 'updated_at')`,
       { storageTable }
     ));
     if (!rows) return;
@@ -180,8 +182,14 @@ export async function ensureProductInventoryColumns() {
     if (!columns.has("image_url")) {
       await safeProductMigration("image_url column", () => query(`ALTER TABLE \`${storageTable}\` ADD COLUMN image_url VARCHAR(255) NULL AFTER status`));
     }
+    if (!columns.has("image_data")) {
+      await safeProductMigration("image_data column", () => query(`ALTER TABLE \`${storageTable}\` ADD COLUMN image_data LONGBLOB NULL AFTER image_url`));
+    }
+    if (!columns.has("image_mime")) {
+      await safeProductMigration("image_mime column", () => query(`ALTER TABLE \`${storageTable}\` ADD COLUMN image_mime VARCHAR(100) NULL AFTER image_data`));
+    }
     if (!columns.has("condition")) {
-      await safeProductMigration("condition column", () => query(`ALTER TABLE \`${storageTable}\` ADD COLUMN \`condition\` VARCHAR(120) NOT NULL DEFAULT 'Good' AFTER image_url`));
+      await safeProductMigration("condition column", () => query(`ALTER TABLE \`${storageTable}\` ADD COLUMN \`condition\` VARCHAR(120) NOT NULL DEFAULT 'Good' AFTER image_mime`));
     }
     if (!columns.has("description")) {
       await safeProductMigration("description column", () => query(`ALTER TABLE \`${storageTable}\` ADD COLUMN description TEXT NULL AFTER \`condition\``));

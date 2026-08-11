@@ -3,6 +3,7 @@ import { z } from "zod";
 import { query } from "../config/db.js";
 import { requireApproved, requireAuth } from "../middleware/auth.js";
 import { asyncHandler, HttpError } from "../utils/errors.js";
+import { productImageSelect, productImageUrlForRow } from "../utils/productImages.js";
 
 const router = Router();
 let cartTableReady;
@@ -43,6 +44,7 @@ async function readCart(userId) {
        p.stock,
        p.status,
        p.image_url,
+       ${productImageSelect("p")},
        p.\`condition\`
      FROM cart_items ci
      LEFT JOIN products p ON p.id = ci.product_id AND p.is_deleted = FALSE
@@ -50,7 +52,7 @@ async function readCart(userId) {
        AND ci.checked_out_at IS NULL
      ORDER BY ci.updated_at DESC, ci.id DESC`,
     { userId }
-  );
+  ).then((rows) => rows.map((row) => ({ ...row, image_url: productImageUrlForRow(row), imageUrl: productImageUrlForRow(row) })));
 }
 
 async function getProductForCart(productId) {

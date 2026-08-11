@@ -4,6 +4,7 @@ import { query, safeModifyColumn } from "../config/db.js";
 import { asyncHandler, HttpError } from "../utils/errors.js";
 import { requireApproved, requireAuth, requireRole } from "../middleware/auth.js";
 import { upload } from "../middleware/upload.js";
+import { productImageExpression } from "../utils/productImages.js";
 
 const router = Router();
 let returnColumnsReady;
@@ -112,7 +113,7 @@ router.get("/", requireAuth, asyncHandler(async (req, res) => {
       GROUP_CONCAT(DISTINCT p.name ORDER BY p.name SEPARATOR ', ') AS product_names,
 
       SUBSTRING_INDEX(
-          GROUP_CONCAT(p.image_url ORDER BY oi.id SEPARATOR '||'),
+          GROUP_CONCAT(${productImageExpression("p")} ORDER BY oi.id SEPARATOR '||'),
           '||',
           1
       ) AS product_image
