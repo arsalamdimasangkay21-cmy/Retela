@@ -183,11 +183,16 @@ router.post("/", requireAuth, requireApproved, upload.single("image"), asyncHand
       imageUrl: req.file ? `/uploads/${req.file.filename}` : null
     }
   );
-  await query(
+  const notificationResult = await query(
     "INSERT INTO notifications (type, title, body) VALUES ('feedback', 'New customer feedback', :body)",
     { body: `${req.user.username} submitted ${input.rating} star ${input.category} feedback.` }
   );
-  req.app.get("io")?.to("admin").emit("notification:new", { type: "feedback", title: "New customer feedback", body: `${req.user.username} submitted ${input.rating} star ${input.category} feedback.` });
+  console.log("[admin notification created]", {
+    id: notificationResult.insertId,
+    type: "feedback",
+    title: "New customer feedback"
+  });
+  req.app.get("io")?.to("admin").emit("notification:new", { id: notificationResult.insertId, type: "feedback", title: "New customer feedback", body: `${req.user.username} submitted ${input.rating} star ${input.category} feedback.`, created_at: new Date().toISOString() });
   res.status(201).json({ message: "Feedback submitted" });
 }));
 

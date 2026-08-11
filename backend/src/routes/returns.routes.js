@@ -226,14 +226,21 @@ router.post("/", requireAuth, requireApproved, upload.array("images", 4), asyncH
       proofImages: imageUrls.length ? JSON.stringify(imageUrls) : null
     }
   );
-  await query(
+  const notificationResult = await query(
     "INSERT INTO notifications (type, title, body) VALUES ('refund', 'New return request', :body)",
     { body: `${req.user.username} requested ${input.refund_type} for Order #${input.order_id}.` }
   );
+  console.log("[admin notification created]", {
+    id: notificationResult.insertId,
+    type: "refund",
+    title: "New return request"
+  });
   req.app.get("io")?.to("admin").emit("notification:new", {
+    id: notificationResult.insertId,
     type: "refund",
     title: "New return request",
-    body: `${req.user.username} requested ${input.refund_type} for Order #${input.order_id}.`
+    body: `${req.user.username} requested ${input.refund_type} for Order #${input.order_id}.`,
+    created_at: new Date().toISOString()
   });
   req.app.get("io")?.to("admin").emit("return:new", {
     order_id: input.order_id,

@@ -3,7 +3,7 @@ import { z } from "zod";
 import { query, transaction } from "../config/db.js";
 import { asyncHandler, HttpError } from "../utils/errors.js";
 import { requireApproved, requireAuth, requireRole } from "../middleware/auth.js";
-import { upload } from "../middleware/upload.js";
+import { productUpload } from "../middleware/upload.js";
 import { ensureApparelOptionTables } from "./apparel-options.routes.js";
 import {
   availableProductWhere,
@@ -179,14 +179,15 @@ function parseProductId(value) {
 }
 
 function uploadedProductImageUrl(req) {
-  return req.file ? `/uploads/${req.file.filename}` : null;
+  return req.file ? `/uploads/products/${req.file.filename}` : null;
 }
 
 function logProductUpload(req, imageUrl = null) {
-  console.log("[product image upload]", {
+  console.log("[PRODUCT UPLOAD]", {
+    id: req.params.id || null,
     hasFile: Boolean(req.file),
     filename: req.file?.filename || null,
-    imageUrl
+    resultingImageUrl: imageUrl || null
   });
 }
 
@@ -336,7 +337,7 @@ router.get("/filters", requireAuth, requireApproved, asyncHandler(async (req, re
   });
 }));
 
-router.post("/", requireAuth, requireRole("admin"), upload.single("image"), asyncHandler(async (req, res) => {
+router.post("/", requireAuth, requireRole("admin"), productUpload.single("image"), asyncHandler(async (req, res) => {
   console.log("[POST /api/products] request", {
     bodyFields: Object.keys(req.body || {}),
     hasFile: Boolean(req.file),
@@ -430,7 +431,7 @@ router.post("/", requireAuth, requireRole("admin"), upload.single("image"), asyn
   }
 }));
 
-router.put("/:id", requireAuth, requireRole("admin"), upload.single("image"), asyncHandler(async (req, res) => {
+router.put("/:id", requireAuth, requireRole("admin"), productUpload.single("image"), asyncHandler(async (req, res) => {
   try {
     logProductEditImage(req);
     const table = await productWriteTable();
@@ -441,7 +442,7 @@ router.put("/:id", requireAuth, requireRole("admin"), upload.single("image"), as
     );
     if (!existingProduct) throw new HttpError(404, "Apparel item not found");
 
-    const imageUrl = req.file ? `/uploads/${req.file.filename}` : existingProduct.image_url;
+    const imageUrl = req.file ? uploadedProductImageUrl(req) : existingProduct.image_url;
     logProductUpload(req, imageUrl);
     const input = productSchema.parse(normalizeProductInput({ ...req.body, image_url: imageUrl }));
     await ensureProductOptionValues(input);
@@ -487,10 +488,16 @@ router.patch("/:id/stock", requireAuth, requireRole("admin"), asyncHandler(async
   const nextStatus = productStatusForStock(nextStock);
   await query(`UPDATE \`${table}\` SET stock = :stock, status = :status, updated_at = NOW() WHERE id = :id`, { id: productId, stock: nextStock, status: nextStatus });
   if (nextStock > 0 && nextStock <= 5) {
-    await query(
+    const notificationResult = await query(
       "INSERT INTO notifications (type, title, body, product_id) VALUES ('inventory', 'Low stock alert', :body, :id)",
       { id: productId, body: `Apparel item #${productId} is now at ${nextStock} stock.` }
     );
+    console.log("[admin notification created]", {
+      id: notificationResult.insertId,
+      type: "inventory",
+      title: "Low stock alert"
+    });
+    req.app.get("io")?.to("admin").emit("notification:new", { id: notificationResult.insertId, type: "inventory", title: "Low stock alert", body: `Apparel item #${productId} is now at ${nextStock} stock.`, created_at: new Date().toISOString() });
   }
   if (nextStock === 0) {
     req.app.get("io")?.to("admin").emit("notification:new", { type: "inventory", title: "Out of stock", body: `Apparel item #${productId} is out of stock.` });

@@ -12,6 +12,7 @@ import { api, API_URL, cachedGet, clearGetCache } from "../api/client";
 import { fetchFeaturedApparel } from "../api/customer";
 import { ChangePasswordForm } from "../components/ChangePasswordForm";
 import ConfirmDialog from "../components/ConfirmDialog";
+import ProductImage from "../components/ProductImage";
 import { Button, Card, Field } from "../components/ui";
 import { resolveAssetUrl } from "../config/branding";
 import { useAuth } from "../context/AuthContext";
@@ -652,7 +653,7 @@ export default function CustomerDashboard({ active, onChange }) {
             {cart.length ? cart.map((item) => (
               <div key={item.product_id} className="cart-row flex gap-3 rounded-2xl border border-white/10 bg-black/25 p-3 text-sm shadow-lg transition duration-300 hover:border-neonbrand/20">
                 <div className="h-14 w-14 shrink-0 overflow-hidden rounded-xl bg-white/[0.06]">
-                  {item.image_url ? <img src={assetUrl(item.image_url)} className="h-full w-full object-cover" alt={item.name} /> : null}
+                  <ProductImage product={item} className="h-full w-full object-cover" alt={item.name} />
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex justify-between gap-3">
@@ -880,7 +881,7 @@ function CartPage({
                   <SelectionCircle selected={selected} />
                 </button>
                 <div className="h-20 w-20 shrink-0 overflow-hidden rounded-xl bg-slate-100">
-                  {item.image_url ? <img src={assetUrl(item.image_url)} className="h-full w-full object-cover" alt={item.name} /> : null}
+                  <ProductImage product={item} className="h-full w-full object-cover" alt={item.name} />
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-start justify-between gap-3">
@@ -1048,12 +1049,7 @@ function FeaturedApparelHero({ items, loading, onAddToCart }) {
                   >
                     <div className="min-h-[270px] overflow-hidden bg-slate-950/85 lg:min-h-[420px]">
                       {image ? (
-                        <img
-                          src={assetUrl(image)}
-                          alt={item.name}
-                          loading="lazy"
-                          className="h-full min-h-[270px] w-full object-contain lg:min-h-[420px]"
-                        />
+                        <ProductImage src={image} alt={item.name} className="h-full min-h-[270px] w-full object-contain lg:min-h-[420px]" />
                       ) : (
                         <div className="grid h-full min-h-[270px] place-items-center text-white/35 lg:min-h-[420px]">
                           <FileImage size={42} />
@@ -1138,7 +1134,7 @@ function FeaturedApparelDetailsModal({ item, onClose, onAddToCart }) {
           <div className="grid gap-3">
             <div className="retela-product-image-frame grid min-h-[320px] place-items-center overflow-hidden rounded-3xl bg-slate-100">
               {activeImage ? (
-                <img src={assetUrl(activeImage)} alt={item.name} className="retela-product-details-image max-h-[62vh] w-full object-contain" />
+                <ProductImage src={activeImage} alt={item.name} className="retela-product-details-image max-h-[62vh] w-full object-contain" />
               ) : (
                 <div className="grid min-h-[320px] place-items-center text-slate-400"><FileImage size={42} /></div>
               )}
@@ -1152,7 +1148,7 @@ function FeaturedApparelDetailsModal({ item, onClose, onAddToCart }) {
                     onClick={() => setActiveImage(image)}
                     className={`h-20 w-20 shrink-0 overflow-hidden rounded-2xl border bg-slate-100 transition ${activeImage === image ? "border-emerald-500 ring-4 ring-emerald-100" : "border-slate-200 hover:border-emerald-200"}`}
                   >
-                    <img src={assetUrl(image)} alt="" className="h-full w-full object-cover" />
+                    <ProductImage src={image} alt="" className="h-full w-full object-cover" />
                   </button>
                 ))}
               </div>
@@ -1264,7 +1260,7 @@ function Shop({ products, addToCart, buyNow, filters, setFilters, filterOptions,
             return (
               <article key={p.id} className="retela-product-card flex h-full min-w-0 flex-col rounded-2xl border border-slate-100 bg-white p-3 shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg">
                 <div className="relative">
-                  {p.image_url ? <img src={assetUrl(p.image_url)} className="h-48 w-full rounded-xl object-cover" alt={p.name} /> : <div className="grid h-48 place-items-center rounded-xl bg-slate-100 text-sm font-semibold text-slate-400">No image</div>}
+                  <ProductImage product={p} className="h-48 w-full rounded-xl object-cover" alt={p.name} />
                   <span className={`absolute right-3 top-3 rounded-full border px-3 py-1 text-xs font-black ${stockBadgeClass(p.stock)}`}>{status}</span>
                 </div>
                 <h4 className="mt-3 break-words font-bold text-slate-950">{p.name}</h4>
@@ -1416,7 +1412,7 @@ function ApparelPhotoModal({ item, onClose }) {
         </div>
         <div className="grid min-h-72 place-items-center overflow-hidden rounded-2xl bg-slate-100">
           {item.image_url ? (
-            <img src={assetUrl(item.image_url)} className="max-h-[76vh] w-full object-contain" alt={item.name} />
+            <ProductImage src={item.image_url} className="max-h-[76vh] w-full object-contain" alt={item.name} />
           ) : (
             <p className="p-8 text-center text-sm font-semibold text-slate-500">No image available</p>
           )}
@@ -1845,7 +1841,7 @@ function NotificationDetailModal({ notification, onClose, onCopyPromo, onShopSal
                 {relatedProducts.map((product) => (
                   <div key={product.id} className="flex min-w-0 gap-3 rounded-2xl border border-white/10 bg-black/18 p-3">
                     <div className="h-14 w-14 shrink-0 overflow-hidden rounded-xl bg-white/10">
-                      {product.image_url ? <img src={assetUrl(product.image_url)} alt={product.name} className="h-full w-full object-cover" /> : null}
+                      <ProductImage product={product} className="h-full w-full object-cover" alt={product.name} />
                     </div>
                     <div className="min-w-0 text-sm">
                       <strong className="block truncate">{product.name}</strong>
@@ -2015,7 +2011,7 @@ function Orders({ rows, profile, reviews = [], returnRequests = [], onNavigate, 
           <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
             <div className="flex min-w-0 gap-3">
               <div className="grid h-14 w-14 shrink-0 place-items-center overflow-hidden rounded-2xl border border-emerald-100 bg-emerald-50 text-sm font-black text-emerald-700">
-                {order.first_product_image ? <img src={assetUrl(order.first_product_image)} className="h-full w-full object-cover" alt={order.first_product_name || "Order apparel"} /> : brandInitials(order.brands)}
+                {order.first_product_image ? <ProductImage src={order.first_product_image} className="h-full w-full object-cover" alt={order.first_product_name || "Order apparel"} /> : brandInitials(order.brands)}
               </div>
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
@@ -2124,7 +2120,7 @@ function CustomerOrderModal({ loading, selectedOrder, displayNumber, onPay, payi
                   {selectedOrder.items.map((item) => (
                     <div key={`${item.product_id}-${item.quantity}`} className="retela-modal-item-row">
                       <div className="retela-modal-item-image">
-                        {item.image_url ? <img src={assetUrl(item.image_url)} alt={item.name} /> : null}
+                        <ProductImage src={item.image_url} className="h-full w-full object-cover" alt={item.name} />
                       </div>
                       <div className="min-w-0 flex-1">
                         <strong className="block truncate text-slate-950">{item.name}</strong>
@@ -2735,7 +2731,7 @@ function OrderPreview({ order, details, loading, showReceived }) {
       ) : (
         <div className="grid gap-4 md:grid-cols-[96px_minmax(0,1fr)]">
           <div className="h-24 w-24 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.06]">
-            {image ? <img src={assetUrl(image)} className="h-full w-full object-cover" alt={name} /> : <div className="grid h-full place-items-center text-white/35"><FileImage size={24} /></div>}
+            {image ? <ProductImage src={image} className="h-full w-full object-cover" alt={name} /> : <div className="grid h-full place-items-center text-white/35"><FileImage size={24} /></div>}
           </div>
           <div className="min-w-0">
             <p className="text-xs font-bold uppercase tracking-[0.16em] text-neonbrand/65">Order #{order.id}</p>

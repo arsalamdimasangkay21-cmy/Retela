@@ -1,16 +1,14 @@
 import fs from "fs/promises";
 import crypto from "crypto";
 import path from "path";
-import { fileURLToPath } from "url";
 import { z } from "zod";
 import { query, safeModifyColumn, transaction } from "../config/db.js";
+import { UPLOAD_ROOT } from "../config/uploads.js";
 import { comparePassword, createOtp, hashPassword, isBcryptHash } from "../utils/auth.js";
 import { sendOtpEmail } from "../utils/email.js";
 import { asyncHandler, HttpError } from "../utils/errors.js";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const uploadDir = path.join(__dirname, "../../uploads");
+const uploadDir = UPLOAD_ROOT;
 
 let verificationTablesReady;
 
@@ -121,7 +119,10 @@ async function cleanupExpiredRegistrationOtps() {
 }
 
 async function removeUploadedFiles(paths = []) {
-  await Promise.allSettled(paths.filter(Boolean).map((filePath) => fs.unlink(path.join(__dirname, "../..", filePath.replace(/^\/+/, "")))));
+  await Promise.allSettled(paths.filter(Boolean).map((filePath) => {
+    const relativePath = String(filePath).replace(/^\/+/, "").replace(/^uploads\/+/i, "");
+    return fs.unlink(path.join(UPLOAD_ROOT, relativePath));
+  }));
 }
 
 async function otpMatches(inputOtp, storedOtp) {
@@ -742,6 +743,25 @@ export const completeRegistration = asyncHandler(async (req, res) => {
       phone_number: payload.phone_number,
       status: "approved"
     };
+  });
+
+  const notificationBody = `${createdUser.username} registered and completed verification.`;
+  const notificationResult = await query(
+    "INSERT INTO notifications (user_id, type, title, body) VALUES (:userId, 'customer_registration', 'New customer registration', :body)",
+    { userId: createdUser.id, body: notificationBody }
+  );
+  console.log("[admin notification created]", {
+    id: notificationResult.insertId,
+    type: "customer_registration",
+    title: "New customer registration"
+  });
+  req.app.get("io")?.to("admin").emit("notification:new", {
+    id: notificationResult.insertId,
+    user_id: createdUser.id,
+    type: "customer_registration",
+    title: "New customer registration",
+    body: notificationBody,
+    created_at: new Date().toISOString()
   });
 
   res.status(201).json({

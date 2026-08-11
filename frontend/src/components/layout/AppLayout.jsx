@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Bell, CalendarDays, MessageCircle, Moon, ShoppingCart, Sun, UserCircle } from "lucide-react";
-import { api, cachedGet } from "../../api/client";
+import { api, cachedGet, clearGetCache } from "../../api/client";
 import { acquireSocket, releaseSocket } from "../../api/socket";
+import ProductImage from "../ProductImage";
 import { logoFromSettings, RETELA_LOGO_URL } from "../../config/branding";
 import { useAuth } from "../../context/AuthContext";
 import { applyUserTheme, emitUserThemeChange, readUserTheme, saveUserTheme } from "../../utils/userTheme";
@@ -39,6 +40,7 @@ export default function AppLayout({ children, active, onChange }) {
     if (!socket) return undefined;
     const handleNewRegistration = (payload) => {
       if (user?.role !== "admin") return;
+      clearGetCache("/notifications");
       setNotificationCount((count) => count + 1);
       setToast(payload);
       window.dispatchEvent(new CustomEvent("retela:notification-new", { detail: payload }));
@@ -46,6 +48,7 @@ export default function AppLayout({ children, active, onChange }) {
     const handleNewNotification = (payload) => {
       if (user?.role === "admin" && !["customer_registration", "message", "feedback", "order", "inventory", "refund"].includes(payload?.type)) return;
       if (user?.role === "customer" && !["order", "broadcast"].includes(payload?.type)) return;
+      clearGetCache("/notifications");
       if (payload?.type === "message" && user?.role === "admin") {
         setMessageCount((count) => count + 1);
       } else {
@@ -122,7 +125,7 @@ export default function AppLayout({ children, active, onChange }) {
       return;
     }
     let cancelled = false;
-    cachedGet("/notifications", {}, { cacheMs: 8000, retries: 1 })
+    cachedGet("/notifications", {}, { cacheMs: 0, retries: 1, force: true })
       .then(({ data }) => {
         if (cancelled) return;
         const unread = data.filter((row) => !row.is_read);
@@ -145,12 +148,16 @@ export default function AppLayout({ children, active, onChange }) {
   }, [token, user?.role]);
 
   useEffect(() => {
-    function handleNotificationRead() {
+    function handleNotificationRead(event) {
+      if (event.detail?.type === "message" && user?.role === "admin") {
+        setMessageCount((count) => Math.max(0, count - 1));
+        return;
+      }
       setNotificationCount((count) => Math.max(0, count - 1));
     }
     window.addEventListener("retela:notification-read", handleNotificationRead);
     return () => window.removeEventListener("retela:notification-read", handleNotificationRead);
-  }, []);
+  }, [user?.role]);
 
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 30000);
@@ -312,7 +319,7 @@ export default function AppLayout({ children, active, onChange }) {
         <div className="fixed inset-x-4 bottom-5 z-50 max-w-sm rounded-[20px] border border-emerald-100 bg-white p-4 text-slate-900 shadow-xl shadow-slate-200/80 sm:left-auto sm:right-5">
           <strong>{toast.title}</strong>
           <p className="mt-1 text-sm text-slate-600">{toast.body}</p>
-          {toast.product?.image_url ? <img src={toast.product.image_url} className="mt-3 h-28 w-full rounded-xl object-cover" alt="" /> : null}
+          {toast?.product?.image_url ? <ProductImage product={toast.product} className="mt-3 h-28 w-full rounded-xl object-cover" alt={toast.product.name || ""} /> : null}
           <button className="mt-3 text-sm font-bold text-emerald-700" onClick={openToastTarget}>View now...</button>
         </div>
       ) : null}

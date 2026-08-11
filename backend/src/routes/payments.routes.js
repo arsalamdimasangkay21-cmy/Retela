@@ -78,9 +78,9 @@ function verifyWebhookSignature(req) {
 
 async function markOrderPaid({ orderId, transactionId, reference }) {
   const rows = await query("SELECT id, user_id, status, payment_status FROM orders WHERE id = :orderId", { orderId });
-  if (!rows.length) return;
-  if (rows[0].payment_status === "paid") return;
-  if (rows[0].status === "cancelled" || rows[0].payment_status === "cancelled") return;
+  if (!rows.length) return null;
+  if (rows[0].payment_status === "paid") return null;
+  if (rows[0].status === "cancelled" || rows[0].payment_status === "cancelled") return null;
   await query(
     `UPDATE orders
      SET status = 'paid',
@@ -96,6 +96,21 @@ async function markOrderPaid({ orderId, transactionId, reference }) {
     "INSERT INTO notifications (user_id, type, title, body) VALUES (:userId, 'order', 'Payment received', :body)",
     { userId: rows[0].user_id, body: `Payment for Order #${orderId} was confirmed.` }
   );
+  const adminResult = await query(
+    "INSERT INTO notifications (type, title, body) VALUES ('order', 'Payment received', :body)",
+    { body: `Payment for Order #${orderId} was confirmed.` }
+  );
+  console.log("[admin notification created]", {
+    id: adminResult.insertId,
+    type: "order",
+    title: "Payment received"
+  });
+  return {
+    id: adminResult.insertId,
+    type: "order",
+    title: "Payment received",
+    body: `Payment for Order #${orderId} was confirmed.`
+  };
 }
 
 async function markOrderFailed({ orderId, transactionId, reference }) {
@@ -270,7 +285,13 @@ router.post("/webhook", asyncHandler(async (req, res) => {
   const eventType = attributes.type || event?.type;
 
   if (orderId && /paid|payment\.paid|checkout_session\.payment\.paid/i.test(String(eventType))) {
-    await markOrderPaid({ orderId, transactionId: resource?.id || event?.id, reference });
+    const adminNotification = await markOrderPaid({ orderId, transactionId: resource?.id || event?.id, reference });
+    if (adminNotification) {
+      req.app.get("io")?.to("admin").emit("notification:new", {
+        ...adminNotification,
+        created_at: new Date().toISOString()
+      });
+    }
   }
   if (orderId && /failed|cancelled|canceled|expired/i.test(String(eventType))) {
     await markOrderFailed({ orderId, transactionId: resource?.id || event?.id, reference });

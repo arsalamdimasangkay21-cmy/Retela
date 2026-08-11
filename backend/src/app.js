@@ -3,8 +3,6 @@ import cors from "cors";
 import express from "express";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
-import path from "path";
-import { fileURLToPath } from "url";
 
 import authRoutes from "./routes/auth.routes.js";
 import usersRoutes from "./routes/users.routes.js";
@@ -25,6 +23,7 @@ import posRoutes from "./routes/pos.routes.js";
 import customerRoutes from "./routes/customer.routes.js";
 import { checkDatabaseConnection, requestContextMiddleware } from "./config/db.js";
 import { allowedOrigins, corsOptions } from "./config/cors.js";
+import { PRODUCT_UPLOAD_DIR, UPLOAD_ROOT, logUploadConfig } from "./config/uploads.js";
 
 import {
   brandsRoutes,
@@ -36,9 +35,6 @@ import {
 
 import { errorHandler } from "./utils/errors.js";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
 export function createApp(io) {
   const app = express();
 
@@ -46,6 +42,7 @@ export function createApp(io) {
   app.set("trust proxy", 1);
 
   console.log("[cors] allowed origins", allowedOrigins());
+  logUploadConfig();
 
   app.set("io", io);
   app.use(requestContextMiddleware);
@@ -86,7 +83,8 @@ export function createApp(io) {
     })
   );
 
-  app.use("/uploads", express.static(path.join(__dirname, "../uploads")));
+  app.use("/uploads/products", express.static(PRODUCT_UPLOAD_DIR));
+  app.use("/uploads", express.static(UPLOAD_ROOT));
 
   app.get("/api/health", async (req, res) => {
     const database = await checkDatabaseConnection().catch((error) => ({

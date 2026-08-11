@@ -565,11 +565,16 @@ router.post("/", requireAuth, requireApproved, asyncHandler(async (req, res) => 
       "UPDATE conversations SET is_archived = FALSE, archived_at = NULL, updated_at = NOW() WHERE id = :conversationId",
       { conversationId }
     );
-    await query(
+    const notificationResult = await query(
       "INSERT INTO notifications (type, title, body) VALUES ('message', 'New customer message', :body)",
       { body: input.body.slice(0, 240) }
     );
-    req.app.get("io")?.to("admin").emit("notification:new", { type: "message", title: "New customer message", body: input.body });
+    console.log("[admin notification created]", {
+      id: notificationResult.insertId,
+      type: "message",
+      title: "New customer message"
+    });
+    req.app.get("io")?.to("admin").emit("notification:new", { id: notificationResult.insertId, type: "message", title: "New customer message", body: input.body, created_at: new Date().toISOString() });
   }
   req.app.get("io")?.to(`conversation:${conversationId}`).emit("message:new", { conversation_id: conversationId, sender_type: sender, body: input.body, mode: input.mode });
   res.status(201).json({ conversation_id: conversationId, sender_type: sender, body: input.body, delivery_status: "delivered" });
@@ -591,6 +596,7 @@ router.post("/ai", requireAuth, requireApproved, asyncHandler(async (req, res) =
   const latestCustomer = [...historyBefore].reverse().find((message) => message.sender_type === "customer");
   const latestAi = [...historyBefore].reverse().find((message) => message.sender_type === "ai");
   const duplicateCustomer = await recentDuplicateMessage({ conversationId: conversation.id, senderType: "customer", body: input.prompt, seconds: 90 });
+  let adminMessageNotification = null;
   if (!duplicateCustomer) {
     await query(
       "INSERT INTO messages (conversation_id, sender_id, sender_type, body, delivery_status, delivered_at, mode, ai_provider) VALUES (:conversationId, :senderId, 'customer', :body, 'delivered', NOW(), 'ai', 'Customer')",
@@ -602,6 +608,21 @@ router.post("/ai", requireAuth, requireApproved, asyncHandler(async (req, res) =
       body: input.prompt,
       mode: "ai"
     });
+    const notificationResult = await query(
+      "INSERT INTO notifications (type, title, body) VALUES ('message', 'New customer message', :body)",
+      { body: input.prompt.slice(0, 240) }
+    );
+    adminMessageNotification = {
+      id: notificationResult.insertId,
+      type: "message",
+      title: "New customer message",
+      body: input.prompt
+    };
+    console.log("[admin notification created]", {
+      id: notificationResult.insertId,
+      type: "message",
+      title: "New customer message"
+    });
   }
 
   await query(
@@ -610,13 +631,15 @@ router.post("/ai", requireAuth, requireApproved, asyncHandler(async (req, res) =
   );
 
   if (conversation.admin_takeover) {
-    req.app.get("io")?.to("admin").emit("notification:new", {
-      type: "message",
-      title: "Customer replied",
-      body: input.prompt,
-      conversation_id: conversation.id,
-      suggestions: []
-    });
+    if (adminMessageNotification) {
+      req.app.get("io")?.to("admin").emit("notification:new", {
+        ...adminMessageNotification,
+        title: "Customer replied",
+        conversation_id: conversation.id,
+        suggestions: [],
+        created_at: new Date().toISOString()
+      });
+    }
     return res.status(202).json({
       conversation_id: conversation.id,
       body: "",
@@ -718,13 +741,15 @@ router.post("/ai", requireAuth, requireApproved, asyncHandler(async (req, res) =
        WHERE id = :conversationId`,
       { conversationId: conversation.id, aiProvider, responseTime: aiResult.responseTime, tokenUsage: aiResult.tokenUsage }
     );
-    req.app.get("io")?.to("admin").emit("notification:new", {
-      type: "message",
-      title: conversation.admin_takeover ? "Customer replied" : "New customer message",
-      body: input.prompt,
-      conversation_id: conversation.id,
-      suggestions
-    });
+    if (adminMessageNotification) {
+      req.app.get("io")?.to("admin").emit("notification:new", {
+        ...adminMessageNotification,
+        title: conversation.admin_takeover ? "Customer replied" : "New customer message",
+        conversation_id: conversation.id,
+        suggestions,
+        created_at: new Date().toISOString()
+      });
+    }
     res.json({ conversation_id: conversation.id, body, provider: aiProvider, responseTime: aiResult.responseTime, tokenUsage: aiResult.tokenUsage, admin_takeover: false, suggestions, products: availableProducts.slice(0, 12) });
   } finally {
     aiProcessingLocks.delete(lockKey);

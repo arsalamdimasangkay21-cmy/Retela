@@ -272,7 +272,7 @@ export default function AdminDashboard({ active, onChange }) {
 
   const loadNotificationsData = useCallback(async ({ cancelled, force = false } = {}) => {
     const [notificationRes, userRes] = await Promise.all([
-      getShared("/notifications", {}, { force }),
+      getShared("/notifications", {}, { cacheMs: 0, force: true }),
       getShared("/users", {}, { force })
     ]);
     if (!canUpdate(cancelled)) return;
@@ -3103,7 +3103,7 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
                 {selectedOrder.items.map((item) => (
                   <div key={`${item.product_id}-${item.quantity}`} className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.055] p-3 transition hover:border-neonbrand/25">
                     <div className="h-16 w-16 shrink-0 overflow-hidden rounded-xl bg-white/10">
-                      {item.image_url ? <img src={assetUrl(item.image_url)} className="h-full w-full object-cover" alt={item.name} /> : <div className="grid h-full w-full place-items-center text-[11px] text-white/40">No image</div>}
+                      <ProductImage src={item.image_url} className="h-full w-full object-cover" alt={item.name} />
                     </div>
                     <div className="min-w-0 flex-1">
                       <strong className="block truncate text-white">{item.name}</strong>
@@ -3745,9 +3745,9 @@ function AdminNotifications({ rows, users, rejectingUserIds = [], selectedRegist
     return registration && !lockedRegistrationStatuses.has(registration.status);
   }
 
+  const adminNotificationTypes = new Set(["approval", "customer_registration", "feedback", "message", "order", "inventory", "refund"]);
   const adminRows = rows
-    .filter((row) => row.type === "approval" || row.type === "customer_registration" || row.type === "feedback" || row.type === "message")
-    .filter((row) => !isRegistrationNotification(row))
+    .filter((row) => adminNotificationTypes.has(row.type))
     .filter((row, index, source) => {
       if (!isRegistrationNotification(row)) return true;
       const key = String(row.customerId || row.registration_id || row.user_id || row.email || row.phone || row.id);
@@ -3784,6 +3784,8 @@ function AdminNotifications({ rows, users, rejectingUserIds = [], selectedRegist
 
   async function openAdminNotification(row) {
     await api.patch(`/notifications/${row.id}/read`).catch(() => {});
+    clearGetCache("/notifications");
+    window.dispatchEvent(new CustomEvent("retela:notification-read", { detail: { id: row.id, type: row.type } }));
     if (row.type === "message") onChange?.("Messages");
     else if (row.type === "order") onChange?.("Orders");
     else if (row.type === "inventory") onChange?.("Inventory");
@@ -3801,6 +3803,11 @@ function AdminNotifications({ rows, users, rejectingUserIds = [], selectedRegist
             <Card key={row.id} className={registration && rejectingUserIds.includes(registration.id) ? "trash-vanish" : ""}>
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <button type="button" onClick={() => openAdminNotification(row)} className="min-w-0 flex-1 text-left">
+                  <span className="mb-2 flex flex-wrap items-center gap-2">
+                    <span className={`rounded-full px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.12em] ${row.is_read ? "bg-slate-100 text-slate-500" : "bg-emerald-50 text-emerald-700"}`}>{row.type}</span>
+                    <span className="text-xs font-semibold text-slate-400">{formatAdminDate(row.created_at)}</span>
+                    {!row.is_read ? <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" aria-label="Unread notification" /> : null}
+                  </span>
                   <strong>{row.title}</strong>
                   <p className="mt-1 break-words text-sm text-slate-500">{row.message || row.body}</p>
                 </button>
@@ -3911,7 +3918,7 @@ function AdminReturns({ rows, decideReturn }) {
           <Card key={row.id}>
             <div className="grid gap-4 lg:grid-cols-[90px_minmax(0,1fr)_auto] lg:items-start">
               <div className="h-24 w-24 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.06]">
-                {row.product_image ? <img src={assetUrl(row.product_image)} className="h-full w-full object-cover" alt={row.product_names || "Return product"} /> : <div className="grid h-full place-items-center text-white/35"><RotateCcw size={24} /></div>}
+                <ProductImage src={row.product_image} className="h-full w-full object-cover" alt={row.product_names || "Return product"} />
               </div>
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">

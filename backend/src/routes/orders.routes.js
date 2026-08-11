@@ -242,7 +242,7 @@ router.patch("/:id/cancel", requireAuth, requireApproved, asyncHandler(async (re
       "INSERT INTO notifications (user_id, type, title, body) VALUES (?, 'order', 'Order cancelled', ?)",
       [req.user.id, `Order #${orderId} was cancelled successfully.`]
     );
-    await conn.execute(
+    const [adminCancelNotification] = await conn.execute(
       "INSERT INTO notifications (type, title, body) VALUES ('order', 'Order cancelled', ?)",
       [`Order #${orderId} was cancelled by the customer.`]
     );
@@ -259,6 +259,11 @@ router.patch("/:id/cancel", requireAuth, requireApproved, asyncHandler(async (re
     await conn.commit();
 
     const cancelledOrder = updatedRows[0];
+    console.log("[admin notification created]", {
+      id: adminCancelNotification.insertId,
+      type: "order",
+      title: "Order cancelled"
+    });
     req.app.get("io")?.to(`user:${req.user.id}`).emit("order:update", { id: orderId, status: "cancelled", payment_status: "cancelled" });
     req.app.get("io")?.to("admin").emit("order:update", { id: orderId, status: "cancelled", payment_status: "cancelled" });
     inventoryUpdates.forEach((update) => {
@@ -353,12 +358,28 @@ router.post("/", requireAuth, requireApproved, asyncHandler(async (req, res) => 
         [req.user.id, ...productIds]
       );
     }
-    await conn.execute("INSERT INTO notifications (type, title, body) VALUES ('order', 'New order received', 'A customer placed an order.')");
+    const adminOrderBody = `Order #${orderResult.insertId} was placed.`;
+    const [adminNotificationResult] = await conn.execute(
+      "INSERT INTO notifications (type, title, body) VALUES ('order', 'New order received', ?)",
+      [adminOrderBody]
+    );
     await conn.execute(
       "INSERT INTO notifications (user_id, type, title, body) VALUES (?, 'order', 'Order placed', ?)",
       [req.user.id, `Your order #${orderResult.insertId} was placed successfully.`]
     );
     await conn.commit();
+    console.log("[admin notification created]", {
+      id: adminNotificationResult.insertId,
+      type: "order",
+      title: "New order received"
+    });
+    req.app.get("io")?.to("admin").emit("notification:new", {
+      id: adminNotificationResult.insertId,
+      type: "order",
+      title: "New order received",
+      body: adminOrderBody,
+      created_at: new Date().toISOString()
+    });
     req.app.get("io")?.to("admin").emit("order:new", { id: orderResult.insertId, total_amount: pricing.total });
     inventoryUpdates.forEach((update) => {
       req.app.get("io")?.emit("inventory:update", { type: "inventory", action: "ordered", ...update });

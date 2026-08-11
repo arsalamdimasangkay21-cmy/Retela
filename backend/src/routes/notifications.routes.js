@@ -163,10 +163,14 @@ router.use(requireAuth);
 
 router.get("/", asyncHandler(async (req, res) => {
   await ensureNotificationBroadcastSchema();
+  res.set("Cache-Control", "no-store");
   const visibilityFilter = req.user.role === "customer"
     ? `WHERE n.user_id = :id
        AND n.type IN ('order', 'broadcast')`
-    : `WHERE n.user_id IS NULL
+    : `WHERE (
+         n.user_id IS NULL
+         OR n.type IN ('approval', 'customer_registration')
+       )
        AND n.type IN ('approval', 'customer_registration', 'message', 'feedback', 'order', 'inventory', 'refund')`;
   const rows = await query(
     req.user.role === "customer"
@@ -186,7 +190,7 @@ router.get("/", asyncHandler(async (req, res) => {
          FROM notifications n
          LEFT JOIN broadcasts b ON b.id = n.broadcast_id
          ${visibilityFilter}
-         ORDER BY n.created_at DESC LIMIT 100`
+         ORDER BY n.created_at DESC, n.id DESC LIMIT 100`
       : `SELECT
            n.*,
            n.body AS message,
@@ -206,7 +210,7 @@ router.get("/", asyncHandler(async (req, res) => {
          FROM notifications n
          LEFT JOIN users u ON u.id = n.user_id
          ${visibilityFilter}
-         ORDER BY n.created_at DESC LIMIT 100`,
+         ORDER BY n.created_at DESC, n.id DESC LIMIT 100`,
     { id: req.user.id }
   );
   if (req.user.role !== "admin") {
@@ -223,11 +227,15 @@ router.get("/", asyncHandler(async (req, res) => {
     seen.add(key);
     deduped.push(row);
   }
+  console.log("[admin notifications]", {
+    count: deduped.length
+  });
   res.json(deduped);
 }));
 
 router.patch("/read-all", asyncHandler(async (req, res) => {
   await ensureNotificationBroadcastSchema();
+  res.set("Cache-Control", "no-store");
   if (req.user.role === "customer") {
     await query(
       `UPDATE notifications
@@ -250,8 +258,11 @@ router.patch("/read-all", asyncHandler(async (req, res) => {
     await query(
       `UPDATE notifications
        SET is_read = true
-       WHERE user_id IS NULL
-         AND type IN ('approval', 'message', 'feedback', 'order', 'inventory')`
+       WHERE (
+         user_id IS NULL
+         OR type IN ('approval', 'customer_registration')
+       )
+         AND type IN ('approval', 'customer_registration', 'message', 'feedback', 'order', 'inventory', 'refund')`
     );
   }
   res.json({ message: "Notifications marked as read" });
@@ -259,6 +270,7 @@ router.patch("/read-all", asyncHandler(async (req, res) => {
 
 router.patch("/read-type/:type", asyncHandler(async (req, res) => {
   await ensureNotificationBroadcastSchema();
+  res.set("Cache-Control", "no-store");
   if (req.user.role === "customer") {
     await query(
       `UPDATE notifications
@@ -285,7 +297,10 @@ router.patch("/read-type/:type", asyncHandler(async (req, res) => {
       `UPDATE notifications
        SET is_read = true
        WHERE type = :type
-         AND user_id IS NULL
+         AND (
+           user_id IS NULL
+           OR type IN ('approval', 'customer_registration')
+         )
          AND type IN ('approval', 'customer_registration', 'message', 'feedback', 'order', 'inventory', 'refund')`,
       { type: req.params.type }
     );
@@ -295,12 +310,16 @@ router.patch("/read-type/:type", asyncHandler(async (req, res) => {
 
 router.patch("/:id/read", asyncHandler(async (req, res) => {
   await ensureNotificationBroadcastSchema();
+  res.set("Cache-Control", "no-store");
   if (req.user.role === "admin") {
     await query(
       `UPDATE notifications
        SET is_read = true
        WHERE id = :id
-         AND user_id IS NULL`,
+         AND (
+           user_id IS NULL
+           OR type IN ('approval', 'customer_registration')
+         )`,
       { id: req.params.id }
     );
   } else {

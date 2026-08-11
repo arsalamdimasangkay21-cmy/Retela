@@ -41,7 +41,7 @@ export function normalizeProductImageFields(product = {}) {
 
 export function logProductImageDebug(product, resolvedImageUrl) {
   if (!import.meta.env.DEV || !product || typeof product !== "object") return;
-  console.log("[product image debug]", {
+  console.log("[PRODUCT IMAGE]", {
     id: product.id,
     imageUrl: product.imageUrl,
     image_url: product.image_url,

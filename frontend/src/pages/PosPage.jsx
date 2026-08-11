@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Barcode, Banknote, Camera, CheckCircle2, Minus, Plus, Printer, QrCode, ReceiptText, Search, ShoppingCart, Trash2, X } from "lucide-react";
 import { api, API_URL } from "../api/client";
+import ProductImage from "../components/ProductImage";
 
 const assetUrl = (url) => !url ? "" : url.startsWith("http") ? url : `${API_URL.replace(/\/api$/, "")}${url}`;
 const money = (value) => `PHP ${Number(value || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -329,7 +330,7 @@ export default function PosPage() {
 function ProductPreview({ product }) {
   return (
     <article className="grid gap-4 rounded-[26px] border border-slate-200 bg-white p-5 shadow-xl shadow-slate-200/60 md:grid-cols-[160px_minmax(0,1fr)]">
-      {product.image_url ? <img src={assetUrl(product.image_url)} alt={product.name} className="h-40 w-full rounded-2xl object-cover md:w-40" /> : <div className="grid h-40 rounded-2xl border border-slate-200 bg-slate-50 text-xs font-black uppercase tracking-[0.14em] text-slate-400 md:w-40">No image</div>}
+      <ProductImage product={product} className="h-40 w-full rounded-2xl object-cover md:w-40" alt={product.name} />
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-2">
           <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-black text-emerald-700">{product.sku}</span>
@@ -372,11 +373,7 @@ function AutocompleteDropdown({ query, suggestions, loading, highlightedIndex, o
                 onClick={() => onSelect(product)}
                 className={`grid w-full grid-cols-[52px_minmax(0,1fr)_auto] items-center gap-3 px-3 py-3 text-left transition ${active ? "bg-emerald-50" : "bg-white hover:bg-slate-50"}`}
               >
-                {product.image_url ? (
-                  <img src={assetUrl(product.image_url)} alt={product.name} className="h-12 w-12 rounded-xl object-cover" />
-                ) : (
-                  <div className="grid h-12 w-12 place-items-center rounded-xl bg-slate-100 text-[9px] font-black uppercase tracking-[0.08em] text-slate-400">No img</div>
-                )}
+                <ProductImage product={product} className="h-12 w-12 rounded-xl object-cover" alt={product.name} />
                 <div className="min-w-0">
                   <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
                     <span className="text-sm font-black text-emerald-700"><HighlightText text={product.sku} query={query} /></span>
@@ -428,7 +425,7 @@ function CartLine({ item, onQuantity, onRemove }) {
   const insufficient = item.quantity > item.stock;
   return (
     <article className={`grid gap-3 rounded-2xl border p-3 sm:grid-cols-[64px_minmax(0,1fr)_auto] sm:items-center ${insufficient ? "border-rose-200 bg-rose-50" : "border-slate-200 bg-white"}`}>
-      {item.image_url ? <img src={assetUrl(item.image_url)} alt={item.name} className="h-16 w-16 rounded-xl object-cover" /> : <div className="grid h-16 w-16 place-items-center rounded-xl bg-slate-100 text-[10px] font-bold text-slate-400">No image</div>}
+      <ProductImage product={item} className="h-16 w-16 rounded-xl object-cover" alt={item.name} />
       <div className="min-w-0">
         <strong className="block truncate text-slate-950">{item.name}</strong>
         <span className="mt-1 block text-xs font-semibold text-slate-500">{item.category} / {item.size} / Stock: {item.stock}</span>
