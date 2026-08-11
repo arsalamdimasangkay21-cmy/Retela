@@ -123,6 +123,15 @@ export function getApiErrorMessage(error, fallback = "Something went wrong. Plea
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem("retela_token");
   if (token) config.headers.Authorization = `Bearer ${token}`;
+  if (typeof FormData !== "undefined" && config.data instanceof FormData) {
+    if (typeof config.headers?.delete === "function") {
+      config.headers.delete("Content-Type");
+      config.headers.delete("content-type");
+    } else {
+      delete config.headers["Content-Type"];
+      delete config.headers["content-type"];
+    }
+  }
   return config;
 });
 

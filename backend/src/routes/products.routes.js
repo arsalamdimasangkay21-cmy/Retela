@@ -182,12 +182,11 @@ function uploadedProductImageUrl(req) {
   return req.file ? `/uploads/${req.file.filename}` : null;
 }
 
-function logProductUpload(req) {
-  console.log("[product upload]", {
+function logProductUpload(req, imageUrl = null) {
+  console.log("[product image upload]", {
     hasFile: Boolean(req.file),
-    fieldname: req.file?.fieldname || null,
     filename: req.file?.filename || null,
-    path: req.file?.path || null
+    imageUrl
   });
 }
 
@@ -329,7 +328,6 @@ router.get("/filters", requireAuth, requireApproved, asyncHandler(async (req, re
 }));
 
 router.post("/", requireAuth, requireRole("admin"), upload.single("image"), asyncHandler(async (req, res) => {
-  logProductUpload(req);
   console.log("[POST /api/products] request", {
     bodyFields: Object.keys(req.body || {}),
     hasFile: Boolean(req.file),
@@ -338,6 +336,7 @@ router.post("/", requireAuth, requireRole("admin"), upload.single("image"), asyn
   try {
     const table = await productWriteTable();
     const imageUrl = uploadedProductImageUrl(req);
+    logProductUpload(req, imageUrl);
     const rawInput = normalizeProductInput({ ...req.body, image_url: imageUrl });
     const input = productSchema.parse(rawInput);
     await ensureProductOptionValues(input);
@@ -404,7 +403,8 @@ router.post("/", requireAuth, requireRole("admin"), upload.single("image"), asyn
     return res.status(201).json({
       success: true,
       message: "Apparel item created successfully",
-      item: product
+      item: product,
+      product
     });
   } catch (error) {
     logProductImageSaveFailure(error);
@@ -422,7 +422,6 @@ router.post("/", requireAuth, requireRole("admin"), upload.single("image"), asyn
 }));
 
 router.put("/:id", requireAuth, requireRole("admin"), upload.single("image"), asyncHandler(async (req, res) => {
-  logProductUpload(req);
   try {
     const table = await productWriteTable();
     const productId = parseProductId(req.params.id);
@@ -433,6 +432,7 @@ router.put("/:id", requireAuth, requireRole("admin"), upload.single("image"), as
     if (!existingProduct) throw new HttpError(404, "Apparel item not found");
 
     const imageUrl = uploadedProductImageUrl(req) || existingProduct.image_url || null;
+    logProductUpload(req, imageUrl);
     const input = productSchema.parse(normalizeProductInput({ ...req.body, image_url: imageUrl }));
     await ensureProductOptionValues(input);
     const status = productStatusForStock(input.stock);
