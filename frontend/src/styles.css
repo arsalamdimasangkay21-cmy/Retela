@@ -1749,3 +1749,483 @@ button {
     max-height: calc(100dvh - 180px);
   }
 }
+
+.admin-customers-page {
+  width: 100%;
+  min-width: 0;
+  overflow-x: hidden;
+}
+
+.admin-customers-card {
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.listed-customers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  min-width: 0;
+}
+
+.listed-customer-pill {
+  display: inline-flex;
+  max-width: 100%;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  border-radius: 999px;
+  background: #eff6ff;
+  padding: 8px 10px 8px 12px;
+  color: #2563eb;
+  font-size: 0.88rem;
+  font-weight: 800;
+}
+
+.listed-customer-pill-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.listed-customer-remove {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 999px;
+  background: #fff1f2;
+  color: #e11d48;
+  transition: background 0.18s ease, transform 0.18s ease;
+}
+
+.listed-customer-remove:hover {
+  background: #ffe4e6;
+  transform: translateY(-1px);
+}
+
+.customer-desktop-view {
+  display: block;
+  min-width: 0;
+}
+
+.customer-mobile-view {
+  display: none;
+}
+
+.customers-table-wrapper {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.customers-table {
+  display: table !important;
+  width: 100%;
+  min-width: 1050px;
+  table-layout: fixed;
+  border-collapse: collapse;
+  color: #334155;
+}
+
+.customers-table th,
+.customers-table td {
+  border-bottom: 1px solid #e2e8f0;
+  padding: 14px 12px;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.customers-table th {
+  background: #f8fafc;
+  color: #64748b;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.customers-table tbody tr:hover {
+  background: #f8fafc;
+}
+
+.customers-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.customer-col-id {
+  width: 60px;
+}
+
+.customer-col-username {
+  width: 110px;
+}
+
+.customer-col-display {
+  width: 150px;
+}
+
+.customer-col-email {
+  width: 220px;
+}
+
+.customer-col-phone {
+  width: 140px;
+}
+
+.customer-col-location {
+  width: 180px;
+}
+
+.customer-col-status {
+  width: 110px;
+}
+
+.customer-col-birthday {
+  width: 120px;
+}
+
+.customer-col-gender {
+  width: 90px;
+}
+
+.customer-col-actions {
+  width: 150px;
+}
+
+.customer-cell-id,
+.customer-nowrap {
+  white-space: nowrap;
+}
+
+.customer-cell-id {
+  color: #64748b;
+  font-weight: 800;
+}
+
+.customer-wrap,
+.customer-email {
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.customer-table-name {
+  color: #0f172a;
+  font-weight: 800;
+}
+
+.customer-muted-value {
+  color: #94a3b8;
+}
+
+.customer-approval-badge,
+.customer-approved-compact {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  white-space: nowrap;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.customer-approval-badge {
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid #dbeafe;
+  background: #eff6ff;
+  color: #2563eb;
+  font-size: 0.75rem;
+}
+
+.customer-approval-badge.is-approved,
+.customer-approved-compact {
+  border-color: #86efac;
+  background: #ecfdf3;
+  color: #15803d;
+}
+
+.customer-approval-badge.is-pending,
+.customer-approval-badge.is-pending_otp {
+  border-color: #fde68a;
+  background: #fffbeb;
+  color: #b45309;
+}
+
+.customer-approval-badge.is-rejected {
+  border-color: #fecaca;
+  background: #fef2f2;
+  color: #dc2626;
+}
+
+.customer-approved-compact {
+  min-width: 90px;
+  height: 34px;
+  padding: 0 12px;
+  font-size: 0.78rem;
+}
+
+.customer-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: nowrap;
+}
+
+.customer-actions button,
+.customer-action-view,
+.customer-action-delete,
+.customer-action-approve {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  font-weight: 800;
+  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+}
+
+.customer-actions button:hover {
+  transform: translateY(-1px);
+}
+
+.customer-actions button:focus-visible {
+  outline: 3px solid rgba(37, 99, 235, 0.28);
+  outline-offset: 2px;
+}
+
+.customer-action-approve {
+  min-width: 90px;
+  height: 38px;
+  padding: 0 14px;
+  border: 1px solid #86efac;
+  border-radius: 10px;
+  background: #ecfdf3;
+  color: #15803d;
+  white-space: nowrap;
+}
+
+.customer-action-approve:hover {
+  box-shadow: 0 10px 20px rgba(21, 128, 61, 0.14);
+}
+
+.customer-action-view {
+  width: 40px;
+  height: 40px;
+  border: 1px solid #93c5fd;
+  border-radius: 10px;
+  background: #eff6ff;
+  color: #2563eb;
+}
+
+.customer-action-view:hover {
+  box-shadow: 0 10px 20px rgba(37, 99, 235, 0.14);
+}
+
+.customer-action-delete {
+  width: 40px;
+  height: 40px;
+  border: 1px solid #fca5a5;
+  border-radius: 10px;
+  background: #fef2f2;
+  color: #dc2626;
+}
+
+.customer-action-delete:hover {
+  box-shadow: 0 10px 20px rgba(220, 38, 38, 0.14);
+}
+
+.customer-mobile-card {
+  min-width: 0;
+  margin-bottom: 14px;
+  border: 1px solid #dce8e0;
+  border-radius: 16px;
+  background: #ffffff;
+  padding: 16px;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.05);
+}
+
+.customer-mobile-card:last-child {
+  margin-bottom: 0;
+}
+
+.customer-mobile-card-top {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.customer-mobile-avatar {
+  display: grid;
+  width: 48px;
+  height: 48px;
+  place-items: center;
+  border: 1px solid #bbf7d0;
+  border-radius: 14px;
+  background: #ecfdf3;
+  color: #15803d;
+  font-size: 0.92rem;
+  font-weight: 900;
+}
+
+.customer-mobile-title {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.customer-mobile-title h3 {
+  margin: 0;
+  color: #0f172a;
+  font-size: 1rem;
+  font-weight: 850;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.customer-mobile-title p {
+  margin: 4px 0 0;
+  color: #64748b;
+  font-size: 0.84rem;
+  font-weight: 750;
+  overflow-wrap: anywhere;
+}
+
+.customer-presence-badge {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #e2e8f0;
+  border-radius: 999px;
+  background: #f8fafc;
+  padding: 6px 9px;
+  color: #64748b;
+  font-size: 0.76rem;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+.customer-presence-badge.is-online {
+  border-color: #86efac;
+  background: #ecfdf3;
+  color: #15803d;
+}
+
+.mobile-customer-info {
+  display: grid;
+  gap: 10px;
+}
+
+.mobile-customer-row {
+  display: grid;
+  grid-template-columns: 100px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+}
+
+.mobile-customer-label {
+  color: #64748b;
+  font-size: 0.75rem;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.mobile-customer-value {
+  min-width: 0;
+  color: #0f172a;
+  font-size: 0.88rem;
+  font-weight: 750;
+  overflow-wrap: anywhere;
+}
+
+.customer-mobile-actions {
+  margin-top: 14px;
+}
+
+@media (max-width: 768px) {
+  .retela-sidebar-panel {
+    width: min(82vw, 300px) !important;
+    max-width: min(82vw, 300px) !important;
+    z-index: 1500 !important;
+  }
+
+  .retela-sidebar-overlay {
+    z-index: 1490 !important;
+  }
+
+  .retela-mobile-menu-button {
+    z-index: 1600 !important;
+  }
+
+  .retela-app-main,
+  .retela-app-header,
+  .retela-page-content,
+  .premium-shell,
+  .premium-topbar {
+    min-width: 0;
+    max-width: 100%;
+    overflow-x: hidden;
+  }
+
+  .premium-topbar {
+    flex-wrap: wrap;
+  }
+
+  .retela-topbar-title {
+    flex: 1 1 12rem;
+  }
+
+  .retela-topbar-actions {
+    flex: 0 1 auto;
+    justify-content: flex-start;
+  }
+
+  .admin-customers-card {
+    padding: 0 !important;
+    border: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+  }
+
+  .customer-desktop-view {
+    display: none;
+  }
+
+  .customer-mobile-view {
+    display: block;
+  }
+}
+
+@media (max-width: 430px) {
+  .customer-mobile-card {
+    padding: 14px;
+  }
+
+  .customer-mobile-title {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .mobile-customer-row {
+    grid-template-columns: 86px minmax(0, 1fr);
+  }
+
+  .customer-mobile-card .customer-actions {
+    flex-wrap: wrap;
+  }
+
+  .customer-mobile-card .customer-approved-compact,
+  .customer-mobile-card .customer-action-approve {
+    flex: 1 1 120px;
+  }
+}

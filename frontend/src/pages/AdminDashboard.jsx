@@ -675,21 +675,28 @@ export default function AdminDashboard({ active, onChange }) {
     const visibleCustomers = users.filter((row) => row.status !== "rejected");
     const approvedCustomers = visibleCustomers.filter((row) => row.status === "approved");
     return (
-      <div className="grid gap-4">
+      <div className="admin-customers-page grid gap-4">
         <Card>
           <h3 className="font-display text-lg font-bold">Listed Customers</h3>
-          <div className="mt-3 flex gap-2 overflow-x-auto pb-2">
+          <div className="listed-customers mt-3">
             {approvedCustomers.map((customer) => (
-              <span key={customer.id} className="inline-flex shrink-0 items-center gap-2 rounded-full bg-blue-50 px-3 py-2 text-sm font-bold text-bluebrand">
-                <PresenceDot status={customer.presence_status} />{customer.username} - {presenceLabel(customer.presence_status)}
-                <button type="button" disabled={rejectingUserIds.includes(customer.id)} onClick={() => removeCustomer(customer.id)} className="grid h-7 w-7 place-items-center rounded-full bg-rose-50 text-rose-600 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50" aria-label={`Remove ${customer.username}`}>
+              <span key={customer.id} className="listed-customer-pill">
+                <PresenceDot status={customer.presence_status} />
+                <span className="listed-customer-pill-text">{customer.username} - {presenceLabel(customer.presence_status)}</span>
+                <button type="button" disabled={rejectingUserIds.includes(customer.id)} onClick={() => removeCustomer(customer.id)} className="listed-customer-remove" aria-label={`Delete customer ${customer.username || customer.id}`}>
                   <Trash2 size={14} />
                 </button>
               </span>
             ))}
           </div>
         </Card>
-        <TableCard rows={visibleCustomers} columns={["id", "username", "display_name", "email", "phone_number", "location", "status", "birthday", "gender"]} rowClassName={(row) => rejectingUserIds.includes(row.id) ? "trash-vanish" : ""} actions={(row) => <><span className={`rounded-lg px-3 py-2 text-xs font-bold ${row.status === "approved" ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>{row.status === "pending_otp" ? "Awaiting email OTP" : registrationStatusLabel(row.status)}</span><button type="button" onClick={() => setSelectedDocumentCustomerId(row.id)} title="View Verification Documents" className="grid h-9 w-9 place-items-center rounded-lg bg-[#3b82f6] text-white shadow transition hover:scale-[1.02] hover:bg-blue-600" aria-label={`View verification documents for ${row.username}`}><Eye size={17} /></button><button type="button" disabled={rejectingUserIds.includes(row.id)} onClick={() => removeCustomer(row.id)} className="grid h-9 w-9 place-items-center rounded-lg bg-rose-50 text-rose-600 shadow disabled:cursor-not-allowed disabled:opacity-50" aria-label={`Remove ${row.username}`}><Trash2 size={17} /></button></>} />
+        <CustomersResponsiveView
+          rows={visibleCustomers}
+          rejectingUserIds={rejectingUserIds}
+          onApprove={(id) => approveUser(id, "approved")}
+          onView={(id) => setSelectedDocumentCustomerId(id)}
+          onDelete={removeCustomer}
+        />
         <CustomerDocumentsModal customerId={selectedDocumentCustomerId} open={Boolean(selectedDocumentCustomerId)} onClose={() => setSelectedDocumentCustomerId(null)} />
       </div>
     );
@@ -3039,6 +3046,209 @@ function TableCard({ rows, actions, rowClassName, columns }) {
       ) : <EmptyState title="No recent transactions" subtitle="Real records will appear here after customers start interacting with the system." />}
     </Card>
   );
+}
+
+function CustomersResponsiveView({ rows, rejectingUserIds = [], onApprove, onView, onDelete }) {
+  if (!rows.length) {
+    return (
+      <Card>
+        <EmptyState title="No customers found" subtitle="Approved and pending customer accounts will appear here." />
+      </Card>
+    );
+  }
+
+  return (
+    <Card className="admin-customers-card">
+      <div className="customer-desktop-view">
+        <div className="customers-table-wrapper" role="region" aria-label="Customers table" tabIndex={0}>
+          <table className="customers-table">
+            <colgroup>
+              <col className="customer-col-id" />
+              <col className="customer-col-username" />
+              <col className="customer-col-display" />
+              <col className="customer-col-email" />
+              <col className="customer-col-phone" />
+              <col className="customer-col-location" />
+              <col className="customer-col-status" />
+              <col className="customer-col-birthday" />
+              <col className="customer-col-gender" />
+              <col className="customer-col-actions" />
+            </colgroup>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Username</th>
+                <th>Display Name</th>
+                <th>Email</th>
+                <th>Phone</th>
+                <th>Location</th>
+                <th>Status</th>
+                <th>Birthday</th>
+                <th>Gender</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((customer) => (
+                <tr key={customer.id} className={rejectingUserIds.includes(customer.id) ? "trash-vanish" : ""}>
+                  <td className="customer-cell-id">{customer.id}</td>
+                  <td className="customer-nowrap">@{customer.username || "customer"}</td>
+                  <td className="customer-wrap">{customer.display_name || customer.username || "-"}</td>
+                  <td className="customer-email">{customer.email || "-"}</td>
+                  <td className="customer-nowrap">{customer.phone_number || "-"}</td>
+                  <td className="customer-wrap">{customer.location || "-"}</td>
+                  <td><CustomerApprovalStatus status={customer.status} /></td>
+                  <td className="customer-nowrap">{formatBirthday(customer.birthday)}</td>
+                  <td className="customer-nowrap">{customer.gender || "-"}</td>
+                  <td>
+                    <CustomerActions
+                      customer={customer}
+                      disabled={rejectingUserIds.includes(customer.id)}
+                      onApprove={onApprove}
+                      onView={onView}
+                      onDelete={onDelete}
+                    />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="customer-mobile-view">
+        {rows.map((customer) => (
+          <CustomerMobileCard
+            key={customer.id}
+            customer={customer}
+            disabled={rejectingUserIds.includes(customer.id)}
+            onApprove={onApprove}
+            onView={onView}
+            onDelete={onDelete}
+          />
+        ))}
+      </div>
+    </Card>
+  );
+}
+
+function CustomerMobileCard({ customer, disabled, onApprove, onView, onDelete }) {
+  return (
+    <article className={`customer-mobile-card ${disabled ? "trash-vanish" : ""}`}>
+      <div className="customer-mobile-card-top">
+        <div className="customer-mobile-avatar" aria-hidden="true">{customerInitials(customer)}</div>
+        <div className="customer-mobile-title">
+          <div>
+            <h3>{customer.display_name || customer.username || `Customer #${customer.id}`}</h3>
+            <p>@{customer.username || "customer"}</p>
+          </div>
+          <span className={`customer-presence-badge ${customer.presence_status === "active" ? "is-online" : ""}`}>
+            <PresenceDot status={customer.presence_status} />{presenceLabel(customer.presence_status)}
+          </span>
+        </div>
+      </div>
+
+      <div className="mobile-customer-info">
+        <MobileCustomerRow label="Email" value={customer.email || "-"} />
+        <MobileCustomerRow label="Phone" value={customer.phone_number || "-"} />
+        <MobileCustomerRow label="Location" value={customer.location || "-"} />
+        <MobileCustomerRow label="Birthday" value={formatBirthday(customer.birthday)} />
+        <MobileCustomerRow label="Gender" value={customer.gender || "-"} />
+        <div className="mobile-customer-row">
+          <span className="mobile-customer-label">Approval</span>
+          <CustomerApprovalStatus status={customer.status} />
+        </div>
+      </div>
+
+      <div className="customer-mobile-actions">
+        <CustomerActions
+          customer={customer}
+          disabled={disabled}
+          onApprove={onApprove}
+          onView={onView}
+          onDelete={onDelete}
+        />
+      </div>
+    </article>
+  );
+}
+
+function MobileCustomerRow({ label, value }) {
+  return (
+    <div className="mobile-customer-row">
+      <span className="mobile-customer-label">{label}</span>
+      <strong className="mobile-customer-value">{value}</strong>
+    </div>
+  );
+}
+
+function CustomerApprovalStatus({ status }) {
+  return (
+    <span className={`customer-approval-badge is-${status || "pending"}`}>
+      {status === "pending_otp" ? "Awaiting email OTP" : registrationStatusLabel(status)}
+    </span>
+  );
+}
+
+function CustomerActions({ customer, disabled, onApprove, onView, onDelete }) {
+  const approved = customer.status === "approved";
+  return (
+    <div className="customer-actions">
+      {approved ? (
+        <span className="customer-approved-compact">Approved</span>
+      ) : (
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => onApprove?.(customer.id)}
+          className="customer-action-approve"
+          aria-label={`Approve customer ${customer.username || customer.id}`}
+        >
+          Approve
+        </button>
+      )}
+      <button
+        type="button"
+        onClick={() => onView?.(customer.id)}
+        className="customer-action-view"
+        aria-label={`View customer ${customer.username || customer.id}`}
+        title="View customer"
+      >
+        <Eye size={17} />
+      </button>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => onDelete?.(customer.id)}
+        className="customer-action-delete"
+        aria-label={`Delete customer ${customer.username || customer.id}`}
+        title="Delete customer"
+      >
+        <Trash2 size={17} />
+      </button>
+    </div>
+  );
+}
+
+function customerInitials(customer) {
+  const source = customer.display_name || customer.username || "Customer";
+  return String(source)
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join("") || "C";
+}
+
+function formatBirthday(value) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "2-digit",
+    year: "numeric"
+  }).format(date);
 }
 
 function formatCell(key, value) {
