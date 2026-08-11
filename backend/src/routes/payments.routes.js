@@ -7,6 +7,8 @@ import { requireApproved, requireAuth } from "../middleware/auth.js";
 
 const router = Router();
 let paymentColumnsReady;
+const PAYMONGO_CHECKOUT_URL = "https://api.paymongo.com/v2/checkout_sessions";
+const GCASH_PAYMENT_METHOD_TYPES = ["gcash"];
 
 async function ensurePaymentColumns() {
   paymentColumnsReady ||= (async () => {
@@ -49,15 +51,27 @@ function clientUrl(path) {
   return `${base}${path}`;
 }
 
-function methodTypes(method) {
-  if (method === "gcash") return ["gcash"];
-  if (method === "maya") return ["paymaya"];
-  if (method === "credit" || method === "debit") return ["card"];
-  return ["gcash"];
-}
-
 function authHeader() {
   return `Basic ${Buffer.from(`${paymongoSecret()}:`).toString("base64")}`;
+}
+
+function paymongoErrorDetails(data) {
+  const error = data?.errors?.[0] || {};
+  return {
+    code: error.code || null,
+    detail: error.detail || error.message || null
+  };
+}
+
+function logPaymongoCheckoutResponse(data) {
+  const attributes = data?.data?.attributes || {};
+  console.log("[PAYMONGO CHECKOUT]", {
+    sessionId: data?.data?.id || null,
+    livemode: attributes.livemode,
+    paymentMethodTypes: attributes.payment_method_types,
+    paymentMethodAllowed: attributes.payment_intent?.attributes?.payment_method_allowed,
+    checkoutUrlExists: Boolean(attributes.checkout_url)
+  });
 }
 
 function verifyWebhookSignature(req) {
@@ -161,14 +175,6 @@ router.post("/create-gcash-checkout", requireAuth, requireApproved, asyncHandler
     throw new HttpError(409, "This order has been cancelled and can no longer be paid.");
   }
   if (order.payment_status === "paid") throw new HttpError(400, "This order is already paid.");
-  if (order.checkout_url && order.payment_status === "awaiting_payment") {
-    console.log("Payment provider status:", {
-      provider: "paymongo",
-      reusedCheckoutUrl: true,
-      orderId: order.id
-    });
-    return res.json({ checkoutUrl: order.checkout_url, orderId: order.id });
-  }
 
   const reference = `RETELA-${order.id}-${Date.now()}`;
   const amount = Math.round(Number(order.total_amount) * 100);
@@ -180,7 +186,8 @@ router.post("/create-gcash-checkout", requireAuth, requireApproved, asyncHandler
   };
   console.log("Creating GCash payment", {
     orderId: order.id,
-    paymentMethod: input.paymentMethod,
+    requestedPaymentMethod: input.paymentMethod,
+    paymentMethodTypes: GCASH_PAYMENT_METHOD_TYPES,
     provider: "paymongo",
     amount,
     successUrl: clientUrl(`/payment/success?order=${order.id}&ref=${reference}`),
@@ -189,7 +196,7 @@ router.post("/create-gcash-checkout", requireAuth, requireApproved, asyncHandler
   let response;
   let data;
   try {
-    response = await fetch("https://api.paymongo.com/v1/checkout_sessions", {
+    response = await fetch(PAYMONGO_CHECKOUT_URL, {
       method: "POST",
       headers: {
         Authorization: authHeader(),
@@ -206,7 +213,7 @@ router.post("/create-gcash-checkout", requireAuth, requireApproved, asyncHandler
               name: `RETELA Order #${order.id}`,
               quantity: 1
             }],
-            payment_method_types: methodTypes(input.paymentMethod),
+            payment_method_types: GCASH_PAYMENT_METHOD_TYPES,
             reference_number: reference,
             success_url: clientUrl(`/payment/success?order=${order.id}&ref=${reference}`),
             cancel_url: clientUrl(`/payment/cancel?order=${order.id}&ref=${reference}`)
@@ -215,6 +222,7 @@ router.post("/create-gcash-checkout", requireAuth, requireApproved, asyncHandler
       })
     });
     data = await response.json().catch(() => ({}));
+    if (response.ok) logPaymongoCheckoutResponse(data);
   } catch (error) {
     console.error("GCash payment error:", {
       provider: "paymongo",
@@ -230,13 +238,14 @@ router.post("/create-gcash-checkout", requireAuth, requireApproved, asyncHandler
     orderId: order.id
   });
   if (!response.ok) {
+    const providerError = paymongoErrorDetails(data);
     console.error("GCash payment error:", {
       provider: "paymongo",
       status: response.status,
-      detail: data?.errors?.[0]?.detail || null,
-      code: data?.errors?.[0]?.code || null
+      detail: providerError.detail,
+      code: providerError.code
     });
-    throw new HttpError(502, data?.errors?.[0]?.detail || "Unable to create GCash payment.");
+    throw new HttpError(502, providerError.detail || "Unable to create GCash payment.");
   }
   const checkoutUrl = data?.data?.attributes?.checkout_url;
   if (!checkoutUrl) {
@@ -261,7 +270,7 @@ router.post("/create-gcash-checkout", requireAuth, requireApproved, asyncHandler
      WHERE id = :orderId`,
     {
       orderId: order.id,
-      paymentMethod: input.paymentMethod,
+      paymentMethod: "gcash",
       reference,
       sessionId: data.data.id,
       checkoutUrl
