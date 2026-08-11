@@ -364,7 +364,7 @@ export default function AdminDashboard({ active, onChange }) {
 
   const refreshActiveData = useCallback(() => loadActiveData(active, { force: true }), [active, loadActiveData]);
 
-  async function saveProduct(event, resolvedForm = form) {
+  async function saveProduct(event, resolvedForm = form, selectedImage = productImage) {
     event.preventDefault();
     if (productSaving) return;
     const price = Number(resolvedForm.price);
@@ -387,11 +387,13 @@ export default function AdminDashboard({ active, onChange }) {
       payload.append("condition", productPayloadValue(resolvedForm.condition || "Good"));
       payload.append("description", productPayloadValue(resolvedForm.description));
       if (editingProductId && resolvedForm.image_url) payload.append("image_url", resolvedForm.image_url);
-      if (productImage) payload.append("image", productImage);
+      const selectedImageFile = typeof File !== "undefined" && selectedImage instanceof File ? selectedImage : null;
+      if (selectedImageFile) payload.append("image", selectedImageFile);
       if (import.meta.env.DEV) {
         console.log("[apparel image submit]", {
-          hasFile: Boolean(productImage),
-          fileName: productImage?.name || null,
+          hasFile: Boolean(selectedImageFile),
+          isFile: Boolean(selectedImageFile),
+          fileName: selectedImageFile?.name || null,
           formDataFields: Array.from(payload.keys())
         });
       }
@@ -407,6 +409,13 @@ export default function AdminDashboard({ active, onChange }) {
       setEditingProductId(null);
       setInventoryModalOpen(false);
       if (savedItem?.id) {
+        setProducts((current) => {
+          const nextItem = normalizeProductRows([savedItem])[0];
+          const exists = current.some((item) => Number(item.id) === Number(nextItem.id));
+          return exists
+            ? current.map((item) => (Number(item.id) === Number(nextItem.id) ? nextItem : item))
+            : [nextItem, ...current];
+        });
         setInventoryProducts((current) => {
           const nextItem = normalizeProductRows([savedItem])[0];
           const exists = current.some((item) => Number(item.id) === Number(nextItem.id));
@@ -1602,7 +1611,7 @@ function ProductEditorModal({ editingProductId, form, setForm, productImage, set
     if (!resolvedForm) return;
     const finalForm = { ...brandResolvedForm, ...resolvedForm };
     setForm(finalForm);
-    await saveProduct(event, finalForm);
+    await saveProduct(event, finalForm, selectedImageFile);
   }
 
   return (

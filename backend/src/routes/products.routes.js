@@ -190,6 +190,15 @@ function logProductUpload(req, imageUrl = null) {
   });
 }
 
+function logProductEditImage(req) {
+  console.log("[PRODUCT EDIT IMAGE]", {
+    hasFile: Boolean(req.file),
+    filename: req.file?.filename || null,
+    mimetype: req.file?.mimetype || null,
+    contentType: req.headers["content-type"]
+  });
+}
+
 function logProductImageSaveFailure(error) {
   console.error("[product image save failed]", {
     message: error.message,
@@ -423,6 +432,7 @@ router.post("/", requireAuth, requireRole("admin"), upload.single("image"), asyn
 
 router.put("/:id", requireAuth, requireRole("admin"), upload.single("image"), asyncHandler(async (req, res) => {
   try {
+    logProductEditImage(req);
     const table = await productWriteTable();
     const productId = parseProductId(req.params.id);
     const [existingProduct] = await query(
@@ -431,7 +441,7 @@ router.put("/:id", requireAuth, requireRole("admin"), upload.single("image"), as
     );
     if (!existingProduct) throw new HttpError(404, "Apparel item not found");
 
-    const imageUrl = uploadedProductImageUrl(req) || existingProduct.image_url || null;
+    const imageUrl = req.file ? `/uploads/${req.file.filename}` : existingProduct.image_url;
     logProductUpload(req, imageUrl);
     const input = productSchema.parse(normalizeProductInput({ ...req.body, image_url: imageUrl }));
     await ensureProductOptionValues(input);
