@@ -541,17 +541,19 @@ function ScannerModal({ onClose, onDetected }) {
   }, [onDetected]);
 
   return (
-    <div className="fixed inset-0 z-[140] grid place-items-center bg-slate-950/70 p-4 backdrop-blur-sm">
-      <div className="w-full max-w-xl rounded-[26px] border border-white/10 bg-white p-4 shadow-2xl">
-        <div className="mb-3 flex items-center justify-between gap-3">
+    <div className="retela-modal-backdrop z-[140] bg-slate-950/70">
+      <div className="retela-modal-card modal-md">
+        <div className="retela-modal-header">
           <div>
             <h2 className="font-display text-xl font-bold text-slate-950">Camera Scanner</h2>
             <p className="text-sm text-slate-500">Point the camera at the product barcode.</p>
           </div>
-          <button type="button" onClick={onClose} className="grid h-10 w-10 place-items-center rounded-xl bg-slate-100 text-slate-600" aria-label="Close scanner"><X size={18} /></button>
+          <button type="button" onClick={onClose} className="retela-modal-close" aria-label="Close scanner"><X size={18} /></button>
         </div>
-        <div id={regionId.current} className="min-h-[320px] overflow-hidden rounded-2xl border border-slate-200 bg-slate-950" />
-        {error ? <p className="mt-3 rounded-2xl bg-rose-50 p-3 text-sm font-semibold text-rose-700">{error}</p> : null}
+        <div className="retela-modal-body">
+          <div id={regionId.current} className="min-h-[300px] overflow-hidden rounded-2xl border border-slate-200 bg-slate-950" />
+          {error ? <p className="mt-3 rounded-2xl bg-rose-50 p-3 text-sm font-semibold text-rose-700">{error}</p> : null}
+        </div>
       </div>
     </div>
   );
@@ -571,18 +573,20 @@ function ReceiptModal({ receipt, settings, onClose }) {
   }
 
   return (
-    <div className="fixed inset-0 z-[150] grid place-items-center bg-slate-950/60 p-4 backdrop-blur-sm">
-      <div className="max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-[26px] border border-slate-200 bg-white p-5 shadow-2xl">
-        <div className="flex items-start justify-between gap-3">
+    <div className="retela-modal-backdrop z-[150] bg-slate-950/60">
+      <div className="retela-modal-card modal-sm">
+        <div className="retela-modal-header">
           <div>
             <ReceiptText className="text-emerald-700" size={32} />
             <h2 className="mt-2 font-display text-2xl font-bold text-slate-950">Receipt</h2>
             <p className="text-sm font-semibold text-slate-500">{receipt.order.transaction_number}</p>
           </div>
-          <button type="button" onClick={onClose} className="grid h-10 w-10 place-items-center rounded-xl bg-slate-100 text-slate-600" aria-label="Close receipt"><X size={18} /></button>
+          <button type="button" onClick={onClose} className="retela-modal-close" aria-label="Close receipt"><X size={18} /></button>
         </div>
-        <ReceiptBody receipt={receipt} />
-        <div className="mt-5 grid grid-cols-2 gap-2">
+        <div className="retela-modal-body">
+          <ReceiptBody receipt={receipt} />
+        </div>
+        <div className="retela-modal-footer">
           <button type="button" onClick={printReceipt} className="inline-flex h-12 items-center justify-center gap-2 rounded-2xl bg-slate-950 text-sm font-black text-white"><Printer size={18} /> Print</button>
           <button type="button" onClick={onClose} className="h-12 rounded-2xl border border-slate-200 text-sm font-black text-slate-700">Done</button>
         </div>

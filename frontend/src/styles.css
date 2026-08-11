@@ -2229,3 +2229,380 @@ button {
     flex: 1 1 120px;
   }
 }
+
+.retela-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  padding: 20px;
+  background: rgba(15, 23, 42, 0.45);
+  backdrop-filter: blur(5px);
+}
+
+.retela-modal-card {
+  display: flex;
+  width: min(92vw, 760px);
+  max-height: min(85vh, 760px);
+  min-width: 0;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid #e5eee8;
+  border-radius: 22px;
+  background: #ffffff;
+  color: #17211b;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.22);
+}
+
+.retela-modal-card.modal-sm,
+.retela-modal-sm {
+  width: min(92vw, 480px);
+  max-height: min(82vh, 560px);
+}
+
+.retela-modal-card.modal-md,
+.retela-modal-md {
+  width: min(92vw, 720px);
+  max-height: 82vh;
+}
+
+.retela-modal-card.modal-lg,
+.retela-modal-lg {
+  width: min(94vw, 900px);
+  max-height: 86vh;
+}
+
+.retela-modal-card.modal-form,
+.retela-modal-form {
+  width: min(94vw, 850px);
+  max-height: 85vh;
+}
+
+.retela-modal-header,
+.retela-modal-footer {
+  flex: 0 0 auto;
+  background: #ffffff;
+}
+
+.retela-modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 20px 22px;
+  border-bottom: 1px solid #e5eee8;
+}
+
+.retela-modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 20px 22px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.retela-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 16px 22px;
+  border-top: 1px solid #e5eee8;
+}
+
+.retela-modal-close {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  max-width: 44px;
+  max-height: 44px;
+  flex: 0 0 44px;
+  place-items: center;
+  border: 1px solid #dce8e0;
+  border-radius: 14px;
+  background: #ffffff;
+  color: #5f6f65;
+  transition: border-color 0.18s ease, background 0.18s ease, color 0.18s ease, transform 0.18s ease;
+}
+
+.retela-modal-close:hover {
+  border-color: #20b66a;
+  background: #effcf5;
+  color: #15884f;
+  transform: translateY(-1px);
+}
+
+.retela-modal-eyebrow {
+  margin: 0;
+  color: #15803d;
+  font-size: 0.72rem;
+  font-weight: 850;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.retela-modal-title {
+  margin: 0.25rem 0 0;
+  color: #17211b;
+  font-family: var(--font-display, inherit);
+  font-size: 1.45rem;
+  font-weight: 850;
+  line-height: 1.15;
+}
+
+.retela-modal-subtitle {
+  margin: 0.35rem 0 0;
+  color: #64748b;
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+
+.retela-confirm-icon {
+  display: grid;
+  width: 48px;
+  height: 48px;
+  flex: 0 0 48px;
+  place-items: center;
+  border: 1px solid #fecdd3;
+  border-radius: 16px;
+  background: #fff1f2;
+  color: #dc2626;
+}
+
+.retela-modal-detail-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.retela-modal-detail-grid.two-col {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.retela-modal-info-card {
+  min-width: 0;
+  border: 1px solid #e5eee8;
+  border-radius: 16px;
+  background: #f8fbf9;
+  padding: 12px;
+}
+
+.retela-modal-info-card span {
+  display: block;
+  color: #64748b;
+  font-size: 0.68rem;
+  font-weight: 850;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.retela-modal-info-card strong {
+  display: block;
+  margin-top: 4px;
+  color: #17211b;
+  font-size: 0.92rem;
+  font-weight: 850;
+  overflow-wrap: anywhere;
+}
+
+.retela-modal-item-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid #e5eee8;
+  border-radius: 16px;
+  background: #ffffff;
+  padding: 10px;
+}
+
+.retela-modal-item-image {
+  width: 64px;
+  height: 64px;
+  flex: 0 0 64px;
+  overflow: hidden;
+  border-radius: 12px;
+  background: #f1f5f9;
+}
+
+.retela-modal-item-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.retela-modal-dark {
+  border-color: rgba(56, 255, 136, 0.2);
+  background: #07110d;
+  color: #ffffff;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.36), 0 0 42px rgba(56, 255, 136, 0.09);
+}
+
+.retela-modal-dark .retela-modal-header,
+.retela-modal-dark .retela-modal-footer {
+  border-color: rgba(255, 255, 255, 0.1);
+  background: rgba(7, 17, 13, 0.96);
+}
+
+.retela-modal-dark .retela-modal-title {
+  color: #ffffff;
+}
+
+.retela-modal-dark .retela-modal-subtitle {
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.retela-modal-dark .retela-modal-info-card,
+.retela-modal-dark .retela-modal-item-row {
+  border-color: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.055);
+}
+
+.retela-modal-dark .retela-modal-info-card span {
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.retela-modal-dark .retela-modal-info-card strong,
+.retela-modal-dark .retela-modal-item-row strong {
+  color: #ffffff;
+}
+
+.retela-modal-dark .retela-modal-close {
+  border-color: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.retela-modal-dark .retela-modal-close:hover {
+  border-color: rgba(56, 255, 136, 0.35);
+  background: rgba(56, 255, 136, 0.1);
+  color: #38ff88;
+}
+
+.retela-modal-actions-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.retela-product-details-backdrop,
+.retela-checkout-modal-backdrop,
+.customer-docs-backdrop {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  overflow: hidden !important;
+  padding: 20px !important;
+}
+
+.retela-product-details-modal,
+.retela-checkout-summary-modal,
+.customer-docs-modal {
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: hidden !important;
+}
+
+.retela-product-details-modal {
+  width: min(94vw, 900px) !important;
+  max-width: min(94vw, 900px) !important;
+  max-height: 86vh !important;
+  border-radius: 22px !important;
+}
+
+.retela-checkout-summary-modal {
+  width: min(92vw, 680px) !important;
+  max-width: min(92vw, 680px) !important;
+  max-height: 82vh !important;
+  border-radius: 22px !important;
+}
+
+.customer-docs-modal {
+  width: min(94vw, 900px) !important;
+  max-width: min(94vw, 900px) !important;
+  max-height: 86vh !important;
+  border-radius: 22px !important;
+}
+
+.customer-docs-content,
+.customer-docs-skeleton,
+.customer-docs-loading,
+.customer-docs-error {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.retela-product-details-modal > div:first-child,
+.retela-product-action-row,
+.retela-checkout-summary-modal > div,
+.retela-checkout-modal-actions {
+  flex: 0 0 auto;
+}
+
+.retela-product-details-grid {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.retela-checkout-summary-modal {
+  overflow-y: auto !important;
+  -webkit-overflow-scrolling: touch;
+}
+
+.customer-docs-image-frame,
+.customer-docs-missing {
+  min-height: 180px !important;
+  max-height: 320px !important;
+}
+
+.customer-docs-image-frame img {
+  max-height: 300px !important;
+}
+
+@media (max-width: 600px) {
+  .retela-modal-backdrop,
+  .retela-product-details-backdrop,
+  .retela-checkout-modal-backdrop,
+  .customer-docs-backdrop {
+    padding: 12px !important;
+  }
+
+  .retela-modal-card,
+  .retela-modal-card.modal-sm,
+  .retela-modal-card.modal-md,
+  .retela-modal-card.modal-lg,
+  .retela-modal-card.modal-form,
+  .retela-product-details-modal,
+  .retela-checkout-summary-modal,
+  .customer-docs-modal {
+    width: 100% !important;
+    max-width: none !important;
+    max-height: calc(100dvh - 24px) !important;
+    border-radius: 18px !important;
+  }
+
+  .retela-modal-header,
+  .retela-modal-body,
+  .retela-modal-footer {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  .retela-modal-footer {
+    flex-wrap: wrap;
+  }
+
+  .retela-modal-footer > button,
+  .retela-modal-footer > a,
+  .retela-modal-actions-wrap > button,
+  .retela-modal-actions-wrap > a {
+    flex: 1 1 100%;
+  }
+
+  .retela-modal-detail-grid.two-col {
+    grid-template-columns: 1fr;
+  }
+}

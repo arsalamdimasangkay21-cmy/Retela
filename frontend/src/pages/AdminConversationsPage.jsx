@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Archive, Bot, ChevronLeft, Loader2, MessageCircle, MoreHorizontal, Search, Send, ToggleLeft, ToggleRight, Trash2, UserRound } from "lucide-react";
 import { api } from "../api/client";
+import ConfirmDialog from "../components/ConfirmDialog";
 import { Card, Field } from "../components/ui";
 
 const quickReplySeeds = [
@@ -108,6 +109,7 @@ export default function AdminConversationsPage() {
   const [mobileListOpen, setMobileListOpen] = useState(true);
   const [unreadState, setUnreadState] = useState({});
   const [dismissedCustomerKeys, setDismissedCustomerKeys] = useState({});
+  const [trashConfirmOpen, setTrashConfirmOpen] = useState(false);
   const scrollRef = useRef(null);
 
   const selectedConversation = conversations.find((conversation) => chatKey(conversation) === selectedChat)
@@ -267,12 +269,17 @@ export default function AdminConversationsPage() {
 
   async function trashConversation() {
     if (!selectedConversation?.id) return;
-    if (!window.confirm("Move this conversation to Trash Bin?")) return;
+    setTrashConfirmOpen(true);
+  }
+
+  async function confirmTrashConversation() {
+    if (!selectedConversation?.id) return;
     setBusyAction("trash");
     try {
       await api.patch(`/messages/${selectedConversation.id}/trash`);
       setSelectedChat("");
       setMessages([]);
+      setTrashConfirmOpen(false);
       await loadConversations();
     } finally {
       setBusyAction("");
@@ -415,6 +422,18 @@ export default function AdminConversationsPage() {
           </Card>
         </motion.div>
       </section>
+      <ConfirmDialog
+        open={trashConfirmOpen}
+        title="Move conversation to Trash Bin?"
+        message="This conversation will be removed from the active support inbox."
+        detail={selectedConversation?.username || selectedConversation?.display_name || (selectedConversation?.customer_id ? `Customer #${selectedConversation.customer_id}` : "")}
+        confirmLabel="Move to Trash"
+        busy={busyAction === "trash"}
+        onClose={() => {
+          if (busyAction !== "trash") setTrashConfirmOpen(false);
+        }}
+        onConfirm={confirmTrashConversation}
+      />
     </motion.div>
   );
 }

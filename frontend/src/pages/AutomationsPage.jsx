@@ -518,20 +518,20 @@ function AutomationEditor({ automation, open, onClose, onSave }) {
 
   return (
     <AnimatePresence>
-      <motion.div className="fixed inset-0 z-[140] grid place-items-center p-4 sm:p-6" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+      <motion.div className="retela-modal-backdrop z-[140]" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
         <button type="button" className="absolute inset-0 cursor-default bg-[rgba(10,20,14,0.55)] backdrop-blur-sm" aria-label="Close automation editor overlay" onClick={onClose} />
-        <motion.form onSubmit={submit} className="relative z-10 w-[min(1100px,calc(100vw-32px))] max-h-[calc(100dvh-32px)] overflow-y-auto rounded-[26px] border border-[#cfded4] bg-[#f8fbf9] p-5 text-[#17211b] shadow-[0_24px_90px_rgba(0,0,0,0.25),0_0_40px_rgba(32,182,106,0.10)] sm:p-6" initial={{ opacity: 0, scale: 0.94, y: 12 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.94, y: 12 }} role="dialog" aria-modal="true" aria-labelledby="automation-editor-title">
-          <div className="flex items-start justify-between gap-4">
+        <motion.form onSubmit={submit} className="retela-modal-card modal-md relative z-10 bg-[#f8fbf9]" initial={{ opacity: 0, scale: 0.94, y: 12 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.94, y: 12 }} role="dialog" aria-modal="true" aria-labelledby="automation-editor-title">
+          <div className="retela-modal-header bg-[#f8fbf9]">
             <div>
               <h3 id="automation-editor-title" className="font-display text-2xl font-bold text-[#17211b]">{form.id ? "Edit Automation" : "Create Automation"}</h3>
               <p className="mt-1 text-sm text-[#5f6f65]">Update the frontend rule configuration and status.</p>
             </div>
-            <button type="button" onClick={onClose} className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl border border-[#cfded4] bg-white text-[#5f6f65] transition hover:border-[#20b66a] hover:text-[#15884f] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#20b66a]" aria-label="Close automation editor">
+            <button type="button" onClick={onClose} className="retela-modal-close" aria-label="Close automation editor">
               <X size={18} />
             </button>
           </div>
 
-          <div className="mt-5 grid gap-4 md:grid-cols-2">
+          <div className="retela-modal-body grid gap-4 md:grid-cols-2">
             <AutomationInput label="Title" value={form.title} onChange={(value) => updateField("title", value)} required />
             <label className="grid gap-2">
               <span className="text-xs font-bold uppercase tracking-[0.16em] text-[#17211b]">Icon</span>
@@ -548,7 +548,7 @@ function AutomationEditor({ automation, open, onClose, onSave }) {
             </div>
           </div>
 
-          <div className="mt-5 grid gap-3 sm:flex sm:justify-end">
+          <div className="retela-modal-footer bg-[#f8fbf9]">
             <button type="button" onClick={onClose} className="min-h-12 rounded-2xl border border-[#cfded4] bg-white px-4 py-2.5 text-sm font-bold text-[#17211b] transition hover:border-[#20b66a] hover:text-[#15884f] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#20b66a]">Cancel</button>
             <Button type="submit" className="min-h-12">
               <Save size={17} />

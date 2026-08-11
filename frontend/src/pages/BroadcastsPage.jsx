@@ -32,6 +32,7 @@ import {
 import { api, API_URL, cachedGet, clearGetCache, getApiErrorMessage } from "../api/client";
 import { acquireSocket, releaseSocket } from "../api/socket";
 import { RETELA_LOGO_URL } from "../config/branding";
+import ConfirmDialog from "../components/ConfirmDialog";
 import { Button, Card, Field } from "../components/ui";
 
 const audienceOptions = [
@@ -170,6 +171,7 @@ export default function BroadcastsPage() {
   const [progressByBroadcast, setProgressByBroadcast] = useState({});
   const [toast, setToast] = useState(null);
   const [products, setProducts] = useState([]);
+  const [deleteTarget, setDeleteTarget] = useState(null);
   const submittingActionRef = useRef("");
 
   const scheduledQueue = useMemo(
@@ -470,7 +472,12 @@ export default function BroadcastsPage() {
   ].join("|");
 
   async function remove(item) {
-    if (!window.confirm(`Delete "${item.title}"?`)) return;
+    setDeleteTarget(item);
+  }
+
+  async function confirmRemove() {
+    if (!deleteTarget) return;
+    const item = deleteTarget;
     setBusyId(`delete-${item.id}`);
     try {
       const { data } = await api.delete(`/broadcasts/${item.id}`);
@@ -478,6 +485,7 @@ export default function BroadcastsPage() {
       hydrateResponse(data);
       if (editingId === item.id) resetForm();
       pushToast("success", data.message || "Broadcast deleted.");
+      setDeleteTarget(null);
     } catch (error) {
       pushToast("error", getApiErrorMessage(error, "Could not delete the broadcast."));
     } finally {
@@ -975,6 +983,18 @@ export default function BroadcastsPage() {
       <AnimatePresence>
         {toast ? <Toast toast={toast} onClose={() => setToast(null)} /> : null}
       </AnimatePresence>
+      <ConfirmDialog
+        open={Boolean(deleteTarget)}
+        title="Delete broadcast?"
+        message="This broadcast will be moved out of the active campaign list."
+        detail={deleteTarget?.title}
+        confirmLabel="Delete Broadcast"
+        busy={busyId === `delete-${deleteTarget?.id}`}
+        onClose={() => {
+          if (!busyId) setDeleteTarget(null);
+        }}
+        onConfirm={confirmRemove}
+      />
     </motion.div>
   );
 }

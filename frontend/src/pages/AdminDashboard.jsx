@@ -8,6 +8,7 @@ import { Activity, Archive, Barcode, Bot, Check, ChevronLeft, ChevronRight, Down
 import { api, API_URL, cachedGet, clearGetCache, getApiErrorMessage } from "../api/client";
 import { createApparelOption, fetchApparelOptions } from "../api/apparelOptions";
 import { ChangePasswordForm } from "../components/ChangePasswordForm";
+import ConfirmDialog from "../components/ConfirmDialog";
 import CustomerDocumentsModal from "../components/CustomerDocumentsModal";
 import ProductImage from "../components/ProductImage";
 import { Button, Card, Field, StatCard } from "../components/ui";
@@ -179,6 +180,8 @@ export default function AdminDashboard({ active, onChange }) {
   const [deletingProductIds, setDeletingProductIds] = useState([]);
   const [productSaving, setProductSaving] = useState(false);
   const [busyAction, setBusyAction] = useState("");
+  const [pendingProductDelete, setPendingProductDelete] = useState(null);
+  const [pendingCustomerDelete, setPendingCustomerDelete] = useState(null);
   const mountedRef = useRef(true);
   const refreshTimerRef = useRef(null);
 
@@ -461,7 +464,13 @@ export default function AdminDashboard({ active, onChange }) {
       return;
     }
     const productName = typeof productOrId === "object" ? productOrId.name || "this apparel item" : "this apparel item";
-    if (!window.confirm(`Move "${productName}" to Trash Bin?`)) return;
+    setPendingProductDelete({ id: productId, name: productName });
+  }
+
+  async function confirmDeleteProduct() {
+    const pending = pendingProductDelete;
+    if (!pending?.id) return;
+    const productId = pending.id;
     if (deletingProductIds.includes(productId)) return;
     setDeletingProductIds((ids) => [...ids, productId]);
     try {
@@ -469,6 +478,7 @@ export default function AdminDashboard({ active, onChange }) {
       clearGetCache("/products");
       setProducts((rows) => rows.filter((product) => validProductId(product) !== productId));
       setInventoryProducts((rows) => rows.filter((product) => validProductId(product) !== productId));
+      setPendingProductDelete(null);
       showProductToast("Apparel item moved to Trash Bin.");
     } catch (error) {
       showProductToast(getApiErrorMessage(error, "Could not delete this apparel item."), "error");
@@ -548,12 +558,20 @@ export default function AdminDashboard({ active, onChange }) {
       showProductToast("Cannot remove customer because the customer ID is invalid.", "error");
       return;
     }
-    if (!window.confirm("Remove this customer account?")) return;
+    const customer = users.find((row) => Number(row.id) === customerId);
+    setPendingCustomerDelete({ id: customerId, name: customer?.username || customer?.display_name || `Customer #${customerId}` });
+  }
+
+  async function confirmRemoveCustomer() {
+    const pending = pendingCustomerDelete;
+    if (!pending?.id) return;
+    const customerId = pending.id;
     setRejectingUserIds((ids) => ids.includes(customerId) ? ids : [...ids, customerId]);
     try {
       await api.delete(`/users/${customerId}`);
       clearGetCache("/users");
       await loadCustomersData({ force: true });
+      setPendingCustomerDelete(null);
       showProductToast("Customer removed successfully.");
     } catch (error) {
       showProductToast(getApiErrorMessage(error, "Could not remove customer."), "error");
@@ -629,46 +647,72 @@ export default function AdminDashboard({ active, onChange }) {
           deletingProductIds={deletingProductIds}
         />
         {productToast ? <AdminToast toast={productToast} onClose={() => setProductToast(null)} /> : null}
+        <ConfirmDialog
+          open={Boolean(pendingProductDelete)}
+          title="Move apparel to Trash Bin?"
+          message="This apparel item will be removed from active inventory and can be restored from Trash Bin."
+          detail={pendingProductDelete?.name}
+          confirmLabel="Move to Trash"
+          busy={Boolean(pendingProductDelete?.id && deletingProductIds.includes(pendingProductDelete.id))}
+          onClose={() => {
+            if (!pendingProductDelete?.id || !deletingProductIds.includes(pendingProductDelete.id)) setPendingProductDelete(null);
+          }}
+          onConfirm={confirmDeleteProduct}
+        />
       </>
     );
   }
 
   if (active === "Inventory") {
     return (
-      <PremiumInventoryPage
-        products={inventoryProducts}
-        filters={filters}
-        setFilters={setFilters}
-        onAddItem={() => {
-          setEditingProductId(null);
-          setProductImage(null);
-          setForm(blankProduct);
-          setInventoryModalOpen(true);
-        }}
-        onEdit={editProduct}
-        onDelete={deleteProduct}
-        deletingProductIds={deletingProductIds}
-        onUpdateStock={updateStock}
-        modalOpen={inventoryModalOpen}
-        onCloseModal={() => {
-          setInventoryModalOpen(false);
-          setEditingProductId(null);
-          setProductImage(null);
-          setForm(blankProduct);
-        }}
-        editingProductId={editingProductId}
-        form={form}
-        setForm={setForm}
-        productImage={productImage}
-        setProductImage={setProductImage}
-        saveProduct={saveProduct}
-        productSaving={productSaving}
-        optionValues={optionValues}
-        refreshApparelOptions={loadApparelOptions}
-        showProductToast={showProductToast}
-        productToast={productToast}
-        onDismissToast={() => setProductToast(null)}
-      />
+      <>
+        <PremiumInventoryPage
+          products={inventoryProducts}
+          filters={filters}
+          setFilters={setFilters}
+          onAddItem={() => {
+            setEditingProductId(null);
+            setProductImage(null);
+            setForm(blankProduct);
+            setInventoryModalOpen(true);
+          }}
+          onEdit={editProduct}
+          onDelete={deleteProduct}
+          deletingProductIds={deletingProductIds}
+          onUpdateStock={updateStock}
+          modalOpen={inventoryModalOpen}
+          onCloseModal={() => {
+            setInventoryModalOpen(false);
+            setEditingProductId(null);
+            setProductImage(null);
+            setForm(blankProduct);
+          }}
+          editingProductId={editingProductId}
+          form={form}
+          setForm={setForm}
+          productImage={productImage}
+          setProductImage={setProductImage}
+          saveProduct={saveProduct}
+          productSaving={productSaving}
+          optionValues={optionValues}
+          refreshApparelOptions={loadApparelOptions}
+          showProductToast={showProductToast}
+          productToast={productToast}
+          onDismissToast={() => setProductToast(null)}
+        />
+        <ConfirmDialog
+          open={Boolean(pendingProductDelete)}
+          title="Move apparel to Trash Bin?"
+          message="This apparel item will be removed from active inventory and can be restored from Trash Bin."
+          detail={pendingProductDelete?.name}
+          confirmLabel="Move to Trash"
+          busy={Boolean(pendingProductDelete?.id && deletingProductIds.includes(pendingProductDelete.id))}
+          onClose={() => {
+            if (!pendingProductDelete?.id || !deletingProductIds.includes(pendingProductDelete.id)) setPendingProductDelete(null);
+          }}
+          onConfirm={confirmDeleteProduct}
+        />
+      </>
     );
   }
 
@@ -707,6 +751,18 @@ export default function AdminDashboard({ active, onChange }) {
           onDelete={removeCustomer}
         />
         <CustomerDocumentsModal customerId={selectedDocumentCustomerId} open={Boolean(selectedDocumentCustomerId)} onClose={() => setSelectedDocumentCustomerId(null)} />
+        <ConfirmDialog
+          open={Boolean(pendingCustomerDelete)}
+          title="Remove customer account?"
+          message="This customer account will be removed from the active customers list."
+          detail={pendingCustomerDelete?.name}
+          confirmLabel="Remove Customer"
+          busy={Boolean(pendingCustomerDelete?.id && rejectingUserIds.includes(pendingCustomerDelete.id))}
+          onClose={() => {
+            if (!pendingCustomerDelete?.id || !rejectingUserIds.includes(pendingCustomerDelete.id)) setPendingCustomerDelete(null);
+          }}
+          onConfirm={confirmRemoveCustomer}
+        />
       </div>
     );
   }
@@ -814,6 +870,7 @@ function TrashBinPage({ onChanged }) {
   const [broadcasts, setBroadcasts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState("");
+  const [deleteConfirm, setDeleteConfirm] = useState(null);
 
   const loadTrash = useCallback(async ({ cancelled, force = false } = {}) => {
     const [apparelRes, conversationRes, broadcastRes] = await Promise.all([
@@ -852,15 +909,49 @@ function TrashBinPage({ onChanged }) {
   }
 
   async function deleteApparel(id) {
-    if (!window.confirm("Permanently delete this apparel item? This cannot be undone.")) return;
-    setBusyId(`apparel-delete-${id}`);
-    try {
-      await api.delete(`/products/${id}/permanent`);
-      clearGetCache("/products");
-      await loadTrash({ force: true });
-      await onChanged?.();
-    } finally {
-      setBusyId("");
+    setDeleteConfirm({ type: "apparel", id, title: "Permanently delete apparel?", detail: "This apparel item cannot be restored after deletion." });
+  }
+
+  async function confirmDelete() {
+    if (!deleteConfirm?.id || !deleteConfirm?.type) return;
+    const { id, type } = deleteConfirm;
+    if (type === "apparel") {
+      setBusyId(`apparel-delete-${id}`);
+      try {
+        await api.delete(`/products/${id}/permanent`);
+        clearGetCache("/products");
+        await loadTrash({ force: true });
+        await onChanged?.();
+        setDeleteConfirm(null);
+      } finally {
+        setBusyId("");
+      }
+      return;
+    }
+    if (type === "conversation") {
+      setBusyId(`conversation-delete-${id}`);
+      try {
+        await api.delete(`/messages/${id}/permanent`);
+        clearGetCache("/messages/trash");
+        await loadTrash({ force: true });
+        await onChanged?.();
+        setDeleteConfirm(null);
+      } finally {
+        setBusyId("");
+      }
+      return;
+    }
+    if (type === "broadcast") {
+      setBusyId(`broadcast-delete-${id}`);
+      try {
+        await api.delete(`/broadcasts/${id}/permanent`);
+        clearGetCache("/broadcasts/trash");
+        await loadTrash({ force: true });
+        await onChanged?.();
+        setDeleteConfirm(null);
+      } finally {
+        setBusyId("");
+      }
     }
   }
 
@@ -877,16 +968,7 @@ function TrashBinPage({ onChanged }) {
   }
 
   async function deleteConversation(id) {
-    if (!window.confirm("Permanently delete this conversation? This cannot be undone.")) return;
-    setBusyId(`conversation-delete-${id}`);
-    try {
-      await api.delete(`/messages/${id}/permanent`);
-      clearGetCache("/messages/trash");
-      await loadTrash({ force: true });
-      await onChanged?.();
-    } finally {
-      setBusyId("");
-    }
+    setDeleteConfirm({ type: "conversation", id, title: "Permanently delete conversation?", detail: "This conversation cannot be restored after deletion." });
   }
 
   async function restoreBroadcast(id) {
@@ -902,16 +984,7 @@ function TrashBinPage({ onChanged }) {
   }
 
   async function deleteBroadcast(id) {
-    if (!window.confirm("Permanently delete this broadcast? This cannot be undone.")) return;
-    setBusyId(`broadcast-delete-${id}`);
-    try {
-      await api.delete(`/broadcasts/${id}/permanent`);
-      clearGetCache("/broadcasts/trash");
-      await loadTrash({ force: true });
-      await onChanged?.();
-    } finally {
-      setBusyId("");
-    }
+    setDeleteConfirm({ type: "broadcast", id, title: "Permanently delete broadcast?", detail: "This broadcast cannot be restored after deletion." });
   }
 
   return (
@@ -992,6 +1065,18 @@ function TrashBinPage({ onChanged }) {
           )}
         />
       </Card>
+      <ConfirmDialog
+        open={Boolean(deleteConfirm)}
+        title={deleteConfirm?.title}
+        message="This action cannot be undone."
+        detail={deleteConfirm?.detail}
+        confirmLabel="Delete Permanently"
+        busy={Boolean(deleteConfirm && busyId === `${deleteConfirm.type}-delete-${deleteConfirm.id}`)}
+        onClose={() => {
+          if (!busyId) setDeleteConfirm(null);
+        }}
+        onConfirm={confirmDelete}
+      />
     </motion.div>
   );
 }
@@ -1616,13 +1701,13 @@ function ProductEditorModal({ editingProductId, form, setForm, productImage, set
 
   return (
     <motion.div
-      className="fixed inset-0 z-[1200] grid place-items-center bg-[rgba(15,23,18,0.55)] p-2.5 backdrop-blur-[4px] sm:p-5"
+      className="retela-modal-backdrop"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ duration: 0.22, ease: "easeOut" }}
     >
       <motion.section
-        className="flex max-h-[calc(100vh-20px)] w-[min(820px,calc(100vw-20px))] flex-col overflow-hidden rounded-[22px] border border-[#dce8e0] bg-[#f8fbf9] text-[#17211b] shadow-[0_24px_70px_rgba(15,23,18,0.28)] sm:max-h-[82vh] sm:w-[min(820px,calc(100vw-40px))]"
+        className="retela-modal-card modal-form bg-[#f8fbf9]"
         initial={{ opacity: 0, y: 18, scale: 0.98 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
         transition={{ duration: 0.28, ease: "easeOut" }}
@@ -1630,18 +1715,18 @@ function ProductEditorModal({ editingProductId, form, setForm, productImage, set
         aria-modal="true"
         aria-labelledby="apparel-editor-title"
       >
-        <div className="shrink-0 border-b border-[#dce8e0] bg-[#f8fbf9] px-4 py-3 sm:px-5">
-          <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <p className="text-xs font-bold uppercase tracking-[0.18em] text-emerald-700">Apparel Item</p>
-            <h3 id="apparel-editor-title" className="mt-1 font-display text-xl font-bold text-[#17211b] sm:text-2xl">{editingProductId ? "Edit Apparel Item" : "Add Apparel Item"}</h3>
-          </div>
-          <button type="button" disabled={productSaving} onClick={onClose} className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-[#cfded4] bg-white text-[#5f6f65] transition hover:border-[#20b66a] hover:text-[#15884f] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#20b66a] disabled:cursor-not-allowed disabled:opacity-60" aria-label="Close apparel editor">
-            <X size={18} />
-          </button>
+        <div className="retela-modal-header bg-[#f8fbf9]">
+          <div className="flex w-full items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-xs font-bold uppercase tracking-[0.18em] text-emerald-700">Apparel Item</p>
+              <h3 id="apparel-editor-title" className="mt-1 font-display text-xl font-bold text-[#17211b] sm:text-2xl">{editingProductId ? "Edit Apparel Item" : "Add Apparel Item"}</h3>
+            </div>
+            <button type="button" disabled={productSaving} onClick={onClose} className="retela-modal-close disabled:cursor-not-allowed disabled:opacity-60" aria-label="Close apparel editor">
+              <X size={18} />
+            </button>
           </div>
         </div>
-        <form onSubmit={handleSubmit} className="min-h-0 overflow-y-auto px-4 py-4 sm:px-5">
+        <form onSubmit={handleSubmit} className="retela-modal-body">
           <div className="grid gap-x-4 gap-y-3 md:grid-cols-2">
           <input className={inputClass} placeholder="Apparel Name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
             <div className="grid gap-1">
@@ -1790,7 +1875,7 @@ function ProductEditorModal({ editingProductId, form, setForm, productImage, set
             </div>
           </div>
           <textarea className={`${inputClass} h-auto min-h-[120px] max-h-[220px] resize-y md:col-span-2`} placeholder="Apparel description, fit notes, flaws, fabric, or styling details" value={form.description || ""} onChange={(e) => setForm({ ...form, description: e.target.value })} />
-          <div className="sticky bottom-0 -mx-4 mt-1 grid gap-3 border-t border-[#dce8e0] bg-[#f8fbf9] px-4 pb-1 pt-3 md:col-span-2 sm:-mx-5 sm:flex sm:justify-end sm:px-5">
+          <div className="sticky bottom-0 -mx-[22px] mt-1 grid gap-3 border-t border-[#dce8e0] bg-[#f8fbf9] px-[22px] pb-1 pt-3 md:col-span-2 sm:flex sm:justify-end">
             <button type="button" disabled={productSaving} className={`${secondaryButtonClass} disabled:cursor-not-allowed disabled:opacity-60`} onClick={onClose}>Cancel</button>
             <button type="submit" disabled={productSaving} className={`${primaryButtonClass} disabled:cursor-not-allowed disabled:opacity-60`}>
               {productSaving ? <Loader2 className="animate-spin" size={17} /> : editingProductId ? <Save size={17} /> : <PackagePlus size={17} />}
@@ -2983,25 +3068,25 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
   }
 
   return (
-    <motion.div className="fixed inset-0 z-[120] grid place-items-center overflow-y-auto bg-black/70 p-4 backdrop-blur-xl" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onMouseDown={onClose}>
-      <motion.div className="mx-4 my-6 w-full max-w-2xl overflow-hidden rounded-[28px] border border-green-400/20 bg-white/5 shadow-[0_30px_110px_rgba(0,0,0,0.55),0_0_55px_rgba(56,255,136,0.14)] backdrop-blur-xl" initial={{ opacity: 0, scale: 0.94, y: 18 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.94, y: 18 }} transition={{ duration: 0.22, ease: "easeOut" }} onMouseDown={(event) => event.stopPropagation()}>
-        <div className="max-h-[86vh] overflow-y-auto p-5 sm:p-6">
+    <motion.div className="retela-modal-backdrop z-[120]" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onMouseDown={onClose}>
+      <motion.div className="retela-modal-card retela-modal-dark modal-md" initial={{ opacity: 0, scale: 0.94, y: 18 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.94, y: 18 }} transition={{ duration: 0.22, ease: "easeOut" }} onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="admin-order-details-title">
           {loading ? (
-            <div className="grid gap-4">
+            <div className="retela-modal-body grid gap-4">
               <div className="skeleton h-8 w-1/2 rounded-2xl" />
               <div className="skeleton h-24 rounded-3xl" />
               <div className="skeleton h-40 rounded-3xl" />
             </div>
           ) : source ? (
-            <div className="grid gap-4">
-              <div className="flex flex-wrap items-start justify-between gap-3">
+            <>
+              <div className="retela-modal-header">
                 <div>
                   <p className="text-xs font-bold uppercase tracking-[0.18em] text-neonbrand/75">{source.order_channel === "pos" ? "POS Transaction" : "Customer Order"}</p>
-                  <h3 className="mt-2 font-display text-2xl font-bold text-white">Order #{source.id}</h3>
+                  <h3 id="admin-order-details-title" className="mt-2 font-display text-2xl font-bold text-white">Order #{source.id}</h3>
                   <p className="mt-1 text-sm text-white/55">{source.username || "Walk-in Customer"} | {new Date(source.created_at).toLocaleString()}</p>
                 </div>
                 <span className={`rounded-full px-3 py-2 text-xs font-bold ${orderBadgeClass(source.status)}`}>{orderStatusLabel(source.status)}</span>
               </div>
+              <div className="retela-modal-body grid gap-4">
               <div className="grid gap-3 sm:grid-cols-3">
                 <Detail label="Total" value={`PHP ${source.total_amount}`} />
                 <Detail label="Items" value={selectedOrder.items.length} />
@@ -3016,8 +3101,8 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
               </div>
               <div className="grid gap-3">
                 {selectedOrder.items.map((item) => (
-                  <div key={`${item.product_id}-${item.quantity}`} className="flex gap-3 rounded-3xl border border-white/10 bg-white/[0.055] p-3 transition hover:border-neonbrand/25">
-                    <div className="h-20 w-20 shrink-0 overflow-hidden rounded-2xl bg-white/10">
+                  <div key={`${item.product_id}-${item.quantity}`} className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.055] p-3 transition hover:border-neonbrand/25">
+                    <div className="h-16 w-16 shrink-0 overflow-hidden rounded-xl bg-white/10">
                       {item.image_url ? <img src={assetUrl(item.image_url)} className="h-full w-full object-cover" alt={item.name} /> : <div className="grid h-full w-full place-items-center text-[11px] text-white/40">No image</div>}
                     </div>
                     <div className="min-w-0 flex-1">
@@ -3028,16 +3113,18 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
                   </div>
                 ))}
               </div>
-              <div className="flex flex-wrap gap-2 border-t border-white/10 pt-4">
+              </div>
+              <div className="retela-modal-footer">
+                <div className="retela-modal-actions-wrap w-full">
                 <button disabled={!["pending", "paid"].includes(source.status)} onClick={() => updateStatus(source.status === "paid" ? "processing" : "approved")} className={`rounded-xl px-4 py-2 text-xs font-bold shadow ${["pending", "paid"].includes(source.status) ? orderButtonClass("approved") : "bg-slate-100 text-slate-400"}`}>Accept</button>
                 <button disabled={!["pending", "approved", "processing", "ready"].includes(source.status)} onClick={() => updateStatus("cancelled")} className={`rounded-xl px-4 py-2 text-xs font-bold shadow ${["pending", "approved", "processing", "ready"].includes(source.status) ? orderButtonClass("cancelled") : "bg-slate-100 text-slate-400"}`}>Reject</button>
                 <button disabled={!["pending", "approved", "processing"].includes(source.status)} onClick={() => updateStatus("ready")} className={`rounded-xl px-4 py-2 text-xs font-bold shadow ${["pending", "approved", "processing"].includes(source.status) ? orderButtonClass("ready") : "bg-slate-100 text-slate-400"}`}>Out for Delivery</button>
                 <button disabled={source.status === "completed"} onClick={() => updateStatus("completed")} className={`rounded-xl px-4 py-2 text-xs font-bold shadow ${source.status !== "completed" ? orderButtonClass("completed") : "bg-slate-100 text-slate-400"}`}>Completed</button>
                 <button type="button" onClick={onClose} className="ml-auto rounded-xl border border-white/10 bg-white/[0.06] px-4 py-2 text-xs font-bold text-white/70 transition hover:text-neonbrand">Close</button>
+                </div>
               </div>
-            </div>
+            </>
           ) : <p className="text-white/60">Order details are not available.</p>}
-        </div>
       </motion.div>
     </motion.div>
   );

@@ -11,6 +11,7 @@ import "swiper/css/pagination";
 import { api, API_URL, cachedGet, clearGetCache } from "../api/client";
 import { fetchFeaturedApparel } from "../api/customer";
 import { ChangePasswordForm } from "../components/ChangePasswordForm";
+import ConfirmDialog from "../components/ConfirmDialog";
 import { Button, Card, Field } from "../components/ui";
 import { resolveAssetUrl } from "../config/branding";
 import { useAuth } from "../context/AuthContext";
@@ -107,6 +108,7 @@ export default function CustomerDashboard({ active, onChange }) {
   const [profilePhoto, setProfilePhoto] = useState(null);
   const [profileToast, setProfileToast] = useState(null);
   const [deactivating, setDeactivating] = useState(false);
+  const [deactivateConfirmOpen, setDeactivateConfirmOpen] = useState(false);
   const filtersRef = useRef(filters);
   const cartRef = useRef(cart);
   const stockRefreshTimerRef = useRef(null);
@@ -546,7 +548,10 @@ export default function CustomerDashboard({ active, onChange }) {
   }
 
   async function deactivateAccount() {
-    if (!window.confirm("Deactivate your account? You will be signed out and will need admin help to restore access.")) return;
+    setDeactivateConfirmOpen(true);
+  }
+
+  async function confirmDeactivateAccount() {
     setDeactivating(true);
     try {
       await api.patch("/users/me/deactivate");
@@ -739,6 +744,17 @@ export default function CustomerDashboard({ active, onChange }) {
     <>
       <Profile profile={profile} setProfile={setProfile} profilePhoto={profilePhoto} setProfilePhoto={setProfilePhoto} saveProfile={saveProfile} onReset={resetProfile} onDeactivate={deactivateAccount} deactivating={deactivating} />
       {profileToast ? <PortalToast toast={profileToast} onClose={() => setProfileToast(null)} /> : null}
+      <ConfirmDialog
+        open={deactivateConfirmOpen}
+        title="Deactivate your account?"
+        message="You will be signed out and will need admin help to restore access."
+        confirmLabel="Deactivate Account"
+        busy={deactivating}
+        onClose={() => {
+          if (!deactivating) setDeactivateConfirmOpen(false);
+        }}
+        onConfirm={confirmDeactivateAccount}
+      />
     </>
   );
 }
@@ -2073,60 +2089,61 @@ function CustomerOrderModal({ loading, selectedOrder, displayNumber, onPay, payi
   const order = selectedOrder?.order;
   const cancelled = isOrderCancelled(order);
   return (
-    <motion.div className="fixed inset-0 z-[120] grid place-items-center overflow-y-auto bg-black/70 p-4 backdrop-blur-xl" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onMouseDown={onClose}>
-      <motion.div className="mx-4 my-6 w-full max-w-2xl overflow-hidden rounded-[28px] border border-green-400/20 bg-white/5 shadow-[0_30px_110px_rgba(0,0,0,0.55),0_0_55px_rgba(56,255,136,0.14)] backdrop-blur-xl" initial={{ opacity: 0, scale: 0.94, y: 18 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.94, y: 18 }} transition={{ duration: 0.22, ease: "easeOut" }} onMouseDown={(event) => event.stopPropagation()}>
-        <div className="max-h-[86vh] overflow-y-auto p-5 sm:p-6">
+    <motion.div className="retela-modal-backdrop z-[120]" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onMouseDown={onClose}>
+      <motion.div className="retela-modal-card modal-md" initial={{ opacity: 0, scale: 0.94, y: 18 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.94, y: 18 }} transition={{ duration: 0.22, ease: "easeOut" }} onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="customer-order-details-title">
           {loading ? (
-            <div className="grid gap-4">
+            <div className="retela-modal-body grid gap-4">
               <div className="skeleton h-8 w-1/2 rounded-2xl" />
               <div className="skeleton h-24 rounded-3xl" />
               <div className="skeleton h-40 rounded-3xl" />
             </div>
           ) : order ? (
-            <div className="grid gap-4">
-              <div className="flex flex-wrap items-start justify-between gap-3">
+            <>
+              <div className="retela-modal-header">
                 <div>
-                  <p className="text-xs font-bold uppercase tracking-[0.18em] text-neonbrand/75">Order Details</p>
-                  <h3 className="mt-2 font-display text-2xl font-bold text-white">My Order #{displayNumber}</h3>
-                  <p className="mt-1 text-sm text-white/55">Created {new Date(order.created_at).toLocaleString()}</p>
+                  <p className="retela-modal-eyebrow">Order Details</p>
+                  <h3 id="customer-order-details-title" className="retela-modal-title">My Order #{displayNumber}</h3>
+                  <p className="retela-modal-subtitle">Created {new Date(order.created_at).toLocaleString()}</p>
                 </div>
                 <span className={`rounded-full border px-4 py-2 text-sm font-bold ${customerOrderStatusClass(order.status)}`}>{customerOrderStatus(order.status)}</span>
               </div>
-              <div className="grid gap-3 sm:grid-cols-3">
-                <Detail label="Total" value={`PHP ${order.total_amount}`} />
-                <Detail label="Payment" value={paymentLabel(order.payment_method)} />
-              </div>
-              <Detail label="Tracking Number" value={order.tracking_number || "Waiting for admin"} />
-              <Detail label="Payment Status" value={order.payment_status || "unpaid"} />
-              {!cancelled && order.fulfillment_method === "delivery" ? (
-                <a className="inline-flex w-fit items-center gap-2 rounded-2xl border border-neonbrand/20 bg-neonbrand/10 px-3 py-2 text-sm font-bold text-neonbrand" href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(order.location || "delivery location")}`} target="_blank" rel="noreferrer">
-                  <MapPin size={16} /> Open tracking map
-                </a>
-              ) : null}
-              <div className="grid gap-3">
-                {selectedOrder.items.map((item) => (
-                  <div key={`${item.product_id}-${item.quantity}`} className="flex gap-3 rounded-3xl border border-white/10 bg-white/[0.055] p-3">
-                    <div className="h-20 w-20 shrink-0 overflow-hidden rounded-2xl bg-white/10">
-                      {item.image_url ? <img src={assetUrl(item.image_url)} className="h-full w-full object-cover" alt={item.name} /> : null}
+              <div className="retela-modal-body grid gap-4">
+                <div className="retela-modal-detail-grid two-col">
+                  <ModalInfo label="Total" value={`PHP ${order.total_amount}`} />
+                  <ModalInfo label="Payment" value={paymentLabel(order.payment_method)} />
+                  <ModalInfo label="Tracking Number" value={order.tracking_number || "Waiting for admin"} />
+                  <ModalInfo label="Payment Status" value={customerOrderStatus(order.payment_status || "unpaid")} />
+                </div>
+                {!cancelled && order.fulfillment_method === "delivery" ? (
+                  <a className="inline-flex w-fit items-center gap-2 rounded-2xl border border-emerald-100 bg-emerald-50 px-3 py-2 text-sm font-bold text-emerald-700 transition hover:bg-emerald-100" href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(order.location || "delivery location")}`} target="_blank" rel="noreferrer">
+                    <MapPin size={16} /> Open tracking map
+                  </a>
+                ) : null}
+                <div className="grid gap-2">
+                  <p className="retela-modal-eyebrow">Items</p>
+                  {selectedOrder.items.map((item) => (
+                    <div key={`${item.product_id}-${item.quantity}`} className="retela-modal-item-row">
+                      <div className="retela-modal-item-image">
+                        {item.image_url ? <img src={assetUrl(item.image_url)} alt={item.name} /> : null}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <strong className="block truncate text-slate-950">{item.name}</strong>
+                        <p className="mt-1 truncate text-sm text-slate-500">{item.brand || "Other Brands"} | Qty {item.quantity}</p>
+                      </div>
                     </div>
-                    <div className="min-w-0 flex-1">
-                      <strong className="block truncate text-white">{item.name}</strong>
-                      <p className="mt-1 truncate text-sm text-white/50">{item.brand || "Other Brands"} | Qty {item.quantity}</p>
-                    </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
-              <div className="flex flex-wrap justify-end gap-2">
+              <div className="retela-modal-footer">
                 {canPayOrder(order) ? (
-                  <button type="button" onClick={(event) => onPay(order, event)} className="rounded-xl bg-neonbrand px-4 py-2 text-xs font-bold text-black">
+                  <button type="button" onClick={(event) => onPay(order, event)} className="rounded-xl bg-emerald-600 px-4 py-2 text-xs font-bold text-white">
                     {payingOrderId === order.id ? "Opening..." : `Pay with ${paymentLabel(order.payment_method)}`}
                   </button>
                 ) : null}
-                <button type="button" onClick={onClose} className="rounded-xl border border-white/10 bg-white/[0.06] px-4 py-2 text-xs font-bold text-white/70 transition hover:text-neonbrand">Close</button>
+                <button type="button" onClick={onClose} className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-700 transition hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700">Close</button>
               </div>
-            </div>
-          ) : <p className="text-white/60">Order details are not available.</p>}
-        </div>
+            </>
+          ) : <p className="retela-modal-body text-slate-600">Order details are not available.</p>}
       </motion.div>
     </motion.div>
   );
@@ -2134,10 +2151,10 @@ function CustomerOrderModal({ loading, selectedOrder, displayNumber, onPay, payi
 
 function CancelOrderDialog({ order, cancelling, onClose, onConfirm }) {
   return (
-    <motion.div className="fixed inset-0 z-[130] grid place-items-center bg-slate-950/55 p-4 backdrop-blur-sm" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onMouseDown={onClose}>
-      <motion.div className="w-full max-w-sm rounded-[24px] border border-rose-100 bg-white p-5 shadow-[0_24px_80px_rgba(15,23,42,0.24)]" initial={{ opacity: 0, y: 14, scale: 0.96 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 14, scale: 0.96 }} transition={{ duration: 0.18 }} onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="cancel-order-title">
-        <div className="flex items-start gap-3">
-          <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl border border-rose-200 bg-rose-50 text-rose-700">
+    <motion.div className="retela-modal-backdrop z-[130]" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onMouseDown={onClose}>
+      <motion.div className="retela-modal-card modal-sm" initial={{ opacity: 0, y: 14, scale: 0.96 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 14, scale: 0.96 }} transition={{ duration: 0.18 }} onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="cancel-order-title">
+        <div className="retela-modal-body flex items-start gap-3">
+          <span className="retela-confirm-icon">
             <XCircle size={21} />
           </span>
           <div className="min-w-0">
@@ -2146,7 +2163,7 @@ function CancelOrderDialog({ order, cancelling, onClose, onConfirm }) {
             <p className="mt-2 text-xs font-bold text-slate-400">{orderNumber(order)}</p>
           </div>
         </div>
-        <div className="mt-5 flex flex-wrap justify-end gap-2">
+        <div className="retela-modal-footer">
           <button type="button" disabled={cancelling} onClick={onClose} className="inline-flex min-h-10 flex-1 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700 transition hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700 disabled:cursor-not-allowed disabled:opacity-60 sm:flex-none">
             Keep Order
           </button>
@@ -2193,6 +2210,15 @@ function Detail({ label, value }) {
     <div className="rounded-2xl border border-white/10 bg-white/[0.06] p-3">
       <span className="block text-xs font-bold uppercase tracking-[0.16em] text-white/40">{label}</span>
       <strong className="mt-1 block break-words text-white/80">{value || "Not provided"}</strong>
+    </div>
+  );
+}
+
+function ModalInfo({ label, value }) {
+  return (
+    <div className="retela-modal-info-card">
+      <span>{label}</span>
+      <strong>{value || "Not provided"}</strong>
     </div>
   );
 }

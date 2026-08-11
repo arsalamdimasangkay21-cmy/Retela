@@ -752,21 +752,21 @@ function DataManagementButton({ icon: Icon, title, description, onClick }) {
 function ClearDemoDataModal({ saving, onConfirm, onClose }) {
   return (
     <motion.div
-      className="fixed inset-0 z-[170] grid place-items-center overflow-y-auto bg-black/70 p-4 backdrop-blur-xl"
+      className="retela-modal-backdrop z-[170] bg-black/70"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       onMouseDown={saving ? undefined : onClose}
     >
       <motion.div
-        className="w-full max-w-lg rounded-[28px] border border-neonbrand/25 bg-slate-950 p-5 text-white shadow-[0_30px_110px_rgba(0,0,0,0.55),0_0_55px_rgba(56,255,136,0.14)] sm:p-6"
+        className="retela-modal-card retela-modal-dark modal-sm"
         initial={{ opacity: 0, scale: 0.94, y: 18 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.94, y: 18 }}
         transition={{ duration: 0.22, ease: "easeOut" }}
         onMouseDown={(event) => event.stopPropagation()}
       >
-        <div className="flex items-start gap-4">
+        <div className="retela-modal-body flex items-start gap-4">
           <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl border border-neonbrand/25 bg-neonbrand/10 text-neonbrand">
             <Trash2 size={22} />
           </span>
@@ -778,10 +778,10 @@ function ClearDemoDataModal({ saving, onConfirm, onClose }) {
             </p>
           </div>
         </div>
-        <div className="mt-5 rounded-2xl border border-white/10 bg-white/[0.055] p-4 text-sm text-white/62">
+        <div className="mx-[22px] rounded-2xl border border-white/10 bg-white/[0.055] p-4 text-sm text-white/62">
           After clearing, product, inventory, sales, orders, reports, archive, trash, and dashboard totals will start from empty data.
         </div>
-        <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+        <div className="retela-modal-footer">
           <button type="button" disabled={saving} onClick={onClose} className="rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm font-bold text-white transition hover:border-neonbrand/45 hover:text-neonbrand disabled:cursor-not-allowed disabled:opacity-60">
             Cancel
           </button>
