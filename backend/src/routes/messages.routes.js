@@ -7,6 +7,7 @@ import { loadSystemSettings } from "../utils/systemSettings.js";
 import { generateAIResponse } from "../utils/aiProvider.js";
 import { availableProductWhere, ensureProductInventoryColumns, nonDeletedProductWhere } from "../utils/productInventory.js";
 import { productImageExpression } from "../utils/productImages.js";
+import { createAdminNotification } from "../utils/adminNotifications.js";
 
 const router = Router();
 let messageStatusColumnsReady;
@@ -566,16 +567,13 @@ router.post("/", requireAuth, requireApproved, asyncHandler(async (req, res) => 
       "UPDATE conversations SET is_archived = FALSE, archived_at = NULL, updated_at = NOW() WHERE id = :conversationId",
       { conversationId }
     );
-    const notificationResult = await query(
-      "INSERT INTO notifications (type, title, body) VALUES ('message', 'New customer message', :body)",
-      { body: input.body.slice(0, 240) }
-    );
-    console.log("[admin notification created]", {
-      id: notificationResult.insertId,
+    await createAdminNotification({
       type: "message",
-      title: "New customer message"
+      title: "New customer message",
+      body: `${req.user.username || "A customer"} sent a new message.`,
+      customerId: req.user.id,
+      app: req.app
     });
-    req.app.get("io")?.to("admin").emit("notification:new", { id: notificationResult.insertId, type: "message", title: "New customer message", body: input.body, created_at: new Date().toISOString() });
   }
   req.app.get("io")?.to(`conversation:${conversationId}`).emit("message:new", { conversation_id: conversationId, sender_type: sender, body: input.body, mode: input.mode });
   res.status(201).json({ conversation_id: conversationId, sender_type: sender, body: input.body, delivery_status: "delivered" });
@@ -609,20 +607,12 @@ router.post("/ai", requireAuth, requireApproved, asyncHandler(async (req, res) =
       body: input.prompt,
       mode: "ai"
     });
-    const notificationResult = await query(
-      "INSERT INTO notifications (type, title, body) VALUES ('message', 'New customer message', :body)",
-      { body: input.prompt.slice(0, 240) }
-    );
-    adminMessageNotification = {
-      id: notificationResult.insertId,
+    adminMessageNotification = await createAdminNotification({
       type: "message",
       title: "New customer message",
-      body: input.prompt
-    };
-    console.log("[admin notification created]", {
-      id: notificationResult.insertId,
-      type: "message",
-      title: "New customer message"
+      body: `${req.user.username || "A customer"} sent a new message.`,
+      customerId: req.user.id,
+      emit: false
     });
   }
 

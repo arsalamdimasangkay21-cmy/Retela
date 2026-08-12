@@ -151,6 +151,12 @@ function normalizeProductRows(rows = []) {
   return Array.isArray(rows) ? rows.map(normalizeProductRow) : [];
 }
 
+function notificationRowsFromResponse(data) {
+  if (Array.isArray(data)) return data;
+  if (Array.isArray(data?.notifications)) return data.notifications;
+  return [];
+}
+
 function duplicateOptionMessage(label) {
   return `This ${label.toLowerCase()} already exists.`;
 }
@@ -163,6 +169,7 @@ export default function AdminDashboard({ active, onChange }) {
   const [orders, setOrders] = useState([]);
   const [users, setUsers] = useState([]);
   const [notifications, setNotifications] = useState([]);
+  const [notificationsLoading, setNotificationsLoading] = useState(false);
   const [returns, setReturns] = useState([]);
   const [reviews, setReviews] = useState([]);
   const [form, setForm] = useState(blankProduct);
@@ -239,7 +246,7 @@ export default function AdminDashboard({ active, onChange }) {
     setInventoryProducts(normalizeProductRows(inventoryRes.data));
     setOrders(orderRes.data);
     setUsers(userRes.data);
-    setNotifications(notificationRes.data);
+    setNotifications(notificationRowsFromResponse(notificationRes.data));
   }, [canUpdate, getShared]);
 
   const loadCatalogData = useCallback(async ({ cancelled, force = false } = {}) => {
@@ -271,13 +278,18 @@ export default function AdminDashboard({ active, onChange }) {
   }, [canUpdate, getShared]);
 
   const loadNotificationsData = useCallback(async ({ cancelled, force = false } = {}) => {
-    const [notificationRes, userRes] = await Promise.all([
-      getShared("/notifications", {}, { cacheMs: 0, force: true }),
-      getShared("/users", {}, { force })
-    ]);
-    if (!canUpdate(cancelled)) return;
-    setNotifications(notificationRes.data);
-    setUsers(userRes.data);
+    if (canUpdate(cancelled)) setNotificationsLoading(true);
+    try {
+      const [notificationRes, userRes] = await Promise.all([
+        getShared("/notifications", {}, { cacheMs: 0, force: true }),
+        getShared("/users", {}, { force })
+      ]);
+      if (!canUpdate(cancelled)) return;
+      setNotifications(notificationRowsFromResponse(notificationRes.data));
+      setUsers(userRes.data);
+    } finally {
+      if (canUpdate(cancelled)) setNotificationsLoading(false);
+    }
   }, [canUpdate, getShared]);
 
   const loadReviewsData = useCallback(async ({ cancelled, force = false } = {}) => {
@@ -366,6 +378,10 @@ export default function AdminDashboard({ active, onChange }) {
   }, [loadCatalogData, loadInventoryData]);
 
   const refreshActiveData = useCallback(() => loadActiveData(active, { force: true }), [active, loadActiveData]);
+
+  const markNotificationRead = useCallback((notificationId) => {
+    setNotifications((current) => current.map((row) => Number(row.id) === Number(notificationId) ? { ...row, is_read: true } : row));
+  }, []);
 
   async function saveProduct(event, resolvedForm = form, selectedImage = productImage) {
     event.preventDefault();
@@ -775,7 +791,7 @@ export default function AdminDashboard({ active, onChange }) {
   if (active === "Broadcasts") return <BroadcastsPage />;
   if (active === "Purchases") return <Card><h3 className="font-display text-xl font-bold">Purchases</h3><p className="mt-2 text-sm text-slate-500">Purchase tracking can be connected to supplier records when this module is ready.</p></Card>;
 
-  if (active === "Notifications") return <AdminNotifications rows={notifications} users={users} rejectingUserIds={rejectingUserIds} selectedRegistration={selectedRegistration} setSelectedRegistration={setSelectedRegistration} approveUser={approveUser} onChange={onChange} />;
+  if (active === "Notifications") return <AdminNotifications rows={notifications} loading={notificationsLoading} users={users} rejectingUserIds={rejectingUserIds} selectedRegistration={selectedRegistration} setSelectedRegistration={setSelectedRegistration} approveUser={approveUser} onChange={onChange} onNotificationRead={markNotificationRead} />;
   if (active === "Feedback") return <AdminFeedback reviews={reviews} />;
   if (active === "Returns") return <AdminReturns rows={returns} decideReturn={decideReturn} />;
   if (active === "Archive") return <ArchivePage onChanged={refreshActiveData} />;
@@ -3743,18 +3759,18 @@ function AdminLocations({ users }) {
   );
 }
 
-function AdminNotifications({ rows, users, rejectingUserIds = [], selectedRegistration, setSelectedRegistration, approveUser, onChange }) {
+function AdminNotifications({ rows, loading = false, users, rejectingUserIds = [], selectedRegistration, setSelectedRegistration, approveUser, onChange, onNotificationRead }) {
   const lockedRegistrationStatuses = new Set(["approved", "rejected"]);
 
   function isRegistrationNotification(row) {
-    return ["approval", "customer_registration"].includes(row.type) && row.title === "New customer registration";
+    return ["approval", "customer_registration", "registration"].includes(row.type) && row.title === "New customer registration";
   }
 
   function canDecideRegistration(registration) {
     return registration && !lockedRegistrationStatuses.has(registration.status);
   }
 
-  const adminNotificationTypes = new Set(["approval", "customer_registration", "feedback", "message", "order", "inventory", "refund"]);
+  const adminNotificationTypes = new Set(["approval", "customer_registration", "registration", "feedback", "message", "order", "order_cancelled", "payment", "inventory", "refund", "return"]);
   const adminRows = rows
     .filter((row) => adminNotificationTypes.has(row.type))
     .filter((row, index, source) => {
@@ -3794,18 +3810,22 @@ function AdminNotifications({ rows, users, rejectingUserIds = [], selectedRegist
   async function openAdminNotification(row) {
     await api.patch(`/notifications/${row.id}/read`).catch(() => {});
     clearGetCache("/notifications");
+    onNotificationRead?.(row.id);
     window.dispatchEvent(new CustomEvent("retela:notification-read", { detail: { id: row.id, type: row.type } }));
     if (row.type === "message") onChange?.("Messages");
-    else if (row.type === "order") onChange?.("Orders");
+    else if (["order", "order_cancelled", "payment"].includes(row.type)) onChange?.("Orders");
     else if (row.type === "inventory") onChange?.("Inventory");
-    else if (row.type === "approval" || row.type === "customer_registration") onChange?.("Customers");
+    else if (row.type === "approval" || row.type === "customer_registration" || row.type === "registration") onChange?.("Customers");
+    else if (row.type === "return" || row.type === "refund") onChange?.("Returns");
     else onChange?.("Notifications");
   }
 
   return (
     <>
       <div className="grid gap-4">
-        {adminRows.length ? adminRows.map((row) => {
+        {loading ? (
+          <Card><p className="text-sm font-semibold text-slate-500">Loading admin notifications...</p></Card>
+        ) : adminRows.length ? adminRows.map((row) => {
           const registration = isRegistrationNotification(row) ? registrationFromNotification(row) : null;
           const canDecide = canDecideRegistration(registration);
           return (
@@ -3843,7 +3863,7 @@ function AdminNotifications({ rows, users, rejectingUserIds = [], selectedRegist
               ) : null}
             </Card>
           );
-        }) : <Card><EmptyState title="No admin notifications yet" subtitle="Feedback, registrations, and messages will appear here." /></Card>}
+        }) : <Card><EmptyState title="No admin notifications yet" subtitle="Orders, registrations, messages, feedback, and returns will appear here." /></Card>}
       </div>
       {selectedRegistration ? (
         <div className="fixed inset-0 z-[70] grid place-items-center bg-black/70 p-4 backdrop-blur-sm">

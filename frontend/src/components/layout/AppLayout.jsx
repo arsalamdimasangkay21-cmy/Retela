@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Bell, CalendarDays, MessageCircle, Moon, ShoppingCart, Sun, UserCircle } from "lucide-react";
 import { api, cachedGet, clearGetCache } from "../../api/client";
 import { acquireSocket, releaseSocket } from "../../api/socket";
@@ -26,6 +26,32 @@ export default function AppLayout({ children, active, onChange }) {
   const [socket, setSocket] = useState(null);
   const lastActivityEmitRef = useRef(0);
 
+  const applyNotificationCounts = useCallback((rows = []) => {
+    const unread = rows.filter((row) => !row.is_read);
+    if (user?.role === "admin") {
+      setMessageCount(unread.filter((row) => row.type === "message").length);
+      setNotificationCount(unread.length);
+      return;
+    }
+    setMessageCount(0);
+    setNotificationCount(unread.length);
+  }, [user?.role]);
+
+  const refreshNotificationCounts = useCallback(() => {
+    if (!token) {
+      setNotificationCount(0);
+      setMessageCount(0);
+      return Promise.resolve();
+    }
+    clearGetCache("/notifications");
+    return cachedGet("/notifications", {}, { cacheMs: 0, retries: 1, force: true })
+      .then(({ data }) => applyNotificationCounts(Array.isArray(data) ? data : []))
+      .catch(() => {
+        setNotificationCount(0);
+        setMessageCount(0);
+      });
+  }, [applyNotificationCounts, token]);
+
   useEffect(() => {
     if (!token) {
       setSocket(null);
@@ -41,22 +67,18 @@ export default function AppLayout({ children, active, onChange }) {
     const handleNewRegistration = (payload) => {
       if (user?.role !== "admin") return;
       clearGetCache("/notifications");
-      setNotificationCount((count) => count + 1);
       setToast(payload);
       window.dispatchEvent(new CustomEvent("retela:notification-new", { detail: payload }));
+      refreshNotificationCounts();
     };
     const handleNewNotification = (payload) => {
-      if (user?.role === "admin" && !["customer_registration", "message", "feedback", "order", "inventory", "refund"].includes(payload?.type)) return;
+      if (user?.role === "admin" && !["approval", "customer_registration", "registration", "message", "feedback", "order", "order_cancelled", "payment", "inventory", "refund", "return", "system"].includes(payload?.type)) return;
       if (user?.role === "customer" && !["order", "broadcast"].includes(payload?.type)) return;
       clearGetCache("/notifications");
-      if (payload?.type === "message" && user?.role === "admin") {
-        setMessageCount((count) => count + 1);
-      } else {
-        setNotificationCount((count) => count + 1);
-      }
       setToast(payload);
       window.dispatchEvent(new CustomEvent("retela:notification-new", { detail: payload }));
-      if (["order", "inventory", "new_product"].includes(payload?.type)) {
+      refreshNotificationCounts();
+      if (["order", "order_cancelled", "payment", "inventory", "new_product"].includes(payload?.type)) {
         window.dispatchEvent(new CustomEvent("retela:data-change", { detail: payload }));
       }
     };
@@ -97,7 +119,7 @@ export default function AppLayout({ children, active, onChange }) {
       socket.off("shipping:update", handleShippingUpdate);
       socket.off("user:status", handleUserStatus);
     };
-  }, [socket, user?.role]);
+  }, [refreshNotificationCounts, socket, user?.role]);
 
   useEffect(() => {
     if (!socket || !user?.id) return undefined;
@@ -124,40 +146,17 @@ export default function AppLayout({ children, active, onChange }) {
       setMessageCount(0);
       return;
     }
-    let cancelled = false;
-    cachedGet("/notifications", {}, { cacheMs: 0, retries: 1, force: true })
-      .then(({ data }) => {
-        if (cancelled) return;
-        const unread = data.filter((row) => !row.is_read);
-        if (user?.role === "admin") {
-          setMessageCount(unread.filter((row) => row.type === "message").length);
-          setNotificationCount(unread.filter((row) => row.type !== "message").length);
-        } else {
-          setMessageCount(0);
-          setNotificationCount(unread.length);
-        }
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setNotificationCount(0);
-        setMessageCount(0);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [token, user?.role]);
+    refreshNotificationCounts();
+  }, [refreshNotificationCounts, token]);
 
   useEffect(() => {
     function handleNotificationRead(event) {
-      if (event.detail?.type === "message" && user?.role === "admin") {
-        setMessageCount((count) => Math.max(0, count - 1));
-        return;
-      }
-      setNotificationCount((count) => Math.max(0, count - 1));
+      clearGetCache("/notifications");
+      refreshNotificationCounts();
     }
     window.addEventListener("retela:notification-read", handleNotificationRead);
     return () => window.removeEventListener("retela:notification-read", handleNotificationRead);
-  }, [user?.role]);
+  }, [refreshNotificationCounts]);
 
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 30000);
@@ -225,9 +224,7 @@ export default function AppLayout({ children, active, onChange }) {
   async function openNotifications() {
     onChange("Notifications");
     if (user?.role === "customer") return;
-    if (!notificationCount) return;
-    setNotificationCount(0);
-    await api.patch("/notifications/read-all").catch(() => {});
+    await refreshNotificationCounts();
   }
 
   async function openMessages() {
@@ -239,16 +236,18 @@ export default function AppLayout({ children, active, onChange }) {
     }
     onChange("Messages");
     if (!messageCount) return;
-    setMessageCount(0);
     await api.patch("/notifications/read-type/message").catch(() => {});
+    await refreshNotificationCounts();
   }
 
   async function openToastTarget() {
     const target = toastTarget(toast?.type, user?.role);
+    const toastId = toast?.id;
     setToast(null);
     onChange(target);
     if (user?.role === "customer") return;
-    await api.patch("/notifications/read-all").catch(() => {});
+    if (toastId) await api.patch(`/notifications/${toastId}/read`).catch(() => {});
+    await refreshNotificationCounts();
   }
 
   function toggleCustomerTheme() {
@@ -330,10 +329,14 @@ export default function AppLayout({ children, active, onChange }) {
 function toastTarget(type, role) {
   if (type === "message") return role === "admin" ? "Messages" : "Notifications";
   if (type === "order") return "Orders";
+  if (type === "order_cancelled") return "Orders";
+  if (type === "payment") return "Orders";
   if (type === "inventory") return "Inventory";
   if (type === "new_product") return "Shop";
   if (type === "broadcast") return "Notifications";
   if (type === "approval") return "Notifications";
+  if (type === "registration") return "Notifications";
+  if (type === "return") return "Returns";
   if (type === "feedback") return "Notifications";
   return "Notifications";
 }

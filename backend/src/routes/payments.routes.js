@@ -4,6 +4,7 @@ import { z } from "zod";
 import { query, safeModifyColumn } from "../config/db.js";
 import { asyncHandler, HttpError } from "../utils/errors.js";
 import { requireApproved, requireAuth } from "../middleware/auth.js";
+import { createAdminNotification } from "../utils/adminNotifications.js";
 
 const router = Router();
 let paymentColumnsReady;
@@ -110,21 +111,13 @@ async function markOrderPaid({ orderId, transactionId, reference }) {
     "INSERT INTO notifications (user_id, type, title, body) VALUES (:userId, 'order', 'Payment received', :body)",
     { userId: rows[0].user_id, body: `Payment for Order #${orderId} was confirmed.` }
   );
-  const adminResult = await query(
-    "INSERT INTO notifications (type, title, body) VALUES ('order', 'Payment received', :body)",
-    { body: `Payment for Order #${orderId} was confirmed.` }
-  );
-  console.log("[admin notification created]", {
-    id: adminResult.insertId,
-    type: "order",
-    title: "Payment received"
-  });
-  return {
-    id: adminResult.insertId,
-    type: "order",
+  return createAdminNotification({
+    type: "payment",
     title: "Payment received",
-    body: `Payment for Order #${orderId} was confirmed.`
-  };
+    body: `Payment for Order #${orderId} was confirmed.`,
+    customerId: rows[0].user_id,
+    emit: false
+  });
 }
 
 async function markOrderFailed({ orderId, transactionId, reference }) {

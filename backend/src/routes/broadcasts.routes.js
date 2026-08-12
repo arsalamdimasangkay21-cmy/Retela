@@ -7,6 +7,7 @@ import { asyncHandler, HttpError } from "../utils/errors.js";
 import { sendEmail } from "../utils/email.js";
 import { sendSms } from "../utils/sms.js";
 import { getOpenAiRuntimeSettings } from "../utils/systemSettings.js";
+import { NOTIFICATION_TYPE_ENUM_SQL } from "../utils/adminNotifications.js";
 
 const router = Router();
 
@@ -154,7 +155,7 @@ async function ensureBroadcastSchema() {
       await query("ALTER TABLE notifications ADD CONSTRAINT fk_notifications_broadcast FOREIGN KEY (broadcast_id) REFERENCES broadcasts(id) ON DELETE SET NULL");
       await query("CREATE INDEX idx_notifications_broadcast ON notifications (broadcast_id)");
     }
-    await safeModifyColumn("notifications", "type", "type enum update", "ALTER TABLE notifications MODIFY type ENUM('approval','customer_registration','order','message','refund','new_product','inventory','system','feedback','broadcast') NOT NULL");
+    await safeModifyColumn("notifications", "type", "type enum update", `ALTER TABLE notifications MODIFY type ${NOTIFICATION_TYPE_ENUM_SQL} NOT NULL`);
   })().catch((error) => {
     broadcastSchemaReady = undefined;
     throw error;

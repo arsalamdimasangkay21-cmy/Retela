@@ -7,6 +7,7 @@ import { UPLOAD_ROOT } from "../config/uploads.js";
 import { comparePassword, createOtp, hashPassword, isBcryptHash } from "../utils/auth.js";
 import { sendOtpEmail } from "../utils/email.js";
 import { asyncHandler, HttpError } from "../utils/errors.js";
+import { createAdminNotification } from "../utils/adminNotifications.js";
 import { verificationFileStatus } from "../utils/verificationFiles.js";
 
 const uploadDir = UPLOAD_ROOT;
@@ -746,23 +747,12 @@ export const completeRegistration = asyncHandler(async (req, res) => {
     };
   });
 
-  const notificationBody = `${createdUser.username} registered and completed verification.`;
-  const notificationResult = await query(
-    "INSERT INTO notifications (user_id, type, title, body) VALUES (:userId, 'customer_registration', 'New customer registration', :body)",
-    { userId: createdUser.id, body: notificationBody }
-  );
-  console.log("[admin notification created]", {
-    id: notificationResult.insertId,
-    type: "customer_registration",
-    title: "New customer registration"
-  });
-  req.app.get("io")?.to("admin").emit("notification:new", {
-    id: notificationResult.insertId,
-    user_id: createdUser.id,
-    type: "customer_registration",
+  await createAdminNotification({
+    type: "registration",
     title: "New customer registration",
-    body: notificationBody,
-    created_at: new Date().toISOString()
+    body: `${createdUser.username} registered and is awaiting review.`,
+    customerId: createdUser.id,
+    app: req.app
   });
 
   res.status(201).json({

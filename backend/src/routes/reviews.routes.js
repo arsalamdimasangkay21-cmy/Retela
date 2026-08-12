@@ -4,6 +4,7 @@ import { query, safeModifyColumn } from "../config/db.js";
 import { asyncHandler, HttpError } from "../utils/errors.js";
 import { optionalAuth, requireApproved, requireAuth } from "../middleware/auth.js";
 import { upload } from "../middleware/upload.js";
+import { createAdminNotification, NOTIFICATION_TYPE_ENUM_SQL } from "../utils/adminNotifications.js";
 
 const router = Router();
 let notificationTypesReady;
@@ -12,7 +13,7 @@ let reviewColumnsReady;
 const feedbackCategories = ["Apparel Quality", "Delivery", "Customer Service", "Payment", "Overall Experience"];
 
 async function ensureNotificationTypes() {
-  notificationTypesReady ||= safeModifyColumn("notifications", "type", "type enum update", "ALTER TABLE notifications MODIFY type ENUM('approval','customer_registration','order','message','refund','new_product','inventory','system','feedback','broadcast') NOT NULL");
+  notificationTypesReady ||= safeModifyColumn("notifications", "type", "type enum update", `ALTER TABLE notifications MODIFY type ${NOTIFICATION_TYPE_ENUM_SQL} NOT NULL`);
   return notificationTypesReady;
 }
 
@@ -183,16 +184,13 @@ router.post("/", requireAuth, requireApproved, upload.single("image"), asyncHand
       imageUrl: req.file ? `/uploads/${req.file.filename}` : null
     }
   );
-  const notificationResult = await query(
-    "INSERT INTO notifications (type, title, body) VALUES ('feedback', 'New customer feedback', :body)",
-    { body: `${req.user.username} submitted ${input.rating} star ${input.category} feedback.` }
-  );
-  console.log("[admin notification created]", {
-    id: notificationResult.insertId,
+  await createAdminNotification({
     type: "feedback",
-    title: "New customer feedback"
+    title: "New customer feedback",
+    body: `${req.user.username} submitted feedback.`,
+    customerId: req.user.id,
+    app: req.app
   });
-  req.app.get("io")?.to("admin").emit("notification:new", { id: notificationResult.insertId, type: "feedback", title: "New customer feedback", body: `${req.user.username} submitted ${input.rating} star ${input.category} feedback.`, created_at: new Date().toISOString() });
   res.status(201).json({ message: "Feedback submitted" });
 }));
 

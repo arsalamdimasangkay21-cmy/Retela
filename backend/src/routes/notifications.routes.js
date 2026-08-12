@@ -3,9 +3,20 @@ import { query, safeModifyColumn } from "../config/db.js";
 import { asyncHandler } from "../utils/errors.js";
 import { requireAuth } from "../middleware/auth.js";
 import { productImageSelect, productImageUrlForRow } from "../utils/productImages.js";
+import { ADMIN_NOTIFICATION_TYPES, NOTIFICATION_TYPE_ENUM_SQL } from "../utils/adminNotifications.js";
 
 const router = Router();
 let notificationBroadcastSchemaReady;
+
+const ADMIN_TYPES_SQL = ADMIN_NOTIFICATION_TYPES.map((type) => `'${type}'`).join(", ");
+const REGISTRATION_TYPES_SQL = "'approval', 'customer_registration', 'registration'";
+
+function setDynamicNotificationHeaders(res) {
+  res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+  res.set("Pragma", "no-cache");
+  res.set("Expires", "0");
+  res.set("ETag", `"notifications-${Date.now()}"`);
+}
 
 function parseJson(value, fallback) {
   if (!value) return fallback;
@@ -102,7 +113,7 @@ async function ensureNotificationBroadcastSchema() {
       await query("ALTER TABLE notifications ADD COLUMN broadcast_id INT NULL AFTER product_id");
       await query("CREATE INDEX idx_notifications_broadcast ON notifications (broadcast_id)");
     }
-    await safeModifyColumn("notifications", "type", "type enum update", "ALTER TABLE notifications MODIFY type ENUM('approval','customer_registration','order','message','refund','new_product','inventory','system','feedback','broadcast') NOT NULL");
+    await safeModifyColumn("notifications", "type", "type enum update", `ALTER TABLE notifications MODIFY type ${NOTIFICATION_TYPE_ENUM_SQL} NOT NULL`);
     const broadcastRows = await query(
       `SELECT COLUMN_NAME
        FROM INFORMATION_SCHEMA.COLUMNS
@@ -164,15 +175,15 @@ router.use(requireAuth);
 
 router.get("/", asyncHandler(async (req, res) => {
   await ensureNotificationBroadcastSchema();
-  res.set("Cache-Control", "no-store");
+  setDynamicNotificationHeaders(res);
   const visibilityFilter = req.user.role === "customer"
     ? `WHERE n.user_id = :id
        AND n.type IN ('order', 'broadcast')`
     : `WHERE (
          n.user_id IS NULL
-         OR n.type IN ('approval', 'customer_registration')
+         OR n.type IN (${REGISTRATION_TYPES_SQL})
        )
-       AND n.type IN ('approval', 'customer_registration', 'message', 'feedback', 'order', 'inventory', 'refund')`;
+       AND n.type IN (${ADMIN_TYPES_SQL})`;
   const rows = await query(
     req.user.role === "customer"
       ? `SELECT
@@ -220,7 +231,7 @@ router.get("/", asyncHandler(async (req, res) => {
   const deduped = [];
   const seen = new Set();
   for (const row of rows) {
-    const isRegistration = ["approval", "customer_registration"].includes(row.type) && row.title === "New customer registration";
+    const isRegistration = ["approval", "customer_registration", "registration"].includes(row.type) && row.title === "New customer registration";
     const key = isRegistration
       ? `registration:${row.customerId || row.registration_id || row.user_id || row.email || row.phone || row.registration_email || row.registration_phone || row.id}`
       : `notification:${row.id}`;
@@ -228,7 +239,7 @@ router.get("/", asyncHandler(async (req, res) => {
     seen.add(key);
     deduped.push(row);
   }
-  console.log("[admin notifications]", {
+  console.log("[ADMIN NOTIFICATIONS FETCH]", {
     count: deduped.length
   });
   res.json(deduped);
@@ -236,7 +247,7 @@ router.get("/", asyncHandler(async (req, res) => {
 
 router.patch("/read-all", asyncHandler(async (req, res) => {
   await ensureNotificationBroadcastSchema();
-  res.set("Cache-Control", "no-store");
+  setDynamicNotificationHeaders(res);
   if (req.user.role === "customer") {
     await query(
       `UPDATE notifications
@@ -261,9 +272,9 @@ router.patch("/read-all", asyncHandler(async (req, res) => {
        SET is_read = true
        WHERE (
          user_id IS NULL
-         OR type IN ('approval', 'customer_registration')
+         OR type IN (${REGISTRATION_TYPES_SQL})
        )
-         AND type IN ('approval', 'customer_registration', 'message', 'feedback', 'order', 'inventory', 'refund')`
+         AND type IN (${ADMIN_TYPES_SQL})`
     );
   }
   res.json({ message: "Notifications marked as read" });
@@ -271,7 +282,7 @@ router.patch("/read-all", asyncHandler(async (req, res) => {
 
 router.patch("/read-type/:type", asyncHandler(async (req, res) => {
   await ensureNotificationBroadcastSchema();
-  res.set("Cache-Control", "no-store");
+  setDynamicNotificationHeaders(res);
   if (req.user.role === "customer") {
     await query(
       `UPDATE notifications
@@ -300,9 +311,9 @@ router.patch("/read-type/:type", asyncHandler(async (req, res) => {
        WHERE type = :type
          AND (
            user_id IS NULL
-           OR type IN ('approval', 'customer_registration')
+           OR type IN (${REGISTRATION_TYPES_SQL})
          )
-         AND type IN ('approval', 'customer_registration', 'message', 'feedback', 'order', 'inventory', 'refund')`,
+         AND type IN (${ADMIN_TYPES_SQL})`,
       { type: req.params.type }
     );
   }
@@ -311,7 +322,7 @@ router.patch("/read-type/:type", asyncHandler(async (req, res) => {
 
 router.patch("/:id/read", asyncHandler(async (req, res) => {
   await ensureNotificationBroadcastSchema();
-  res.set("Cache-Control", "no-store");
+  setDynamicNotificationHeaders(res);
   if (req.user.role === "admin") {
     await query(
       `UPDATE notifications
@@ -319,8 +330,9 @@ router.patch("/:id/read", asyncHandler(async (req, res) => {
        WHERE id = :id
          AND (
            user_id IS NULL
-           OR type IN ('approval', 'customer_registration')
-         )`,
+           OR type IN (${REGISTRATION_TYPES_SQL})
+         )
+         AND type IN (${ADMIN_TYPES_SQL})`,
       { id: req.params.id }
     );
   } else {
