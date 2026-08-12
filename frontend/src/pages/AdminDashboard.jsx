@@ -557,7 +557,6 @@ export default function AdminDashboard({ active, onChange }) {
     try {
       if (status === "rejected") {
         setRejectingUserIds((ids) => [...ids, id]);
-        await new Promise((resolve) => setTimeout(resolve, 760));
       }
       await api.patch(`/users/${id}/status`, { status });
       clearGetCache("/users");

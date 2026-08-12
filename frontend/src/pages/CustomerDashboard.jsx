@@ -17,6 +17,7 @@ import ProductImage from "../components/ProductImage";
 import { Button, Card, Field } from "../components/ui";
 import { resolveAssetUrl } from "../config/branding";
 import { useAuth } from "../context/AuthContext";
+import useBlockingLoader from "../hooks/useBlockingLoader";
 import { emitUserThemeChange, readUserTheme, saveUserTheme } from "../utils/userTheme";
 
 const assetUrl = (url) => resolveAssetUrl(url) || (!url ? "" : `${API_URL.replace(/\/api$/, "")}${url}`);
@@ -1590,6 +1591,24 @@ function SummaryLine({ label, value, highlight = false, strong = false }) {
 }
 
 function PaymentLoadingOverlay({ method }) {
+  const showBlockingLoader = useBlockingLoader(Boolean(method));
+
+  if (!showBlockingLoader) {
+    return (
+      <motion.div
+        className="fixed bottom-4 left-4 right-4 z-[180] mx-auto max-w-sm rounded-2xl border border-neonbrand/25 bg-[#07110d]/95 p-4 text-white shadow-2xl shadow-black/35 backdrop-blur-xl"
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: 12 }}
+      >
+        <p className="inline-flex items-center gap-2 text-sm font-bold">
+          <Loader2 size={16} className="animate-spin text-neonbrand" />
+          Still preparing {paymentLabel(method)} checkout...
+        </p>
+      </motion.div>
+    );
+  }
+
   return (
     <motion.div
       className="fixed inset-0 z-[180] grid place-items-center bg-black/78 p-4 backdrop-blur-2xl"

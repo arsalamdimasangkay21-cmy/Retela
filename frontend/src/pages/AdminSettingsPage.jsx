@@ -32,6 +32,7 @@ import {
 import { api, API_URL, cachedGet, clearGetCache, getApiErrorMessage } from "../api/client";
 import { ChangePasswordForm } from "../components/ChangePasswordForm";
 import { useAuth } from "../context/AuthContext";
+import useBlockingLoader from "../hooks/useBlockingLoader";
 import { emitUserThemeChange, readUserTheme, saveUserTheme } from "../utils/userTheme";
 
 const defaultSettings = {
@@ -260,6 +261,7 @@ export default function AdminSettingsPage({ onChange }) {
   const [toast, setToast] = useState(null);
   const [userTheme, setUserTheme] = useState(() => readUserTheme(user));
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
+  const showBlockingLoader = useBlockingLoader(loading);
   const restoreInputRef = useRef(null);
   const toastTimerRef = useRef(null);
 
@@ -484,10 +486,25 @@ export default function AdminSettingsPage({ onChange }) {
     }
   }
 
-  if (loading) {
+  if (showBlockingLoader) {
     return (
       <div className="grid gap-5 xl:grid-cols-2">
         {Array.from({ length: 6 }).map((_, index) => <div key={index} className="premium-card skeleton min-h-72 rounded-[28px]" />)}
+      </div>
+    );
+  }
+
+  if (loading) {
+    return (
+      <div className="settings-page grid gap-5">
+        <section className="relative overflow-hidden rounded-[32px] border border-neonbrand/20 bg-black/35 p-5 shadow-2xl shadow-black/30 backdrop-blur-2xl sm:p-7">
+          <p className="text-xs font-bold uppercase tracking-[0.24em] text-neonbrand/75">Admin Control Center</p>
+          <h1 className="mt-3 font-display text-3xl font-bold tracking-tight text-white sm:text-4xl">Settings</h1>
+          <p className="mt-2 text-sm font-semibold text-white/58">Still loading settings...</p>
+        </section>
+        <div className="grid gap-5 xl:grid-cols-2">
+          {Array.from({ length: 4 }).map((_, index) => <div key={index} className="premium-card skeleton min-h-56 rounded-[28px]" />)}
+        </div>
       </div>
     );
   }

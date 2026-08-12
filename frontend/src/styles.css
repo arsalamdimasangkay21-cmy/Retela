@@ -604,7 +604,7 @@ button {
 
 .premium-sidebar,
 .premium-topbar {
-  animation: fadeSlide 0.6s ease both;
+  animation: fadeSlide 260ms ease both;
 }
 
 .premium-topbar {
@@ -626,12 +626,12 @@ button {
   position: fixed;
   top: max(1rem, env(safe-area-inset-top));
   left: 1rem;
-  z-index: 80;
+  z-index: 90;
   display: grid;
-  width: 44px;
-  height: 44px;
-  min-width: 44px;
-  min-height: 44px;
+  width: 46px;
+  height: 46px;
+  min-width: 46px;
+  min-height: 46px;
   place-items: center;
   border: 1px solid #d8efe0;
   border-radius: 16px;
@@ -640,7 +640,14 @@ button {
   box-shadow: 0 14px 30px rgba(15, 23, 42, 0.16);
   opacity: 1;
   pointer-events: auto;
-  transition: border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
+  transition: border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease, background-color 180ms ease;
+}
+
+.retela-mobile-menu-button.is-open {
+  border-color: rgba(56, 255, 136, 0.5);
+  background: #14532d;
+  color: #ffffff;
+  box-shadow: 0 12px 28px rgba(5, 46, 22, 0.24);
 }
 
 .retela-mobile-menu-button:active {
@@ -659,7 +666,7 @@ button {
   padding: 1rem;
   animation: none;
   will-change: transform;
-  transition: width 300ms ease, padding 300ms ease, transform 300ms ease, background-color 300ms ease, border-color 300ms ease, color 300ms ease, box-shadow 300ms ease;
+  transition: width 260ms ease, padding 260ms ease, transform 260ms cubic-bezier(.22, 1, .36, 1), background-color 260ms ease, border-color 260ms ease, color 260ms ease, box-shadow 260ms ease;
 }
 
 .retela-sidebar-desktop-collapsed {
@@ -709,8 +716,8 @@ button {
     top: 0 !important;
     bottom: auto !important;
     left: 0 !important;
-    width: min(86vw, 340px) !important;
-    max-width: min(86vw, 340px) !important;
+    width: min(82vw, 320px) !important;
+    max-width: calc(100vw - 48px) !important;
     height: 100vh;
     height: 100dvh;
     max-height: 100vh !important;
@@ -719,10 +726,14 @@ button {
     overflow-y: auto !important;
     overscroll-behavior: contain;
     border-radius: 0 24px 24px 0 !important;
-    padding: max(1rem, env(safe-area-inset-top)) 1rem calc(1rem + env(safe-area-inset-bottom)) !important;
+    padding: calc(16px + env(safe-area-inset-top)) 1rem calc(16px + env(safe-area-inset-bottom)) !important;
     opacity: 1 !important;
     -webkit-overflow-scrolling: touch;
-    transition: transform 300ms ease, background-color 300ms ease, border-color 300ms ease, color 300ms ease, box-shadow 300ms ease;
+    transition: transform 260ms cubic-bezier(.22, 1, .36, 1), background-color 220ms ease, border-color 220ms ease, color 220ms ease, box-shadow 260ms ease;
+  }
+
+  .retela-sidebar-close-button {
+    display: none !important;
   }
 
   .retela-sidebar-mobile-open {
@@ -730,7 +741,7 @@ button {
   }
 
   .retela-sidebar-mobile-closed {
-    transform: translateX(-100%) !important;
+    transform: translateX(-105%) !important;
   }
 
   .retela-sidebar-panel nav {
@@ -743,6 +754,24 @@ button {
   .retela-sidebar-panel .sidebar-logout {
     flex-shrink: 0;
     margin-bottom: max(0.25rem, env(safe-area-inset-bottom));
+  }
+
+  .retela-sidebar-overlay {
+    background: rgba(15, 23, 42, 0.35);
+    backdrop-filter: blur(2px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .premium-sidebar,
+  .premium-topbar,
+  .retela-mobile-menu-button,
+  .retela-sidebar-panel,
+  .retela-sidebar-overlay,
+  .premium-sidebar .sidebar-nav-item,
+  .premium-sidebar .sidebar-logout {
+    animation: none !important;
+    transition-duration: 1ms !important;
   }
 }
 
