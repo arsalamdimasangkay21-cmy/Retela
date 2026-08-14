@@ -3717,14 +3717,17 @@ function orderButtonClass(status) {
 
 function orderBadgeClass(status) {
   const styles = {
-    pending: "bg-amber-50 text-amber-700",
-    approved: "bg-emerald-50 text-emerald-700",
-    processing: "bg-blue-50 text-bluebrand",
-    ready: "bg-amber-50 text-amber-700",
-    completed: "bg-slate-900 text-white",
-    cancelled: "bg-rose-50 text-rose-700"
+    pending: "border border-[#FDE68A] bg-[#FEF3C7] text-[#92400E]",
+    awaiting_payment: "border border-[#FDE68A] bg-[#FEF3C7] text-[#92400E]",
+    paid: "border border-[#BFDBFE] bg-[#DBEAFE] text-[#1D4ED8]",
+    approved: "border border-[#BFDBFE] bg-[#DBEAFE] text-[#1D4ED8]",
+    processing: "border border-[#BFDBFE] bg-[#DBEAFE] text-[#1D4ED8]",
+    ready: "border border-[#BAE6FD] bg-[#E0F2FE] text-[#0369A1]",
+    completed: "border border-[#BBF7D0] bg-[#DCFCE7] text-[#166534]",
+    cancelled: "border border-[#FECACA] bg-[#FEE2E2] text-[#B91C1C]",
+    payment_failed: "border border-[#FECACA] bg-[#FEE2E2] text-[#B91C1C]"
   };
-  return styles[status] || "bg-white text-bluebrand";
+  return styles[status] || "border border-[#BFDBFE] bg-[#DBEAFE] text-[#1D4ED8]";
 }
 
 function orderStatusLabel(status) {
