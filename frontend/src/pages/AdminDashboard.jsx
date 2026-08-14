@@ -3537,10 +3537,9 @@ function CustomersResponsiveView({ rows, rejectingUserIds = [], onApprove, onVie
                   <td className="customer-nowrap">{formatBirthday(customer.birthday)}</td>
                   <td className="customer-nowrap">{customer.gender || "-"}</td>
                   <td>
-                    <CustomerActions
+                    <CustomerTableActions
                       customer={customer}
                       disabled={rejectingUserIds.includes(customer.id)}
-                      onApprove={onApprove}
                       onView={onView}
                       onDelete={onDelete}
                     />
@@ -3565,6 +3564,32 @@ function CustomersResponsiveView({ rows, rejectingUserIds = [], onApprove, onVie
         ))}
       </div>
     </Card>
+  );
+}
+
+function CustomerTableActions({ customer, disabled, onView, onDelete }) {
+  return (
+    <div className="customer-table-actions">
+      <button
+        type="button"
+        onClick={() => onView?.(customer.id)}
+        className="customer-action-view"
+        aria-label={`View customer ${customer.username || customer.id}`}
+        title="View customer"
+      >
+        <Eye size={17} />
+      </button>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => onDelete?.(customer.id)}
+        className="customer-action-delete"
+        aria-label={`Delete customer ${customer.username || customer.id}`}
+        title="Delete customer"
+      >
+        <Trash2 size={17} />
+      </button>
+    </div>
   );
 }
 
@@ -3638,33 +3663,6 @@ function CustomerApprovalStatus({ status }) {
     <span className={`customer-approval-badge is-${status || "pending"}`}>
       {status === "pending_otp" ? "Awaiting email OTP" : registrationStatusLabel(status)}
     </span>
-  );
-}
-
-function CustomerActions({ customer, disabled, onApprove, onView, onDelete }) {
-  return (
-    <div className="customer-actions">
-      <CustomerApprovalControl customer={customer} disabled={disabled} onApprove={onApprove} />
-      <button
-        type="button"
-        onClick={() => onView?.(customer.id)}
-        className="customer-action-view"
-        aria-label={`View customer ${customer.username || customer.id}`}
-        title="View customer"
-      >
-        <Eye size={17} />
-      </button>
-      <button
-        type="button"
-        disabled={disabled}
-        onClick={() => onDelete?.(customer.id)}
-        className="customer-action-delete"
-        aria-label={`Delete customer ${customer.username || customer.id}`}
-        title="Delete customer"
-      >
-        <Trash2 size={17} />
-      </button>
-    </div>
   );
 }
 

@@ -4634,6 +4634,14 @@ button {
   overflow: hidden;
 }
 
+.admin-customers-card:not(.admin-customers-filter-card) {
+  border: 1px solid #d9eee2 !important;
+  border-radius: 18px !important;
+  background: #ffffff !important;
+  padding: 0 !important;
+  box-shadow: 0 16px 34px rgba(18, 92, 55, 0.08) !important;
+}
+
 .admin-customers-filter-card {
   display: grid;
   gap: 14px;
@@ -4823,6 +4831,8 @@ button {
   max-width: 100%;
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
+  border-radius: inherit;
+  background: #ffffff;
 }
 
 .customers-table {
@@ -4836,28 +4846,33 @@ button {
 
 .customers-table th,
 .customers-table td {
-  border-bottom: 1px solid #e2e8f0;
-  padding: 14px 12px;
+  border-bottom: 1px solid #e5eee8;
+  padding: 13px 12px;
   text-align: left;
   vertical-align: middle;
 }
 
 .customers-table th {
-  background: #f8fafc;
-  color: #64748b;
+  background: #f4fbf7;
+  color: #496a5d;
   font-size: 0.72rem;
-  font-weight: 800;
-  letter-spacing: 0.04em;
+  font-weight: 900;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   white-space: nowrap;
 }
 
 .customers-table tbody tr:hover {
-  background: #f8fafc;
+  background: #f8fcfa;
 }
 
 .customers-table tbody tr:last-child td {
   border-bottom: 0;
+}
+
+.customers-table th:last-child,
+.customers-table td:last-child {
+  text-align: center;
 }
 
 .customer-col-id {
@@ -4897,7 +4912,7 @@ button {
 }
 
 .customer-col-actions {
-  width: 150px;
+  width: 112px;
 }
 
 .customer-cell-id,
@@ -4974,14 +4989,20 @@ button {
   font-size: 0.78rem;
 }
 
-.customer-actions {
+.customer-actions,
+.customer-table-actions {
   display: flex;
   align-items: center;
   gap: 8px;
   flex-wrap: nowrap;
 }
 
+.customer-table-actions {
+  justify-content: center;
+}
+
 .customer-actions button,
+.customer-table-actions button,
 .customer-action-view,
 .customer-action-delete,
 .customer-action-approve {
@@ -4993,11 +5014,15 @@ button {
   transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
 }
 
-.customer-actions button:hover {
+.customer-actions button:hover,
+.customer-table-actions button:hover {
   transform: translateY(-1px);
 }
 
-.customer-actions button:focus-visible {
+.customer-actions button:focus-visible,
+.customer-table-actions button:focus-visible,
+.customer-action-view:focus-visible,
+.customer-action-delete:focus-visible {
   outline: 3px solid rgba(37, 99, 235, 0.28);
   outline-offset: 2px;
 }
@@ -5593,6 +5618,24 @@ button {
 
   .customer-mobile-view {
     display: block;
+  }
+}
+
+@media (min-width: 641px) and (max-width: 768px) {
+  .admin-customers-card:not(.admin-customers-filter-card) {
+    border: 1px solid #d9eee2 !important;
+    border-radius: 18px !important;
+    background: #ffffff !important;
+    padding: 0 !important;
+    box-shadow: 0 16px 34px rgba(18, 92, 55, 0.08) !important;
+  }
+
+  .customer-desktop-view {
+    display: block;
+  }
+
+  .customer-mobile-view {
+    display: none;
   }
 }
 
