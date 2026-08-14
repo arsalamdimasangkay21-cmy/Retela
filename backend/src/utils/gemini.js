@@ -1,6 +1,7 @@
 import { HttpError } from "./errors.js";
 
 const DEFAULT_MODEL = "gemini-2.5-flash";
+const DEFAULT_TIMEOUT_MS = 15000;
 
 function safeProviderErrorText(value) {
   return String(value || "")
@@ -10,7 +11,12 @@ function safeProviderErrorText(value) {
 }
 
 function getGeminiApiKey() {
-  return process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "";
+  return process.env.GEMINI_API_KEY?.trim() || "";
+}
+
+function providerTimeoutSignal() {
+  const timeoutMs = Number(process.env.AI_PROVIDER_TIMEOUT_MS || DEFAULT_TIMEOUT_MS);
+  return AbortSignal.timeout(Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : DEFAULT_TIMEOUT_MS);
 }
 
 function productLine(product) {
@@ -36,7 +42,7 @@ export async function generateGeminiResult({ prompt, products, history, orders =
   const apiKey = getGeminiApiKey();
   if (!apiKey) return null;
 
-  const model = process.env.GEMINI_MODEL || DEFAULT_MODEL;
+  const model = process.env.GEMINI_MODEL?.trim() || DEFAULT_MODEL;
   const inventory = products.length
     ? products.slice(0, 30).map((product, index) => `${index + 1}. ${productLine(product)}`).join("\n")
     : "No apparel items are currently in stock.";
@@ -79,6 +85,7 @@ export async function generateGeminiResult({ prompt, products, history, orders =
       "Content-Type": "application/json",
       "x-goog-api-key": apiKey
     },
+    signal: providerTimeoutSignal(),
     body: JSON.stringify({
       contents: [
         {

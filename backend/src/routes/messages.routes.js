@@ -27,6 +27,7 @@ const cannedAdminReplies = [
 
 const availabilityPattern = /available|avail|stock|meron|size|do you have|mayroon|available pa|pa ba/i;
 const sizePattern = /\b(xs|s|m|l|xl|xxl|free size|free)\b/i;
+const assistantUnavailableMessage = "Retela Assistant is temporarily unavailable. Please try again shortly.";
 
 async function ensureMessagingIdentityColumns() {
   messagingIdentityColumnsReady ||= (async () => {
@@ -699,15 +700,20 @@ router.post("/ai", requireAuth, requireApproved, asyncHandler(async (req, res) =
       getCustomerProfile(req.user.id),
       getConversationHistory(conversation.id)
     ]);
-    const aiResult = await generateAIResponse(input.prompt, {
-      products: availableProducts,
-      history,
-      orders,
-      settings: settingsResult.config,
-      customer: customerProfile
-    });
+    let aiResult;
+    try {
+      aiResult = await generateAIResponse(input.prompt, {
+        products: availableProducts,
+        history,
+        orders,
+        settings: settingsResult.config,
+        customer: customerProfile
+      });
+    } catch (error) {
+      throw new HttpError(error.status || 503, assistantUnavailableMessage);
+    }
     const body = aiResult.body;
-    if (!body) throw new HttpError(503, "AI provider is not configured or unavailable. Contact administrator.");
+    if (!body) throw new HttpError(503, assistantUnavailableMessage);
 
     if (latestAi?.body && similarityRatio(latestAi.body, body) >= 0.9) {
       return res.json({ conversation_id: conversation.id, body: latestAi.body, provider: latestAi.ai_provider || aiResult.provider, admin_takeover: false, duplicate: true, suggestions: [], products: availableProducts.slice(0, 12) });

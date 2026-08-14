@@ -2,6 +2,7 @@ import { HttpError } from "./errors.js";
 import { getOpenAiRuntimeSettings } from "./systemSettings.js";
 
 const DEFAULT_MODEL = "gpt-4o-mini";
+const DEFAULT_TIMEOUT_MS = 15000;
 
 function safeProviderErrorText(value) {
   return String(value || "")
@@ -27,16 +28,20 @@ function productLine(product) {
 }
 
 export async function isOpenAiConfigured() {
-  const runtime = await getOpenAiRuntimeSettings();
-  return Boolean(runtime.apiKey);
+  return Boolean(process.env.OPENAI_API_KEY?.trim());
+}
+
+function providerTimeoutSignal() {
+  const timeoutMs = Number(process.env.AI_PROVIDER_TIMEOUT_MS || DEFAULT_TIMEOUT_MS);
+  return AbortSignal.timeout(Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : DEFAULT_TIMEOUT_MS);
 }
 
 export async function generateOpenAiResult({ prompt, products, history, orders = [], settings = {}, customer = {} }) {
   const runtime = await getOpenAiRuntimeSettings();
-  const apiKey = runtime.apiKey;
+  const apiKey = process.env.OPENAI_API_KEY?.trim() || "";
   if (!apiKey) return null;
 
-  const model = process.env.OPENAI_MODEL || DEFAULT_MODEL;
+  const model = process.env.OPENAI_MODEL?.trim() || DEFAULT_MODEL;
   const inventory = products.length
     ? products.slice(0, 30).map((product, index) => `${index + 1}. ${productLine(product)}`).join("\n")
     : "No apparel items are currently in stock.";
@@ -65,6 +70,7 @@ export async function generateOpenAiResult({ prompt, products, history, orders =
       "Authorization": `Bearer ${apiKey}`,
       "Content-Type": "application/json"
     },
+    signal: providerTimeoutSignal(),
     body: JSON.stringify({
       model,
       temperature: Number(runtime.temperature ?? 0.25),

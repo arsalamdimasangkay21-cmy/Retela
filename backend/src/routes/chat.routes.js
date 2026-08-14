@@ -27,13 +27,18 @@ router.post("/", asyncHandler(async (req, res) => {
     )
   ]);
   const availableProducts = products.filter((item) => Number(item.stock || 0) > 0);
-  const response = await generateAIResponse(message, {
-    products: availableProducts,
-    history: [],
-    orders: [],
-    settings: config,
-    customer: {}
-  });
+  let response;
+  try {
+    response = await generateAIResponse(message, {
+      products: availableProducts,
+      history: [],
+      orders: [],
+      settings: config,
+      customer: {}
+    });
+  } catch (error) {
+    throw new HttpError(error.status || 503, "Retela Assistant is temporarily unavailable. Please try again shortly.");
+  }
 
   res.json({
     reply: response.body,

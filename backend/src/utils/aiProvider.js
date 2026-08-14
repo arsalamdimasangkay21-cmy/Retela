@@ -1,10 +1,9 @@
 import { HttpError } from "./errors.js";
 import { query } from "../config/db.js";
 import { generateGeminiResult, isGeminiConfigured } from "./gemini.js";
-import { generateOpenAiResult } from "./openai.js";
-import { getOpenAiRuntimeSettings, loadSystemSettings } from "./systemSettings.js";
+import { generateOpenAiResult, isOpenAiConfigured } from "./openai.js";
 
-const PROVIDERS = new Set(["openai", "gemini", "auto"]);
+const PROVIDERS = new Set(["openai", "gemini"]);
 
 let lastProviderUsed = "";
 let lastProviderStatus = "Not checked";
@@ -14,32 +13,27 @@ let startupDiagnosticsLogged = false;
 function logAIStartupDiagnostics() {
   if (startupDiagnosticsLogged) return;
   startupDiagnosticsLogged = true;
-  console.info("[AI config]", {
-    geminiApiKeyEnvConfigured: Boolean(process.env.GEMINI_API_KEY),
-    googleApiKeyEnvConfigured: Boolean(process.env.GOOGLE_API_KEY),
-    openaiApiKeyEnvConfigured: Boolean(process.env.OPENAI_API_KEY),
-    geminiModel: process.env.GEMINI_MODEL || "gemini-2.5-flash",
-    openaiModel: process.env.OPENAI_MODEL || "gpt-4o-mini",
-    providerSelection: "system_settings.ai.aiProvider",
-    providerSelectionEnvConfigured: false
-  });
+  console.log("[AI] Gemini configured:", Boolean(process.env.GEMINI_API_KEY?.trim()));
+  console.log("[AI] OpenAI configured:", Boolean(process.env.OPENAI_API_KEY?.trim()));
+  console.log("[AI] Preferred provider:", normalizeProvider(process.env.AI_PROVIDER));
+  console.log("[AI] Gemini model:", process.env.GEMINI_MODEL?.trim() || "gemini-2.5-flash");
+  console.log("[AI] OpenAI model:", process.env.OPENAI_MODEL?.trim() || "gpt-4o-mini");
 }
 
 function normalizeProvider(value) {
-  const provider = String(value || "auto").trim().toLowerCase();
-  return PROVIDERS.has(provider) ? provider : "auto";
+  const provider = String(value || "gemini").trim().toLowerCase();
+  return PROVIDERS.has(provider) ? provider : "gemini";
 }
 
 function providerLabel(provider) {
   if (provider === "openai") return "OpenAI";
   if (provider === "gemini") return "Gemini";
-  return "Auto";
+  return "Gemini";
 }
 
-async function getProviderConfig(contextProvider) {
+function getProviderConfig(contextProvider) {
   if (contextProvider) return normalizeProvider(contextProvider);
-  const { config } = await loadSystemSettings();
-  return normalizeProvider(config.ai?.aiProvider);
+  return normalizeProvider(process.env.AI_PROVIDER);
 }
 
 async function runOpenAi(message, context) {
@@ -67,6 +61,16 @@ function markProviderUsed(provider, status = "Ready") {
   lastProviderStatus = status;
   lastProviderCheckedAt = new Date().toISOString();
   console.info(`[AI] Provider used: ${providerLabel(provider)}`);
+}
+
+function providerOrder(preferredProvider) {
+  return preferredProvider === "openai" ? ["openai", "gemini"] : ["gemini", "openai"];
+}
+
+function hasProviderConfig(provider) {
+  if (provider === "gemini") return Boolean(process.env.GEMINI_API_KEY?.trim());
+  if (provider === "openai") return Boolean(process.env.OPENAI_API_KEY?.trim());
+  return false;
 }
 
 function markProviderFailure(error) {
@@ -125,57 +129,57 @@ logAIStartupDiagnostics();
 export async function generateAIResponse(message, context = {}) {
   logAIStartupDiagnostics();
   const start = Date.now();
-  const selectedProvider = await getProviderConfig(context.provider);
+  const selectedProvider = getProviderConfig(context.provider);
+  const hasGemini = hasProviderConfig("gemini");
+  const hasOpenAI = hasProviderConfig("openai");
 
-  try {
-    let result;
-    if (selectedProvider === "openai") {
-      try {
-        result = await runOpenAi(message, context);
-      } catch (openAiError) {
-        logProviderFailure("openai", openAiError);
-        throw openAiError;
-      }
-    } else if (selectedProvider === "gemini") {
-      try {
-        result = await runGemini(message, context);
-      } catch (geminiError) {
-        logProviderFailure("gemini", geminiError);
-        throw geminiError;
-      }
-    } else {
-      try {
-        result = await runOpenAi(message, context);
-      } catch (openAiError) {
-        logProviderFailure("openai", openAiError, "in auto mode; falling back to Gemini");
-        try {
-          result = await runGemini(message, context);
-        } catch (geminiError) {
-          logProviderFailure("gemini", geminiError, "after OpenAI fallback");
-          throw geminiError;
-        }
-      }
+  if (!hasGemini && !hasOpenAI) {
+    const error = new HttpError(503, "No AI provider is configured.");
+    markProviderFailure(error);
+    throw error;
+  }
+
+  let lastError = null;
+  const attempted = [];
+
+  for (const provider of providerOrder(selectedProvider)) {
+    if (!hasProviderConfig(provider)) {
+      console.info(`[AI] ${providerLabel(provider)} skipped: missing API key`);
+      continue;
     }
 
-    const responseTime = Date.now() - start;
-    markProviderUsed(result.provider);
-    return {
-      body: result.body,
-      provider: result.provider,
-      responseTime,
-      tokenUsage: result.tokenUsage
-    };
-  } catch (error) {
-    markProviderFailure(error);
-    throw new HttpError(error.status || 503, "AI provider is not configured or unavailable. Contact administrator.");
+    attempted.push(provider);
+    console.info(`[AI] Trying ${providerLabel(provider)}`);
+    try {
+      const result = provider === "gemini"
+        ? await runGemini(message, context)
+        : await runOpenAi(message, context);
+      const responseTime = Date.now() - start;
+      markProviderUsed(result.provider);
+      console.info(`[AI] ${providerLabel(result.provider)} response generated successfully`);
+      return {
+        body: result.body,
+        provider: result.provider,
+        responseTime,
+        tokenUsage: result.tokenUsage
+      };
+    } catch (error) {
+      lastError = error;
+      markProviderFailure(error);
+      logProviderFailure(provider, error);
+      const nextProvider = providerOrder(selectedProvider).find((candidate) => candidate !== provider && hasProviderConfig(candidate) && !attempted.includes(candidate));
+      if (nextProvider) console.info(`[AI] ${providerLabel(provider)} failed, trying ${providerLabel(nextProvider)}`);
+    }
   }
+
+  const unavailableError = new HttpError(503, "AI providers are temporarily unavailable.");
+  unavailableError.cause = lastError;
+  throw unavailableError;
 }
 
 export async function getAIProviderStatus(settings = null) {
-  const loaded = settings ? { config: settings } : await loadSystemSettings();
-  const provider = normalizeProvider(loaded.config.ai?.aiProvider);
-  const openAiRuntime = await getOpenAiRuntimeSettings();
-  const openaiConfigured = Boolean(openAiRuntime.apiKey);
+  const provider = normalizeProvider(process.env.AI_PROVIDER || settings?.ai?.aiProvider);
+  const openaiConfigured = await isOpenAiConfigured();
   const geminiConfigured = isGeminiConfigured();
   let durableLastProvider = lastProviderUsed;
   if (!durableLastProvider) {
@@ -188,17 +192,12 @@ export async function getAIProviderStatus(settings = null) {
          LIMIT 1`
       );
       durableLastProvider = normalizeProvider(rows[0]?.ai_provider || "");
-      if (durableLastProvider === "auto") durableLastProvider = "";
     } catch {
       durableLastProvider = "";
     }
   }
 
-  const ready = provider === "openai"
-    ? openaiConfigured
-    : provider === "gemini"
-      ? geminiConfigured
-      : openaiConfigured || geminiConfigured;
+  const ready = openaiConfigured || geminiConfigured;
 
   return {
     currentProvider: providerLabel(provider),
