@@ -2048,6 +2048,15 @@ button {
   min-width: 0;
 }
 
+.retela-customer-filter-search {
+  min-width: 0;
+}
+
+.retela-customer-filter-control {
+  min-width: 0;
+  width: 100%;
+}
+
 .retela-product-card {
   width: 100%;
   max-width: 100%;
@@ -2099,6 +2108,10 @@ button {
   min-width: 0;
 }
 
+.retela-product-card-meta [aria-hidden="true"] {
+  flex: 0 0 auto;
+}
+
 .retela-product-card-price {
   font-size: 1rem;
   line-height: 1.15;
@@ -2147,6 +2160,10 @@ button {
 
 .retela-product-action-button:active {
   transform: scale(0.98);
+}
+
+.retela-view-label-short {
+  display: none;
 }
 
 .retela-product-action-view {
@@ -2209,6 +2226,92 @@ button {
 
   .retela-shop-card {
     padding: 10px !important;
+  }
+
+  .retela-shop-filter-panel {
+    gap: 8px !important;
+    margin-bottom: 10px !important;
+  }
+
+  .retela-shop-filter-header {
+    gap: 8px !important;
+  }
+
+  .retela-shop-filter-header p {
+    font-size: 0.66rem;
+    letter-spacing: 0.14em;
+  }
+
+  .retela-shop-filter-header h3 {
+    margin-top: 2px !important;
+    font-size: 1.35rem;
+    line-height: 1.1;
+  }
+
+  .retela-shop-clear-button {
+    min-height: 36px;
+    border-radius: 12px !important;
+    padding: 0 10px !important;
+    font-size: 0.72rem !important;
+  }
+
+  .retela-customer-filter-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 8px !important;
+  }
+
+  .retela-customer-filter-search {
+    grid-column: 1 / -1;
+    min-height: 42px;
+    border-radius: 12px !important;
+    gap: 8px !important;
+    padding: 0 10px !important;
+  }
+
+  .retela-customer-filter-search input {
+    font-size: 0.8rem !important;
+  }
+
+  .retela-customer-filter-control {
+    height: 42px;
+    border-radius: 12px !important;
+    padding: 0 10px !important;
+    font-size: 0.8rem !important;
+  }
+
+  .retela-filter-brand {
+    order: 2;
+  }
+
+  .retela-filter-category {
+    order: 3;
+  }
+
+  .retela-filter-size {
+    order: 4;
+  }
+
+  .retela-filter-sort {
+    order: 5;
+  }
+
+  .retela-filter-min-price {
+    order: 6;
+  }
+
+  .retela-filter-max-price {
+    order: 7;
+  }
+
+  .retela-customer-filter-stock {
+    grid-column: 1 / -1;
+    order: 8;
+  }
+
+  .retela-shop-filter-panel > p {
+    margin-top: 0;
+    font-size: 0.78rem;
+    line-height: 1.2;
   }
 
   .retela-shop-product-grid {
@@ -2343,6 +2446,7 @@ button {
   }
 
   .retela-product-card-actions {
+    grid-template-columns: minmax(0, 1.45fr) minmax(0, 0.75fr);
     gap: 6px;
     padding-top: 6px;
   }
@@ -2350,7 +2454,23 @@ button {
   .retela-product-card-actions > button {
     min-height: 34px;
     padding: 0 6px;
-    font-size: 0.68rem;
+    font-size: 0.64rem;
+  }
+
+  .retela-view-label-full {
+    display: inline;
+  }
+
+  .retela-view-label-short {
+    display: none;
+  }
+
+  .retela-product-action-buy {
+    display: none;
+  }
+
+  .retela-product-action-view svg {
+    display: none;
   }
 
   .retela-product-details-backdrop {

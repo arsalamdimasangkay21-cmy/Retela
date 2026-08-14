@@ -1204,13 +1204,13 @@ function Shop({ products, addToCart, buyNow, filters, setFilters, filterOptions,
   return (
     <>
       <Card className="retela-shop-card">
-        <div className="mb-4 grid gap-3">
-          <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="retela-shop-filter-panel mb-4 grid gap-3">
+          <div className="retela-shop-filter-header flex flex-wrap items-center justify-between gap-3">
             <div>
               <p className="text-xs font-bold uppercase tracking-[0.18em] text-neonbrand/75">Shop search</p>
               <h3 className="mt-1 font-display text-2xl font-bold text-white">Shop Apparel</h3>
             </div>
-            <button type="button" onClick={clearFilters} className="rounded-2xl border border-white/10 bg-white/[0.06] px-3 py-2 text-xs font-bold text-white/70 transition hover:border-neonbrand/40 hover:text-neonbrand">
+            <button type="button" onClick={clearFilters} className="retela-shop-clear-button rounded-2xl border border-white/10 bg-white/[0.06] px-3 py-2 text-xs font-bold text-white/70 transition hover:border-neonbrand/40 hover:text-neonbrand">
               Clear filters
             </button>
           </div>
@@ -1231,6 +1231,8 @@ function Shop({ products, addToCart, buyNow, filters, setFilters, filterOptions,
                   <p className="retela-product-card-meta min-w-0 text-slate-600">
                     <span className="truncate">{p.brand || "Other"}</span>
                     <span aria-hidden="true"> | </span>
+                    <span className="truncate">{p.category || "T-Shirts"}</span>
+                    <span aria-hidden="true"> | </span>
                     <span className="truncate">{p.size || "Free Size"}</span>
                   </p>
                   <p className="retela-product-card-price font-black text-emerald-700">PHP {Number(p.price || 0).toLocaleString()}</p>
@@ -1238,7 +1240,7 @@ function Shop({ products, addToCart, buyNow, filters, setFilters, filterOptions,
                   {p.description ? <p className="retela-product-card-description break-words text-slate-500">{p.description}</p> : null}
                   <div className="retela-product-card-actions mt-auto">
                     <button type="button" onClick={() => openDetails(p)} className="retela-product-action-button retela-product-action-view">
-                      <Eye size={14} /> View
+                      <Eye size={14} /> <span className="retela-view-label-full">View Details</span><span className="retela-view-label-short">View</span>
                     </button>
                     <button type="button" onClick={() => addToCart(p)} className="retela-product-action-button retela-product-action-add">
                       <ShoppingCart size={14} /> Add
@@ -1271,29 +1273,29 @@ function Shop({ products, addToCart, buyNow, filters, setFilters, filterOptions,
 
 function CustomerFilters({ filters, setFilters, filterOptions }) {
   return (
-    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-      <Field icon={Search} placeholder="Search apparel, brands, or categories" value={filters.search} onChange={(e) => setFilters({ ...filters, search: e.target.value })} />
-      <select className="rounded-xl border border-slate-200 bg-white p-3 text-sm" value={filters.brand} onChange={(e) => setFilters({ ...filters, brand: e.target.value })}>
+    <div className="retela-customer-filter-grid grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+      <Field icon={Search} placeholder="Search apparel, brands, or categories" value={filters.search} onChange={(e) => setFilters({ ...filters, search: e.target.value })} wrapperClassName="retela-customer-filter-search" />
+      <select className="retela-customer-filter-control retela-filter-brand rounded-xl border border-slate-200 bg-white p-3 text-sm" value={filters.brand} onChange={(e) => setFilters({ ...filters, brand: e.target.value })}>
         <option value="all">Brand</option>
         {productBrands.map((brand) => <option key={brand} value={brand}>{brand}</option>)}
       </select>
-      <select className="rounded-xl border border-slate-200 bg-white p-3 text-sm" value={filters.category} onChange={(e) => setFilters({ ...filters, category: e.target.value })}>
+      <select className="retela-customer-filter-control retela-filter-category rounded-xl border border-slate-200 bg-white p-3 text-sm" value={filters.category} onChange={(e) => setFilters({ ...filters, category: e.target.value })}>
         <option value="all">Category</option>
         {productCategories.map((category) => <option key={category} value={category}>{category}</option>)}
       </select>
-      <select className="rounded-xl border border-slate-200 bg-white p-3 text-sm" value={filters.size} onChange={(e) => setFilters({ ...filters, size: e.target.value })}>
+      <select className="retela-customer-filter-control retela-filter-size rounded-xl border border-slate-200 bg-white p-3 text-sm" value={filters.size} onChange={(e) => setFilters({ ...filters, size: e.target.value })}>
         <option value="all">Size</option>
         {productSizes.map((size) => <option key={size} value={size}>{size}</option>)}
       </select>
-      <input className="rounded-xl border border-slate-200 bg-white p-3 text-sm" type="number" min="0" placeholder="Min price" value={filters.minPrice} onChange={(e) => setFilters({ ...filters, minPrice: e.target.value })} />
-      <input className="rounded-xl border border-slate-200 bg-white p-3 text-sm" type="number" min="0" placeholder="Max price" value={filters.maxPrice} onChange={(e) => setFilters({ ...filters, maxPrice: e.target.value })} />
-      <select className="rounded-xl border border-slate-200 bg-white p-3 text-sm" value={filters.sortBy} onChange={(e) => setFilters({ ...filters, sortBy: e.target.value })}>
+      <input className="retela-customer-filter-control retela-filter-min-price rounded-xl border border-slate-200 bg-white p-3 text-sm" type="number" min="0" placeholder="Min price" value={filters.minPrice} onChange={(e) => setFilters({ ...filters, minPrice: e.target.value })} />
+      <input className="retela-customer-filter-control retela-filter-max-price rounded-xl border border-slate-200 bg-white p-3 text-sm" type="number" min="0" placeholder="Max price" value={filters.maxPrice} onChange={(e) => setFilters({ ...filters, maxPrice: e.target.value })} />
+      <select className="retela-customer-filter-control retela-filter-sort rounded-xl border border-slate-200 bg-white p-3 text-sm" value={filters.sortBy} onChange={(e) => setFilters({ ...filters, sortBy: e.target.value })}>
         <option value="latest">Latest</option>
         <option value="lowest_price">Price: Low to High</option>
         <option value="highest_price">Price: High to Low</option>
         <option value="name_asc">Name A-Z</option>
       </select>
-      <select className="rounded-xl border border-slate-200 bg-white p-3 text-sm" value={filters.stock} onChange={(e) => setFilters({ ...filters, stock: e.target.value })}>
+      <select className="retela-customer-filter-control retela-customer-filter-stock rounded-xl border border-slate-200 bg-white p-3 text-sm" value={filters.stock} onChange={(e) => setFilters({ ...filters, stock: e.target.value })}>
         <option value="all">All</option>
         <option value="in_stock">In Stock</option>
       </select>
