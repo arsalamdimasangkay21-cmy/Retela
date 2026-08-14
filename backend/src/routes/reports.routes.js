@@ -54,6 +54,19 @@ function reportDateFilter(inputRange = "all", inputStart = "", inputEnd = "", al
   return { range: "all", where: "1 = 1", params: {} };
 }
 
+function normalizeSalesChannel(value = "all") {
+  const channel = String(value || "all").trim().toLowerCase();
+  if (channel === "pos") return "pos";
+  if (channel === "online" || channel === "online_order" || channel === "online-order") return "online";
+  return "all";
+}
+
+function reportChannelFilter(inputChannel = "all", alias = "o") {
+  const channel = normalizeSalesChannel(inputChannel);
+  if (channel === "all") return { channel, where: "1 = 1", params: {} };
+  return { channel, where: `${alias}.order_channel = :salesChannel`, params: { salesChannel: channel } };
+}
+
 async function ensureProductColumns() {
   productColumnsReady ||= ensureProductInventoryColumns();
   return productColumnsReady;
@@ -91,6 +104,9 @@ const getAnalyticsSummary = asyncHandler(async (req, res) => {
   const { where: itemRangeSql, params: itemRangeParams } = reportDateFilter(req.query.range, start, end, "item_orders");
   const { where: reviewRangeSql, params: reviewRangeParams } = reportDateFilter(req.query.range, start, end, "r");
   const { where: productRangeSql, params: productRangeParams } = reportDateFilter(req.query.range, start, end, "p");
+  const { channel, where: channelSql, params: channelParams } = reportChannelFilter(req.query.channel, "o");
+  const { where: itemChannelSql } = reportChannelFilter(req.query.channel, "item_orders");
+  const { where: reviewChannelSql } = reportChannelFilter(req.query.channel, "review_orders");
   const [sales] = await query(`
     SELECT
       COALESCE(SUM(o.total_amount), 0) AS total_sales,
@@ -100,11 +116,11 @@ const getAnalyticsSummary = asyncHandler(async (req, res) => {
         SELECT COALESCE(SUM(oi.quantity), 0)
         FROM orders item_orders
         JOIN order_items oi ON oi.order_id = item_orders.id
-        WHERE ${itemRangeSql} AND ${reportableOrderCondition("item_orders")}
+        WHERE ${itemRangeSql} AND ${reportableOrderCondition("item_orders")} AND ${itemChannelSql}
       ) AS items_sold
     FROM orders o
-    WHERE ${rangeSql} AND ${reportableOrderSql}
-  `, { ...rangeParams, ...itemRangeParams });
+    WHERE ${rangeSql} AND ${reportableOrderSql} AND ${channelSql}
+  `, { ...rangeParams, ...itemRangeParams, ...channelParams });
   const [inventory] = await query(`
     SELECT COUNT(*) AS product_count,
       COALESCE(SUM(stock),0) AS total_stock,
@@ -116,8 +132,8 @@ const getAnalyticsSummary = asyncHandler(async (req, res) => {
     SELECT COALESCE(AVG(rating),0) AS average_rating, COUNT(*) AS review_count
     FROM reviews r
     JOIN orders review_orders ON review_orders.id = r.order_id
-    WHERE ${reviewRangeSql} AND ${reportableOrderCondition("review_orders")}
-  `, reviewRangeParams);
+    WHERE ${reviewRangeSql} AND ${reportableOrderCondition("review_orders")} AND ${reviewChannelSql}
+  `, { ...reviewRangeParams, ...channelParams });
   const bestProducts = await query(
     `SELECT p.name,
        p.category,
@@ -125,9 +141,9 @@ const getAnalyticsSummary = asyncHandler(async (req, res) => {
        SUM(oi.quantity) AS sold,
        COALESCE(SUM(oi.quantity * oi.price), 0) AS revenue
      FROM order_items oi JOIN products p ON p.id=oi.product_id JOIN orders o ON o.id=oi.order_id
-     WHERE ${rangeSql} AND ${reportableOrderSql}
+     WHERE ${rangeSql} AND ${reportableOrderSql} AND ${channelSql}
      GROUP BY p.id, p.name, p.category ORDER BY sold DESC LIMIT 5`,
-    rangeParams
+    { ...rangeParams, ...channelParams }
   );
   const categorySales = await query(
     `SELECT p.category,
@@ -136,10 +152,10 @@ const getAnalyticsSummary = asyncHandler(async (req, res) => {
      FROM orders o
      JOIN order_items oi ON oi.order_id = o.id
      JOIN products p ON p.id = oi.product_id
-     WHERE ${rangeSql} AND ${reportableOrderSql}
+     WHERE ${rangeSql} AND ${reportableOrderSql} AND ${channelSql}
      GROUP BY p.category
      ORDER BY total DESC`,
-    rangeParams
+    { ...rangeParams, ...channelParams }
   );
   const paymentMethods = await query(
     `SELECT o.payment_method,
@@ -148,18 +164,18 @@ const getAnalyticsSummary = asyncHandler(async (req, res) => {
      FROM orders o
      JOIN order_items oi ON oi.order_id = o.id
      JOIN products p ON p.id = oi.product_id
-     WHERE ${rangeSql} AND ${reportableOrderSql}
+     WHERE ${rangeSql} AND ${reportableOrderSql} AND ${channelSql}
      GROUP BY o.payment_method`,
-    rangeParams
+    { ...rangeParams, ...channelParams }
   );
   const monthlySales = await query(
     `SELECT DATE_FORMAT(o.created_at, '%Y-%m') AS month, SUM(oi.quantity * oi.price) AS total
      FROM orders o
      JOIN order_items oi ON oi.order_id = o.id
      JOIN products p ON p.id = oi.product_id
-     WHERE ${rangeSql} AND ${reportableOrderSql}
+     WHERE ${rangeSql} AND ${reportableOrderSql} AND ${channelSql}
      GROUP BY month ORDER BY month DESC LIMIT 12`,
-    rangeParams
+    { ...rangeParams, ...channelParams }
   );
   const dailySales = await query(
     `SELECT DATE(o.created_at) AS sale_date,
@@ -168,11 +184,11 @@ const getAnalyticsSummary = asyncHandler(async (req, res) => {
      FROM orders o
      JOIN order_items oi ON oi.order_id = o.id
      JOIN products p ON p.id = oi.product_id
-     WHERE ${rangeSql} AND ${reportableOrderSql}
+     WHERE ${rangeSql} AND ${reportableOrderSql} AND ${channelSql}
      GROUP BY sale_date, day
      ORDER BY sale_date DESC
      LIMIT 30`,
-    rangeParams
+    { ...rangeParams, ...channelParams }
   );
   const refunds = await query("SELECT status, COUNT(*) AS count FROM returns GROUP BY status");
   const brandSales = await query(
@@ -182,14 +198,23 @@ const getAnalyticsSummary = asyncHandler(async (req, res) => {
      FROM orders o
      JOIN order_items oi ON oi.order_id = o.id
      JOIN products p ON p.id = oi.product_id
-     WHERE ${rangeSql} AND ${reportableOrderSql}
+     WHERE ${rangeSql} AND ${reportableOrderSql} AND ${channelSql}
      GROUP BY COALESCE(NULLIF(TRIM(p.brand), ''), 'Other Brands')
      ORDER BY total DESC
      LIMIT 10`,
-    rangeParams
+    { ...rangeParams, ...channelParams }
   );
-  const orderStatuses = await query(`SELECT status, COUNT(*) AS count FROM orders o WHERE ${rangeSql} AND ${reportableOrderSql} GROUP BY status`, rangeParams);
-  res.json({ range, startDate: dateOnly(start), endDate: dateOnly(end), sales, inventory, ratings, bestProducts, categorySales, paymentMethods, monthlySales: monthlySales.reverse(), dailySales: dailySales.reverse(), refunds, brandSales, orderStatuses });
+  const channelBreakdown = await query(
+    `SELECT o.order_channel,
+       COUNT(DISTINCT o.id) AS order_count,
+       COALESCE(SUM(o.total_amount), 0) AS total
+     FROM orders o
+     WHERE ${rangeSql} AND ${reportableOrderSql} AND ${channelSql}
+     GROUP BY o.order_channel`,
+    { ...rangeParams, ...channelParams }
+  );
+  const orderStatuses = await query(`SELECT status, COUNT(*) AS count FROM orders o WHERE ${rangeSql} AND ${reportableOrderSql} AND ${channelSql} GROUP BY status`, { ...rangeParams, ...channelParams });
+  res.json({ range, channel, startDate: dateOnly(start), endDate: dateOnly(end), sales, inventory, ratings, bestProducts, categorySales, paymentMethods, monthlySales: monthlySales.reverse(), dailySales: dailySales.reverse(), refunds, brandSales, channelBreakdown, orderStatuses });
 });
 
 router.get("/", getAnalyticsSummary);
@@ -203,6 +228,8 @@ router.get("/sales", asyncHandler(async (req, res) => {
   const { range, where: rangeSql, params: rangeParams } = reportDateFilter(req.query.range, start, end, "o");
   const { where: reviewRangeSql, params: reviewRangeParams } = reportDateFilter(req.query.range, start, end, "r");
   const { where: productRangeSql, params: productRangeParams } = reportDateFilter(req.query.range, start, end, "p");
+  const { channel, where: channelSql, params: channelParams } = reportChannelFilter(req.query.channel, "o");
+  const { where: reviewChannelSql } = reportChannelFilter(req.query.channel, "o");
   const { config } = await loadSystemSettings();
 
   const [orderSummary] = await query(`
@@ -212,14 +239,14 @@ router.get("/sales", asyncHandler(async (req, res) => {
       COUNT(DISTINCT o.id) AS sales_order_count,
       COALESCE(AVG(o.total_amount), 0) AS average_order_value
     FROM orders o
-    WHERE ${rangeSql} AND ${reportableOrderSql}
-  `, rangeParams);
+    WHERE ${rangeSql} AND ${reportableOrderSql} AND ${channelSql}
+  `, { ...rangeParams, ...channelParams });
   const [itemsSummary] = await query(`
     SELECT COALESCE(SUM(oi.quantity), 0) AS items_sold
     FROM orders o
     JOIN order_items oi ON oi.order_id = o.id
-    WHERE ${rangeSql} AND ${reportableOrderSql}
-  `, rangeParams);
+    WHERE ${rangeSql} AND ${reportableOrderSql} AND ${channelSql}
+  `, { ...rangeParams, ...channelParams });
   const summary = {
     ...orderSummary,
     total_sales: Number(orderSummary?.total_sales || 0),
@@ -253,10 +280,10 @@ router.get("/sales", asyncHandler(async (req, res) => {
       JOIN products p ON p.id = oi.product_id
       GROUP BY oi.order_id, p.id, p.name
     ) order_products ON order_products.order_id = o.id
-    WHERE ${rangeSql} AND ${reportableOrderSql}
+    WHERE ${rangeSql} AND ${reportableOrderSql} AND ${channelSql}
     GROUP BY o.id, COALESCE(NULLIF(TRIM(u.display_name), ''), u.username, 'Walk-in Customer'), o.payment_method, o.payment_status, o.status, o.order_channel, o.total_amount, o.created_at
     ORDER BY o.created_at DESC
-  `, rangeParams);
+  `, { ...rangeParams, ...channelParams });
 
   const products = await query(`
     SELECT
@@ -267,10 +294,10 @@ router.get("/sales", asyncHandler(async (req, res) => {
     FROM orders o
     JOIN order_items oi ON oi.order_id = o.id
     JOIN products p ON p.id = oi.product_id
-    WHERE ${rangeSql} AND ${reportableOrderSql}
+    WHERE ${rangeSql} AND ${reportableOrderSql} AND ${channelSql}
     GROUP BY p.id, p.name, COALESCE(NULLIF(TRIM(p.brand), ''), 'Other Brands')
     ORDER BY revenue_generated DESC
-  `, rangeParams);
+  `, { ...rangeParams, ...channelParams });
 
   const customers = await query(`
     SELECT
@@ -279,10 +306,10 @@ router.get("/sales", asyncHandler(async (req, res) => {
       COALESCE(SUM(o.total_amount), 0) AS total_spent
     FROM orders o
     LEFT JOIN users u ON u.id = o.user_id
-    WHERE ${rangeSql} AND ${reportableOrderSql}
+    WHERE ${rangeSql} AND ${reportableOrderSql} AND ${channelSql}
     GROUP BY COALESCE(u.id, 0), COALESCE(NULLIF(TRIM(u.display_name), ''), u.username, 'Walk-in Customer')
     ORDER BY total_spent DESC
-  `, rangeParams);
+  `, { ...rangeParams, ...channelParams });
 
   const salesOverTime = await query(`
     SELECT
@@ -290,10 +317,10 @@ router.get("/sales", asyncHandler(async (req, res) => {
       DATE_FORMAT(o.created_at, '%b %d') AS label,
       COALESCE(SUM(o.total_amount), 0) AS total
     FROM orders o
-    WHERE ${rangeSql} AND ${reportableOrderSql}
+    WHERE ${rangeSql} AND ${reportableOrderSql} AND ${channelSql}
     GROUP BY DATE(o.created_at), label
     ORDER BY DATE(o.created_at) ASC
-  `, rangeParams);
+  `, { ...rangeParams, ...channelParams });
 
   const paymentMethods = await query(`
     SELECT
@@ -301,9 +328,9 @@ router.get("/sales", asyncHandler(async (req, res) => {
       COUNT(DISTINCT o.id) AS order_count,
       COALESCE(SUM(o.total_amount), 0) AS total
     FROM orders o
-    WHERE ${rangeSql} AND ${reportableOrderSql}
+    WHERE ${rangeSql} AND ${reportableOrderSql} AND ${channelSql}
     GROUP BY o.payment_method
-  `, rangeParams);
+  `, { ...rangeParams, ...channelParams });
 
   const [inventory] = await query(`
     SELECT
@@ -338,11 +365,11 @@ router.get("/sales", asyncHandler(async (req, res) => {
     FROM orders o
     JOIN order_items oi ON oi.order_id = o.id
     JOIN products p ON p.id = oi.product_id
-    WHERE ${rangeSql} AND ${reportableOrderSql}
+    WHERE ${rangeSql} AND ${reportableOrderSql} AND ${channelSql}
     GROUP BY p.id, p.name, COALESCE(NULLIF(TRIM(p.brand), ''), 'Other Brands')
     ORDER BY sold DESC
     LIMIT 8
-  `, rangeParams);
+  `, { ...rangeParams, ...channelParams });
 
   const apparelPerformance = await query(`
     SELECT
@@ -357,10 +384,10 @@ router.get("/sales", asyncHandler(async (req, res) => {
     FROM orders o
     JOIN order_items oi ON oi.order_id = o.id
     JOIN products p ON p.id = oi.product_id
-    WHERE ${rangeSql} AND ${reportableOrderSql}
+    WHERE ${rangeSql} AND ${reportableOrderSql} AND ${channelSql}
     GROUP BY p.id, p.name, COALESCE(NULLIF(TRIM(p.brand), ''), 'Other Brands'), p.category, p.size
     ORDER BY revenue DESC
-  `, rangeParams);
+  `, { ...rangeParams, ...channelParams });
 
   const monthlySales = await query(`
     SELECT
@@ -368,10 +395,10 @@ router.get("/sales", asyncHandler(async (req, res) => {
       COALESCE(SUM(o.total_amount), 0) AS total,
       COUNT(DISTINCT o.id) AS orders_count
     FROM orders o
-    WHERE ${rangeSql} AND ${reportableOrderSql}
+    WHERE ${rangeSql} AND ${reportableOrderSql} AND ${channelSql}
     GROUP BY DATE_FORMAT(o.created_at, '%Y-%m')
     ORDER BY month ASC
-  `, rangeParams);
+  `, { ...rangeParams, ...channelParams });
 
   const feedback = await query(`
     SELECT
@@ -388,21 +415,32 @@ router.get("/sales", asyncHandler(async (req, res) => {
     JOIN orders o ON o.id = r.order_id
     LEFT JOIN order_items oi ON oi.order_id = o.id
     LEFT JOIN products op ON op.id = oi.product_id
-    WHERE ${reviewRangeSql} AND ${reportableOrderSql}
+    WHERE ${reviewRangeSql} AND ${reportableOrderSql} AND ${reviewChannelSql}
     GROUP BY r.id, r.rating, r.category, r.comment, r.created_at, COALESCE(NULLIF(TRIM(u.display_name), ''), u.username, 'Customer'), p.name
     ORDER BY r.created_at DESC
     LIMIT 200
-  `, reviewRangeParams);
+  `, { ...reviewRangeParams, ...channelParams });
 
   const orderStatuses = await query(`
     SELECT status, COUNT(*) AS count
     FROM orders o
-    WHERE ${rangeSql} AND ${reportableOrderSql}
+    WHERE ${rangeSql} AND ${reportableOrderSql} AND ${channelSql}
     GROUP BY status
-  `, rangeParams);
+  `, { ...rangeParams, ...channelParams });
+
+  const channelBreakdown = await query(`
+    SELECT
+      o.order_channel,
+      COUNT(DISTINCT o.id) AS order_count,
+      COALESCE(SUM(o.total_amount), 0) AS total
+    FROM orders o
+    WHERE ${rangeSql} AND ${reportableOrderSql} AND ${channelSql}
+    GROUP BY o.order_channel
+  `, { ...rangeParams, ...channelParams });
 
   res.json({
     range,
+    channel,
     startDate: dateOnly(start),
     endDate: dateOnly(end),
     reportDate: new Date().toISOString(),
@@ -420,6 +458,7 @@ router.get("/sales", asyncHandler(async (req, res) => {
     apparelPerformance,
     monthlySales,
     feedback,
+    channelBreakdown,
     orderStatuses
   });
 }));

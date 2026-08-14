@@ -18,6 +18,7 @@ export const defaultReportOptions = {
   dateRange: "last30days",
   startDate: "",
   endDate: "",
+  channel: "all",
   paperSize: "a4",
   orientation: "portrait"
 };
@@ -74,8 +75,10 @@ export function includesReport(options, reportId) {
 
 export function reportOptionsParams(options = defaultReportOptions) {
   const dateRange = options?.dateRange || "all";
+  const channel = ["pos", "online"].includes(String(options?.channel || "").toLowerCase()) ? String(options.channel).toLowerCase() : "all";
   return {
     range: dateRange,
+    ...(channel !== "all" ? { channel } : {}),
     ...(dateRange === "custom" && options?.startDate ? { start: options.startDate, startDate: options.startDate } : {}),
     ...(dateRange === "custom" && options?.endDate ? { end: options.endDate, endDate: options.endDate } : {}),
     ts: Date.now()

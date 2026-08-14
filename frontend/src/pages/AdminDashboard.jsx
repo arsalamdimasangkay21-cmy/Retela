@@ -1603,10 +1603,10 @@ function InventoryActionButton({ tone, icon: Icon, children, onClick, disabled =
   );
 }
 
-function BarcodeScannerPanel({ title, value, onChange, product, onPrint }) {
+function BarcodeScannerPanel({ title, value, onChange, product, onPrint, compact = false }) {
   const hasQuery = Boolean(String(value || "").trim());
   return (
-    <Card className="border-neonbrand/15 bg-neonbrand/[0.055]">
+    <Card className={`border-neonbrand/15 bg-neonbrand/[0.055] ${compact ? "sales-barcode-card" : ""}`}>
       <div className="grid gap-4 xl:grid-cols-[minmax(260px,0.9fr)_minmax(0,1.1fr)]">
         <div>
           <div className="flex items-center gap-3">
@@ -1628,8 +1628,8 @@ function BarcodeScannerPanel({ title, value, onChange, product, onPrint }) {
                 className="min-h-12 w-full rounded-2xl border border-white/10 bg-white/[0.07] py-3 pl-12 pr-4 text-sm font-semibold uppercase text-white outline-none placeholder:text-white/35 focus:border-neonbrand/60 focus:ring-4 focus:ring-neonbrand/10"
               />
             </div>
-            <button type="button" onClick={() => onChange("")} className="rounded-2xl border border-neonbrand/25 bg-neonbrand/10 px-4 py-3 text-sm font-bold text-neonbrand transition hover:bg-neonbrand hover:text-black">
-              Clear
+            <button type="button" onClick={() => { if (!compact) onChange(""); }} className="rounded-2xl border border-neonbrand/25 bg-neonbrand/10 px-4 py-3 text-sm font-bold text-neonbrand transition hover:bg-neonbrand hover:text-black">
+              {compact ? "Scan" : "Clear"}
             </button>
           </div>
         </div>
@@ -1662,10 +1662,14 @@ function BarcodeScannerPanel({ title, value, onChange, product, onPrint }) {
               </div>
             </div>
           ) : (
-            <EmptyState
-              title={hasQuery ? "No matching product found" : "Ready to scan"}
-              subtitle={hasQuery ? "Check the barcode/SKU and try again." : "Matching product details will appear here immediately."}
-            />
+            compact ? (
+              <p className="sales-barcode-status">{hasQuery ? "No matching product found. Check the barcode/SKU and try again." : "Ready to scan or search by SKU."}</p>
+            ) : (
+              <EmptyState
+                title={hasQuery ? "No matching product found" : "Ready to scan"}
+                subtitle={hasQuery ? "Check the barcode/SKU and try again." : "Matching product details will appear here immediately."}
+              />
+            )
           )}
         </div>
       </div>
@@ -2333,6 +2337,7 @@ function UsersIcon(props) {
 function SalesAnalytics({ summary }) {
   const [trendPeriod, setTrendPeriod] = useState("day");
   const [reportRange, setReportRange] = useState(defaultReportOptions.dateRange);
+  const [salesChannel, setSalesChannel] = useState("all");
   const [appliedDateOptions, setAppliedDateOptions] = useState({
     dateRange: defaultReportOptions.dateRange,
     startDate: defaultReportOptions.startDate,
@@ -2356,8 +2361,9 @@ function SalesAnalytics({ summary }) {
     ...reportOptions,
     dateRange: appliedDateOptions.dateRange,
     startDate: appliedDateOptions.startDate || "",
-    endDate: appliedDateOptions.endDate || ""
-  }), [reportOptions, appliedDateOptions]);
+    endDate: appliedDateOptions.endDate || "",
+    channel: salesChannel
+  }), [reportOptions, appliedDateOptions, salesChannel]);
   const totalSales = Number(visibleSummary?.sales?.total_sales || 0);
   const totalOrders = Number(visibleSummary?.sales?.order_count || 0);
   const itemsSold = Number(visibleSummary?.sales?.items_sold || 0);
@@ -2375,7 +2381,7 @@ function SalesAnalytics({ summary }) {
   const trendRows = trendPeriod === "month" ? monthlySales : dailySales;
   const paymentMethodRows = visibleSummary?.paymentMethods || [];
   const paymentMethodTotal = paymentMethodRows.reduce((sum, item) => sum + Number(item.total || 0), 0);
-  const paymentColors = { cash: "#22C55E", cod: "#16A34A", gcash: "#38BDF8", debit: "#F59E0B", credit: "#F472B6", maya: "#84CC16" };
+  const paymentColors = { cod: "#16A34A", cash: "#0EA5E9", gcash: "#F97316", online: "#F97316", debit: "#8B5CF6", credit: "#EC4899", maya: "#14B8A6" };
   const paymentMethodData = paymentMethodRows.map((row) => {
     const revenue = Number(row?.total || 0);
     return {
@@ -2393,12 +2399,19 @@ function SalesAnalytics({ summary }) {
     revenue: Number(product.revenue || 0),
     imageUrl: resolveProductImageUrl(product)
   }));
+  const channelBreakdownRows = (visibleSummary?.channelBreakdown || []).map((row) => ({
+    key: row.order_channel || "online",
+    label: row.order_channel === "pos" ? "PoS" : "Online Order",
+    total: Number(row.total || 0),
+    orders: Number(row.order_count || 0)
+  }));
+  const channelBreakdownTotal = channelBreakdownRows.reduce((sum, row) => sum + row.total, 0);
   const cards = [
-    { title: "Total Sales", value: money(totalSales), change: "Live", caption: "database revenue", icon: TrendingUp },
-    { title: "Total Orders", value: totalOrders.toLocaleString(), change: "Live", caption: "database orders", icon: ReceiptText },
-    { title: "Average Order Value", value: money(averageOrder), change: "Live", caption: "per reportable order", icon: WalletCards },
-    { title: "Items Sold", value: itemsSold.toLocaleString(), change: "Live", caption: "database quantities", icon: ShoppingBag },
-    { title: "Average Rating", value: averageRating.toFixed(1), change: `${reviewCount} reviews`, caption: "customer feedback", icon: Star }
+    { title: "Total Sales", value: money(totalSales), change: "Live", caption: "database revenue", icon: TrendingUp, tone: "sales" },
+    { title: "Total Orders", value: totalOrders.toLocaleString(), change: "Live", caption: "database orders", icon: ReceiptText, tone: "orders" },
+    { title: "Average Order Value", value: money(averageOrder), change: "Live", caption: "per reportable order", icon: WalletCards, tone: "aov" },
+    { title: "Items Sold", value: itemsSold.toLocaleString(), change: "Live", caption: "database quantities", icon: ShoppingBag, tone: "items" },
+    { title: "Average Rating", value: averageRating.toFixed(1), change: `${reviewCount} reviews`, caption: "customer feedback", icon: Star, tone: "rating" }
   ];
   const hasAnalyticsData = totalOrders > 0
     || totalSales > 0
@@ -2414,7 +2427,10 @@ function SalesAnalytics({ summary }) {
     datasets: [{
       label: trendPeriod === "month" ? "Monthly Sales" : "Daily Sales",
       data: trendRows.map((item) => item.total),
-      ...glowingLineStyle
+      ...glowingLineStyle,
+      borderColor: "#2563EB",
+      backgroundColor: "rgba(37, 99, 235, 0.10)",
+      pointBorderColor: "#2563EB"
     }]
   };
   const chartOptions = {
@@ -2464,7 +2480,7 @@ function SalesAnalytics({ summary }) {
     let alive = true;
     setAnalyticsLoading(true);
     setAnalyticsError("");
-    cachedGet("/reports/summary", { params: reportOptionsParams({ ...defaultReportOptions, ...appliedDateOptions }) }, { cacheMs: 8000, retries: 1 })
+    cachedGet("/reports/summary", { params: reportOptionsParams({ ...defaultReportOptions, ...appliedDateOptions, channel: salesChannel }) }, { cacheMs: 8000, retries: 1 })
       .then(({ data }) => {
         if (alive) setAnalyticsSummary(data);
       })
@@ -2475,16 +2491,17 @@ function SalesAnalytics({ summary }) {
         if (alive) setAnalyticsLoading(false);
       });
     return () => { alive = false; };
-  }, [appliedDateOptions.dateRange, appliedDateOptions.startDate, appliedDateOptions.endDate]);
+  }, [appliedDateOptions.dateRange, appliedDateOptions.startDate, appliedDateOptions.endDate, salesChannel]);
 
   useEffect(() => {
     setReportOptions((current) => ({
       ...current,
       dateRange: appliedDateOptions.dateRange,
       startDate: appliedDateOptions.startDate || "",
-      endDate: appliedDateOptions.endDate || ""
+      endDate: appliedDateOptions.endDate || "",
+      channel: salesChannel
     }));
-  }, [appliedDateOptions.dateRange, appliedDateOptions.startDate, appliedDateOptions.endDate]);
+  }, [appliedDateOptions.dateRange, appliedDateOptions.startDate, appliedDateOptions.endDate, salesChannel]);
 
   function handleDateRangeChange(value) {
     setReportRange(value);
@@ -2505,7 +2522,8 @@ function SalesAnalytics({ summary }) {
       ...current,
       dateRange: appliedDateOptions.dateRange,
       startDate: appliedDateOptions.startDate || "",
-      endDate: appliedDateOptions.endDate || ""
+      endDate: appliedDateOptions.endDate || "",
+      channel: salesChannel
     }));
   }
 
@@ -2583,38 +2601,59 @@ function SalesAnalytics({ summary }) {
   const customRangeReady = Boolean(customRange.startDate && customRange.endDate);
 
   return (
-    <motion.div className="grid min-w-0 gap-5" initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.45, ease: "easeOut" }}>
-      <section className="relative overflow-hidden rounded-[30px] border border-white/10 bg-black/35 p-5 shadow-2xl shadow-black/30 backdrop-blur-2xl sm:p-7">
-        <div className="absolute inset-y-0 right-0 hidden w-1/3 bg-[radial-gradient(circle_at_50%_30%,rgba(56,255,136,0.2),transparent_55%)] lg:block" />
+    <motion.div className="sales-analytics-page grid min-w-0 gap-5" initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.45, ease: "easeOut" }}>
+      <section className="sales-analytics-toolbar">
         <div className="relative flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
           <div>
-            <p className="text-xs font-bold uppercase tracking-[0.2em] text-neonbrand/75">RETELA SYSTEM - Tela to Pera Thrift Shop</p>
-            <h1 className="mt-3 font-display text-4xl font-bold tracking-tight text-white">Apparel Analytics</h1>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-white/58 sm:text-base">Track apparel sales, inventory trends, low stock, and revenue.</p>
+            <p className="sales-analytics-eyebrow">RETELA SYSTEM - Tela to Pera Thrift Shop</p>
+            <h1>Apparel Analytics</h1>
+            <p>Track apparel sales, inventory trends, low stock, and revenue.</p>
           </div>
-          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-end">
-            <select value={reportRange} onChange={(event) => handleDateRangeChange(event.target.value)} className="rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm font-semibold text-white outline-none">
-              {reportRanges.map((range) => <option key={range.value} value={range.value}>{range.label}</option>)}
-            </select>
+          <div className="sales-analytics-controls">
+            <div className="sales-filter-row">
+              <select value={reportRange} onChange={(event) => handleDateRangeChange(event.target.value)} className="sales-date-select">
+                {reportRanges.map((range) => <option key={range.value} value={range.value}>{range.label}</option>)}
+              </select>
+              <div className="sales-channel-tabs" role="tablist" aria-label="Sales channel">
+                {[
+                  { value: "all", label: "All Sales" },
+                  { value: "pos", label: "PoS" },
+                  { value: "online", label: "Online Order" }
+                ].map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    role="tab"
+                    aria-selected={salesChannel === option.value}
+                    onClick={() => setSalesChannel(option.value)}
+                    className={salesChannel === option.value ? "is-active" : ""}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </div>
             {reportRange === "custom" ? (
-              <div className="flex flex-col gap-2 sm:flex-row">
-                <input type="date" value={customRange.startDate} onChange={(event) => setCustomRange((current) => ({ ...current, startDate: event.target.value }))} className="rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm font-semibold text-white outline-none" aria-label="Start Date" />
-                <input type="date" value={customRange.endDate} onChange={(event) => setCustomRange((current) => ({ ...current, endDate: event.target.value }))} className="rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm font-semibold text-white outline-none" aria-label="End Date" />
-                <button type="button" disabled={!customRangeReady || analyticsLoading} onClick={applyCustomDateRange} className="inline-flex items-center justify-center rounded-2xl border border-neonbrand/25 bg-neonbrand/10 px-5 py-3 text-sm font-bold text-neonbrand transition hover:border-neonbrand/60 disabled:cursor-not-allowed disabled:opacity-60">Apply</button>
+              <div className="sales-custom-range">
+                <input type="date" value={customRange.startDate} onChange={(event) => setCustomRange((current) => ({ ...current, startDate: event.target.value }))} aria-label="Start Date" />
+                <input type="date" value={customRange.endDate} onChange={(event) => setCustomRange((current) => ({ ...current, endDate: event.target.value }))} aria-label="End Date" />
+                <button type="button" disabled={!customRangeReady || analyticsLoading} onClick={applyCustomDateRange}>Apply</button>
               </div>
             ) : null}
-            <button type="button" disabled={exportDisabled} onClick={() => openReportOptions("pdf")} className="gradient-btn inline-flex items-center justify-center gap-2 rounded-2xl px-5 py-3 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-60">
-              <Download size={17} />
-              Export PDF
-            </button>
-            <button type="button" disabled={exportDisabled} onClick={() => openReportOptions("excel")} className="inline-flex items-center justify-center gap-2 rounded-2xl border border-neonbrand/25 bg-white/[0.06] px-5 py-3 text-sm font-bold text-white transition hover:border-neonbrand/60 hover:text-neonbrand disabled:cursor-not-allowed disabled:opacity-60">
-              <FileSpreadsheet size={17} />
-              Export Excel
-            </button>
-            <button type="button" disabled={exportDisabled} onClick={() => openReportOptions("print")} className="inline-flex items-center justify-center gap-2 rounded-2xl border border-neonbrand/25 bg-white/[0.06] px-5 py-3 text-sm font-bold text-white transition hover:border-neonbrand/60 hover:text-neonbrand disabled:cursor-not-allowed disabled:opacity-60">
-              <Printer size={17} />
-              Print Report
-            </button>
+            <div className="sales-export-row">
+              <button type="button" disabled={exportDisabled} onClick={() => openReportOptions("pdf")}>
+                <Download size={16} />
+                Export PDF
+              </button>
+              <button type="button" disabled={exportDisabled} onClick={() => openReportOptions("excel")}>
+                <FileSpreadsheet size={16} />
+                Export Excel
+              </button>
+              <button type="button" disabled={exportDisabled} onClick={() => openReportOptions("print")}>
+                <Printer size={16} />
+                Print Report
+              </button>
+            </div>
           </div>
         </div>
       </section>
@@ -2664,6 +2703,7 @@ function SalesAnalytics({ summary }) {
         onChange={setSalesBarcodeQuery}
         product={scannedSalesProduct}
         onPrint={printProductBarcode}
+        compact
       />
 
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1.55fr)_minmax(320px,0.85fr)]">
@@ -2687,15 +2727,37 @@ function SalesAnalytics({ summary }) {
               ))}
             </div>
           </div>
-          <div className="chart-stage mt-6 h-[360px]">
+          <div className="chart-stage sales-trends-stage mt-6 h-[360px]">
             {trendRows.length ? <Line data={chartData} options={chartOptions} /> : <EmptyState title="No sales yet" subtitle="Live orders from the database will populate the sales trend." />}
           </div>
         </Card>
         </div>
         <div ref={paymentChartRef}>
-          <AnalyticsDonutCard title="Revenue Overview" data={paymentMethodData} icon={Tags} />
+          <AnalyticsDonutCard title="Revenue Overview" data={paymentMethodData} icon={Tags} total={paymentMethodTotal} />
         </div>
       </div>
+
+      <Card className="sales-channel-card">
+        <div className="sales-section-heading">
+          <div>
+            <h2>Sales Channels</h2>
+            <p>Revenue by source, separate from payment method.</p>
+          </div>
+          <Tags size={20} />
+        </div>
+        <div className="sales-channel-breakdown">
+          {channelBreakdownRows.length ? channelBreakdownRows.map((row) => (
+            <div key={row.key} className="sales-channel-row">
+              <span>{row.label}</span>
+              <div>
+                <strong>{money(row.total)}</strong>
+                <small>{row.orders} orders</small>
+              </div>
+              <progress value={channelBreakdownTotal ? row.total : 0} max={channelBreakdownTotal || 1} />
+            </div>
+          )) : <p className="sales-empty-inline">No channel sales for this filter.</p>}
+        </div>
+      </Card>
 
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)]">
         <Card>
@@ -2766,19 +2828,19 @@ function SalesAnalytics({ summary }) {
   );
 }
 
-function SalesMetricCard({ title, value, change, caption, icon: Icon, index }) {
+function SalesMetricCard({ title, value, change, caption, icon: Icon, index, tone = "sales" }) {
   return (
-    <motion.article className="metric-card group rounded-[26px] border border-white/10 bg-white/[0.06] shadow-2xl shadow-black/25 backdrop-blur-2xl transition duration-300 hover:border-neonbrand/30 hover:shadow-[0_24px_70px_rgba(0,0,0,0.34),0_0_34px_rgba(56,255,136,0.08)]" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} whileHover={{ y: -4, scale: 1.015 }} transition={{ duration: 0.35, delay: index * 0.05 }}>
+    <motion.article className={`metric-card sales-metric-card is-${tone}`} initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} whileHover={{ y: -3, scale: 1.01 }} transition={{ duration: 0.28, delay: index * 0.04 }}>
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
-          <p className="text-xs font-bold uppercase tracking-[0.18em] text-white/45">{title}</p>
-          <strong className="metric-value mt-4 block font-display font-bold text-white">{value}</strong>
+          <p>{title}</p>
+          <strong className="metric-value block font-display font-bold">{value}</strong>
           <div className="mt-3 flex flex-wrap items-center gap-2">
-            <span className="rounded-full border border-neonbrand/20 bg-neonbrand/10 px-2.5 py-1 text-xs font-bold text-neonbrand">{change}</span>
-            <span className="text-xs text-white/42">{caption}</span>
+            <span className="sales-metric-chip">{change}</span>
+            <span className="sales-metric-caption">{caption}</span>
           </div>
         </div>
-        <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl border border-neonbrand/20 bg-neonbrand/10 text-neonbrand shadow-[0_0_30px_rgba(56,255,136,0.12)] transition group-hover:scale-110">
+        <span className="sales-metric-icon">
           <Icon size={23} />
         </span>
       </div>
@@ -2786,7 +2848,7 @@ function SalesMetricCard({ title, value, change, caption, icon: Icon, index }) {
   );
 }
 
-function AnalyticsDonutCard({ title, data, icon: Icon, compact }) {
+function AnalyticsDonutCard({ title, data, icon: Icon, compact, total = 0 }) {
   const hasSales = data.some((item) => Number(item.value || 0) > 0);
   const chart = {
     labels: data.map((item) => item.label),
@@ -2794,29 +2856,35 @@ function AnalyticsDonutCard({ title, data, icon: Icon, compact }) {
       data: data.map((item) => item.value),
       backgroundColor: data.map((item) => item.color),
       hoverBackgroundColor: data.map((item) => item.color),
-      borderColor: "rgba(5,5,5,0.9)",
-      borderWidth: 5,
-      hoverOffset: 14,
-      spacing: 4
+      borderColor: "#ffffff",
+      borderWidth: 3,
+      hoverOffset: 8,
+      spacing: 2
     }]
   };
   return (
     <Card className="chart-3d-card">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <h2 className="font-display text-xl font-bold text-white">{title}</h2>
-          <p className="mt-1 text-sm text-white/45">Revenue distribution by segment.</p>
+          <h2 className="font-display text-xl font-bold text-[#123526]">{title}</h2>
+          <p className="mt-1 text-sm text-[#557166]">Revenue distribution by payment method.</p>
         </div>
-        <Icon className="text-neonbrand" size={22} />
+        <Icon className="text-[#16a36a]" size={22} />
       </div>
-      <div className={`chart-stage mx-auto mt-4 ${compact ? "h-48" : "h-64"} max-w-sm`}>
+      <div className={`chart-stage analytics-donut-stage mx-auto mt-4 ${compact ? "h-48" : "h-64"} max-w-sm`}>
         {hasSales ? <Doughnut data={chart} options={{ ...chartMotion, cutout: "68%", maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { backgroundColor: "rgba(5,5,5,0.92)", callbacks: { label: (context) => `${context.label}: ${context.parsed}%` } } } }} /> : <EmptyState title="No payment sales yet" subtitle="Orders from the database will populate this chart." />}
+        {hasSales ? (
+          <div className="analytics-donut-total" aria-hidden="true">
+            <strong>{money(total)}</strong>
+            <span>Total</span>
+          </div>
+        ) : null}
       </div>
       <div className="mt-4 grid gap-3">
         {data.map((item) => (
-          <div key={item.label} className="flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/[0.045] px-3 py-2">
-            <span className="flex min-w-0 items-center gap-2 text-sm text-white/72"><span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: item.color }} />{item.label}</span>
-            <span className="shrink-0 text-right text-sm font-bold text-white">{item.value}% <span className="ml-2 text-white/42">{money(item.revenue)}</span></span>
+          <div key={item.label} className="analytics-donut-legend-row">
+            <span><span style={{ backgroundColor: item.color }} />{item.label}</span>
+            <strong>{item.value}% <small>{money(item.revenue)}</small></strong>
           </div>
         ))}
       </div>
@@ -2826,9 +2894,9 @@ function AnalyticsDonutCard({ title, data, icon: Icon, compact }) {
 
 function SummaryRow({ label, value, positive, strong }) {
   return (
-    <div className="flex items-center justify-between gap-4 rounded-2xl border border-white/10 bg-white/[0.045] px-4 py-3">
-      <span className={`${strong ? "font-bold text-white" : "text-white/62"}`}>{label}</span>
-      <strong className={`${positive ? "text-neonbrand" : "text-rose-300"} ${strong ? "text-lg" : "text-sm"}`}>{value}</strong>
+    <div className="sales-summary-row">
+      <span className={strong ? "is-strong" : ""}>{label}</span>
+      <strong className={`${positive ? "is-positive" : "is-negative"} ${strong ? "is-strong" : ""}`}>{value}</strong>
     </div>
   );
 }
