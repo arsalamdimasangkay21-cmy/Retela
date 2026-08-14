@@ -15,6 +15,7 @@ import ConfirmDialog from "../components/ConfirmDialog";
 import FaceVerification from "../components/FaceVerification";
 import NotificationPreviewPanel from "../components/NotificationPreviewPanel";
 import ProductImage from "../components/ProductImage";
+import ProductQuickView from "../components/ProductQuickView";
 import { Button, Card, Field } from "../components/ui";
 import { resolveAssetUrl } from "../config/branding";
 import { useAuth } from "../context/AuthContext";
@@ -574,6 +575,7 @@ export default function CustomerDashboard({ active, onChange }) {
             items={featuredApparel}
             loading={featuredLoading}
             onAddToCart={(item) => addToCart(item, "Added to cart successfully.")}
+            onBuyNow={buyNow}
           />
           <FloatingNotificationsWidget onViewAll={() => onChange("Notifications")} />
         </div>
@@ -930,8 +932,9 @@ function CartPage({
   );
 }
 
-function FeaturedApparelHero({ items, loading, onAddToCart }) {
+function FeaturedApparelHero({ items, loading, onAddToCart, onBuyNow }) {
   const [selectedApparel, setSelectedApparel] = useState(null);
+  const [quickViewProduct, setQuickViewProduct] = useState(null);
   const availableItems = useMemo(() => items.filter((item) => Number(item.stock || 0) > 0), [items]);
 
   function openDetails(item) {
@@ -940,6 +943,11 @@ function FeaturedApparelHero({ items, loading, onAddToCart }) {
 
   function closeDetails() {
     setSelectedApparel(null);
+  }
+
+  function openQuickView(event, item) {
+    event.stopPropagation();
+    setQuickViewProduct(item);
   }
 
   useEffect(() => {
@@ -1005,12 +1013,16 @@ function FeaturedApparelHero({ items, loading, onAddToCart }) {
               const image = item.images?.[0] || item.image_url;
               return (
                 <SwiperSlide key={item.id}>
-                  <button
-                    type="button"
+                  <div
+                    role="button"
+                    tabIndex={0}
                     className="grid min-h-[370px] w-full cursor-pointer gap-0 text-left lg:grid-cols-[minmax(0,1.18fr)_minmax(300px,0.58fr)]"
                     onClick={() => openDetails(item)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") openDetails(item);
+                    }}
                   >
-                    <div className="min-h-[270px] overflow-hidden bg-slate-950/85 lg:min-h-[420px]">
+                    <div className="relative min-h-[270px] overflow-hidden bg-slate-950/85 lg:min-h-[420px]">
                       {image ? (
                         <ProductImage src={image} alt={item.name} className="h-full min-h-[270px] w-full object-contain lg:min-h-[420px]" />
                       ) : (
@@ -1018,6 +1030,9 @@ function FeaturedApparelHero({ items, loading, onAddToCart }) {
                           <FileImage size={42} />
                         </div>
                       )}
+                      <button type="button" className="retela-product-eye-button retela-featured-eye-button" onClick={(event) => openQuickView(event, item)} aria-label={`Preview ${item.name}`}>
+                        <Eye size={17} />
+                      </button>
                     </div>
                     <div className="flex min-w-0 flex-col justify-center gap-3 bg-white p-4 text-slate-950 sm:p-6 lg:p-7">
                       <span className="w-fit rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-black uppercase tracking-[0.16em] text-emerald-700">Available</span>
@@ -1034,7 +1049,7 @@ function FeaturedApparelHero({ items, loading, onAddToCart }) {
                         View Details
                       </span>
                     </div>
-                  </button>
+                  </div>
                 </SwiperSlide>
               );
             })}
@@ -1057,6 +1072,14 @@ function FeaturedApparelHero({ items, loading, onAddToCart }) {
           onAddToCart={onAddToCart}
         />
       ) : null}
+      <ProductQuickView
+        product={quickViewProduct}
+        isOpen={Boolean(quickViewProduct)}
+        onClose={() => setQuickViewProduct(null)}
+        mode="customer"
+        onAddToCart={onAddToCart}
+        onBuyNow={onBuyNow}
+      />
     </>
   );
 }
@@ -1156,6 +1179,7 @@ function Shop({ products, addToCart, buyNow, filters, setFilters, filterOptions,
   const [selectedApparel, setSelectedApparel] = useState(null);
   const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
   const [isPhotoModalOpen, setIsPhotoModalOpen] = useState(false);
+  const [quickViewProduct, setQuickViewProduct] = useState(null);
   const purchasableProducts = useMemo(() => products.filter((item) => Number(item.stock || 0) > 0), [products]);
 
   function openDetails(item) {
@@ -1225,6 +1249,9 @@ function Shop({ products, addToCart, buyNow, filters, setFilters, filterOptions,
                 <div className="retela-product-card-image-wrap relative overflow-hidden bg-slate-100">
                   <ProductImage product={p} className="retela-shop-product-image h-full w-full object-cover" alt={p.name} />
                   <span className={`retela-product-stock-badge absolute right-2 top-2 rounded-full border font-black ${stockBadgeClass(p.stock)}`}>{status}</span>
+                  <button type="button" className="retela-product-eye-button" onClick={() => setQuickViewProduct(p)} aria-label={`Preview ${p.name}`}>
+                    <Eye size={15} />
+                  </button>
                 </div>
                 <div className="retela-product-card-body flex flex-1 min-w-0 flex-col">
                   <h4 className="retela-product-card-title font-bold text-slate-950">{p.name}</h4>
@@ -1267,6 +1294,14 @@ function Shop({ products, addToCart, buyNow, filters, setFilters, filterOptions,
       {selectedApparel && isPhotoModalOpen ? (
         <ApparelPhotoModal item={selectedApparel} onClose={closePhoto} />
       ) : null}
+      <ProductQuickView
+        product={quickViewProduct}
+        isOpen={Boolean(quickViewProduct)}
+        onClose={() => setQuickViewProduct(null)}
+        mode="customer"
+        onAddToCart={addToCart}
+        onBuyNow={buyNow}
+      />
     </>
   );
 }

@@ -2057,6 +2057,49 @@ button {
   width: 100%;
 }
 
+.retela-product-eye-button {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  z-index: 5;
+  display: inline-flex;
+  width: 36px;
+  height: 36px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #c8ead6;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.94);
+  color: #0f7a4a;
+  box-shadow: 0 10px 24px rgba(13, 87, 52, 0.18);
+  transition: transform 160ms ease, background-color 160ms ease, border-color 160ms ease;
+}
+
+.retela-product-eye-button:hover {
+  border-color: #16a36a;
+  background: #f4fff9;
+  transform: translateY(-1px);
+}
+
+.retela-product-eye-button:active {
+  transform: scale(0.96);
+}
+
+.retela-admin-product-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+  min-width: 0;
+}
+
+.retela-admin-product-card {
+  max-width: 100%;
+}
+
+.retela-admin-product-image-wrap {
+  aspect-ratio: 1 / 1;
+}
+
 .retela-product-card {
   width: 100%;
   max-width: 100%;
@@ -2195,8 +2238,171 @@ button {
   grid-column: 1 / -1;
 }
 
+.product-quick-view-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 2300;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  background: rgba(15, 23, 42, 0.48);
+  backdrop-filter: blur(5px);
+}
+
+.product-quick-view-sheet {
+  display: flex;
+  width: min(92vw, 520px);
+  max-height: min(86vh, 720px);
+  overflow: hidden;
+  flex-direction: column;
+  border: 1px solid #d8eee1;
+  border-radius: 24px;
+  background: #ffffff;
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.28);
+  animation: productQuickViewIn 220ms cubic-bezier(.22, 1, .36, 1);
+}
+
+.product-quick-view-header {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-bottom: 1px solid #e6f2eb;
+  color: #527365;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.product-quick-view-header button {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  border: 1px solid #d8eee1;
+  border-radius: 14px;
+  background: #f6fff9;
+  color: #116b3b;
+}
+
+.product-quick-view-image-stage {
+  position: relative;
+  display: grid;
+  flex: 1 1 auto;
+  min-height: 0;
+  place-items: center;
+  padding: 14px;
+  background: linear-gradient(180deg, #f8fffb 0%, #eef9f2 100%);
+}
+
+.product-quick-view-image {
+  width: 100%;
+  max-height: min(58vh, 520px);
+  object-fit: contain;
+  border-radius: 18px;
+}
+
+.product-quick-view-image-placeholder {
+  min-height: 280px;
+}
+
+.product-quick-view-nav {
+  position: absolute;
+  top: 50%;
+  z-index: 2;
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border: 1px solid rgba(22, 163, 106, 0.25);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.9);
+  color: #116b3b;
+  transform: translateY(-50%);
+}
+
+.product-quick-view-nav.is-prev {
+  left: 14px;
+}
+
+.product-quick-view-nav.is-next {
+  right: 14px;
+}
+
+.product-quick-view-dots {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 14px 12px;
+  background: #eef9f2;
+}
+
+.product-quick-view-dots button {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: #b8d9c6;
+  transition: width 160ms ease, background-color 160ms ease;
+}
+
+.product-quick-view-dots button.is-active {
+  width: 20px;
+  background: #16a36a;
+}
+
+.product-quick-view-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  flex: 0 0 auto;
+  padding: 14px;
+  padding-bottom: max(14px, env(safe-area-inset-bottom));
+  border-top: 1px solid #e6f2eb;
+  background: #ffffff;
+}
+
+.product-quick-view-actions button {
+  min-height: 44px;
+  border-radius: 14px;
+  font-size: 0.9rem;
+  font-weight: 900;
+}
+
+.product-quick-view-buy {
+  border: 1px solid #16a36a;
+  background: #16a36a;
+  color: #ffffff;
+}
+
+.product-quick-view-add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid #b8e7ca;
+  background: #f3fff7;
+  color: #0c7044;
+}
+
+@keyframes productQuickViewIn {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
 @media (max-width: 1024px) {
   .retela-shop-product-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .retela-admin-product-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
@@ -2319,6 +2525,32 @@ button {
     gap: 10px;
   }
 
+  .retela-admin-product-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .retela-admin-product-card {
+    border-radius: 16px !important;
+    padding: 8px !important;
+  }
+
+  .retela-admin-product-body {
+    margin-top: 8px !important;
+  }
+
+  .retela-admin-product-body h4 {
+    font-size: 0.82rem;
+  }
+
+  .retela-admin-product-body .grid {
+    gap: 2px;
+  }
+
+  .retela-admin-product-body p {
+    font-size: 0.68rem;
+  }
+
   .retela-customer-checkout-layout,
   .retela-checkout-card {
     width: calc(100% - 24px);
@@ -2371,7 +2603,8 @@ button {
     min-height: 0 !important;
   }
 
-  .retela-featured-swiper button > div:first-child {
+  .retela-featured-swiper button > div:first-child,
+  .retela-featured-swiper [role="button"] > div:first-child {
     min-height: 0 !important;
   }
 
@@ -2427,6 +2660,13 @@ button {
     font-size: 9px;
   }
 
+  .retela-product-eye-button {
+    right: 6px;
+    bottom: 6px;
+    width: 32px;
+    height: 32px;
+  }
+
   .retela-product-card-title {
     font-size: 0.82rem;
     line-height: 1.16;
@@ -2471,6 +2711,50 @@ button {
 
   .retela-product-action-view svg {
     display: none;
+  }
+
+  .product-quick-view-backdrop {
+    align-items: flex-end;
+    padding: 0;
+    background: rgba(15, 35, 24, 0.35);
+  }
+
+  .product-quick-view-sheet {
+    width: 100%;
+    max-height: calc(88dvh - env(safe-area-inset-bottom));
+    border-bottom: 0;
+    border-radius: 24px 24px 0 0;
+    animation-name: productQuickViewSheetIn;
+  }
+
+  .product-quick-view-image-stage {
+    padding: 12px;
+  }
+
+  .product-quick-view-image {
+    max-height: 54dvh;
+    border-radius: 16px;
+  }
+
+  .product-quick-view-actions {
+    gap: 8px;
+    padding: 12px;
+    padding-bottom: max(16px, calc(12px + env(safe-area-inset-bottom)));
+  }
+
+  .product-quick-view-actions button {
+    min-height: 42px;
+    border-radius: 12px;
+    font-size: 0.82rem;
+  }
+
+  @keyframes productQuickViewSheetIn {
+    from {
+      transform: translateY(100%);
+    }
+    to {
+      transform: translateY(0);
+    }
   }
 
   .retela-product-details-backdrop {

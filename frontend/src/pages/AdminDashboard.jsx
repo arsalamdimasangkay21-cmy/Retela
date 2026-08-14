@@ -12,6 +12,7 @@ import ConfirmDialog from "../components/ConfirmDialog";
 import CustomerDocumentsModal from "../components/CustomerDocumentsModal";
 import NotificationPreviewPanel from "../components/NotificationPreviewPanel";
 import ProductImage from "../components/ProductImage";
+import ProductQuickView from "../components/ProductQuickView";
 import { Button, Card, Field, StatCard } from "../components/ui";
 import { useAuth } from "../context/AuthContext";
 import { getProductImageValue, normalizeProductImageFields, resolveProductImageUrl } from "../utils/productImage";
@@ -3455,6 +3456,8 @@ function orderStatusLabel(status) {
 }
 
 function ProductGallery({ products, filters, setFilters, optionValues, onAdd, onEdit, onDelete, deletingProductIds = [] }) {
+  const [quickViewProduct, setQuickViewProduct] = useState(null);
+
   return (
     <Card className="border-white/10 bg-white/[0.06] shadow-[0_24px_70px_rgba(0,0,0,0.28)] backdrop-blur-2xl">
         <div className="mb-5 flex flex-col justify-between gap-3 lg:flex-row lg:items-center">
@@ -3485,11 +3488,16 @@ function ProductGallery({ products, filters, setFilters, optionValues, onAdd, on
             {optionValues.conditions.filter((condition) => condition !== "Other").map((condition) => <option key={condition} value={condition}>{condition}</option>)}
           </select>
         </div>
-        {products.length ? <div className="grid min-w-0 justify-start gap-5 [grid-template-columns:repeat(auto-fill,minmax(250px,300px))]">
+        {products.length ? <div className="retela-admin-product-grid">
           {products.map((p) => (
-            <motion.article key={p.id} className="w-full max-w-[300px] min-w-0 rounded-[20px] border border-white/10 bg-white/[0.07] p-2.5 shadow-xl shadow-black/18 backdrop-blur-2xl transition duration-300 hover:-translate-y-0.5 hover:border-neonbrand/30 hover:shadow-[0_18px_55px_rgba(0,0,0,0.3),0_0_28px_rgba(56,255,136,0.08)]" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.28 }}>
-              <ProductImage product={p} className="aspect-[4/3] w-full rounded-xl object-cover" alt={p.name} />
-              <div className="mt-3 min-w-0">
+            <motion.article key={p.id} className="retela-admin-product-card w-full min-w-0 rounded-[20px] border border-white/10 bg-white/[0.07] p-2.5 shadow-xl shadow-black/18 backdrop-blur-2xl transition duration-300 hover:-translate-y-0.5 hover:border-neonbrand/30 hover:shadow-[0_18px_55px_rgba(0,0,0,0.3),0_0_28px_rgba(56,255,136,0.08)]" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.28 }}>
+              <div className="retela-admin-product-image-wrap relative overflow-hidden rounded-xl bg-white/[0.06]">
+                <ProductImage product={p} className="h-full w-full object-cover" alt={p.name} />
+                <button type="button" className="retela-product-eye-button" onClick={() => setQuickViewProduct(p)} aria-label={`Preview ${p.name}`}>
+                  <Eye size={15} />
+                </button>
+              </div>
+              <div className="retela-admin-product-body mt-3 min-w-0">
                 <h4 className="truncate font-bold text-white" title={p.name}>{p.name}</h4>
                 <div className="mt-2 grid gap-1 text-xs text-white/52">
                   <p className="truncate"><span className="font-bold text-white/72">Category:</span> {p.category || "T-Shirts"}</p>
@@ -3515,6 +3523,12 @@ function ProductGallery({ products, filters, setFilters, optionValues, onAdd, on
             </motion.article>
           ))}
         </div> : <EmptyState title="No apparel items added yet." subtitle="Use Add Apparel Item to create the first thrift item when inventory is ready." />}
+        <ProductQuickView
+          product={quickViewProduct}
+          isOpen={Boolean(quickViewProduct)}
+          onClose={() => setQuickViewProduct(null)}
+          mode="admin"
+        />
     </Card>
   );
 }
