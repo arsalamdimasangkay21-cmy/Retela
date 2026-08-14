@@ -178,7 +178,7 @@ async function getAudienceUsers(audience, audienceFilter = "") {
   }
   if (audience === "by_product_interest" && filter) {
     return query(
-      `SELECT DISTINCT u.id, u.username, u.display_name, u.email, u.phone_number
+      `SELECT DISTINCT u.id, u.username, u.display_name, u.email, u.phone_number, u.created_at
        FROM users u
        JOIN orders o ON o.user_id = u.id
        JOIN order_items oi ON oi.order_id = o.id
@@ -208,7 +208,7 @@ async function getAudienceUsers(audience, audienceFilter = "") {
   }
   if (audience === "by_product_interest") {
     return query(
-      `SELECT DISTINCT u.id, u.username, u.display_name, u.email, u.phone_number
+      `SELECT DISTINCT u.id, u.username, u.display_name, u.email, u.phone_number, u.created_at
        FROM users u
        JOIN orders o ON o.user_id = u.id
        JOIN order_items oi ON oi.order_id = o.id
@@ -240,7 +240,7 @@ async function getAudienceUsers(audience, audienceFilter = "") {
   }
   if (audience === "customers_with_orders") {
     return query(
-      `SELECT DISTINCT u.id, u.username, u.display_name, u.email, u.phone_number
+      `SELECT DISTINCT u.id, u.username, u.display_name, u.email, u.phone_number, u.created_at
        FROM users u
        JOIN orders o ON o.user_id = u.id
        WHERE u.role = 'customer'
