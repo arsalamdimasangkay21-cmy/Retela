@@ -683,6 +683,43 @@ button {
   pointer-events: auto;
 }
 
+.admin-sidebar-brand {
+  border: 1px solid #d9eee2 !important;
+  border-radius: 18px !important;
+  background: #ffffff !important;
+  color: #0f5f36 !important;
+  box-shadow: 0 8px 24px rgba(18, 92, 55, 0.1) !important;
+}
+
+.admin-sidebar-brand .retela-sidebar-logo {
+  border-color: #d9eee2 !important;
+  background: #ffffff !important;
+  object-fit: contain !important;
+  box-shadow: 0 4px 14px rgba(18, 92, 55, 0.08) !important;
+}
+
+.admin-sidebar-brand .retela-sidebar-title {
+  color: #0f5f36 !important;
+}
+
+.admin-sidebar-brand .retela-sidebar-subtitle {
+  color: #16864e !important;
+}
+
+.admin-sidebar-brand .admin-sidebar-hamburger {
+  border: 1px solid #2bbf6d !important;
+  background: #ecfff3 !important;
+  color: #116b3b !important;
+  box-shadow: 0 8px 22px rgba(18, 92, 55, 0.1) !important;
+}
+
+.admin-sidebar-brand .admin-sidebar-hamburger:hover,
+.admin-sidebar-brand .admin-sidebar-hamburger:focus-visible {
+  border-color: #16a36a !important;
+  background: #dffbe9 !important;
+  color: #0f5f36 !important;
+}
+
 .retela-sidebar-overlay {
   position: fixed;
   inset: 0;
