@@ -3931,16 +3931,16 @@ function AdminFeedback({ reviews }) {
   const average = reviews.length ? reviews.reduce((sum, review) => sum + Number(review.rating || 0), 0) / reviews.length : 0;
   return (
     <div className="grid gap-5">
-      <section className="relative overflow-hidden rounded-[30px] border border-white/10 bg-black/35 p-5 shadow-2xl shadow-black/30 backdrop-blur-2xl sm:p-7">
+      <section className="admin-feedback-hero relative overflow-hidden rounded-[30px] border border-white/10 bg-black/35 p-5 shadow-2xl shadow-black/30 backdrop-blur-2xl sm:p-7">
         <div className="relative flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <p className="text-xs font-bold uppercase tracking-[0.2em] text-neonbrand/75">Customer Experience</p>
             <h1 className="mt-3 font-display text-3xl font-bold text-white">Feedback</h1>
             <p className="mt-2 text-sm text-white/55">Review customer ratings, categories, order references, and uploaded apparel feedback.</p>
           </div>
-          <div className="rounded-2xl border border-amber-300/25 bg-amber-300/10 px-4 py-3 text-amber-100">
-            <span className="text-xs font-bold uppercase tracking-[0.16em]">Average Rating</span>
-            <strong className="mt-1 flex items-center gap-2 text-2xl"><Star size={20} fill="currentColor" /> {average.toFixed(1)}</strong>
+          <div className="feedback-rating-card rounded-2xl px-4 py-3">
+            <span className="feedback-rating-label text-xs font-bold uppercase tracking-[0.16em]">Average Rating</span>
+            <strong className="feedback-rating-value mt-1 flex items-center gap-2 text-2xl"><Star className="feedback-rating-star" size={20} fill="currentColor" /> {average.toFixed(1)}</strong>
           </div>
         </div>
       </section>
@@ -3958,7 +3958,7 @@ function AdminFeedback({ reviews }) {
             {review.image_url ? <img src={assetUrl(review.image_url)} className="mt-4 h-40 w-full rounded-2xl object-cover" alt="Customer feedback" /> : null}
             <p className="mt-4 text-sm leading-6 text-white/58">{review.comment}</p>
           </Card>
-        )) : <Card className="md:col-span-2 xl:col-span-3"><EmptyState title="No customer feedback yet" subtitle="Feedback from completed orders will appear here." /></Card>}
+        )) : <Card className="feedback-empty-card md:col-span-2 xl:col-span-3"><EmptyState title="No customer feedback yet" subtitle="Feedback from completed orders will appear here." /></Card>}
       </div>
     </div>
   );

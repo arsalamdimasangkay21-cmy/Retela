@@ -2,10 +2,39 @@ import { useEffect, useRef, useState } from "react";
 import { Bot, Loader2, Send, X } from "lucide-react";
 import { api } from "../api/client";
 
+const initialSuggestions = [
+  "Track my order",
+  "Product availability",
+  "Shipping fee",
+  "Return an item",
+  "Payment methods",
+  "Talk to support"
+];
+
+const contextualSuggestions = {
+  order: ["Track my order", "Order status", "Cancel an order"],
+  product: ["Is this available?", "Available sizes", "Product condition"],
+  shipping: ["Shipping fee", "Delivery time"],
+  return: ["Return policy", "Start a return"],
+  payment: ["GCash", "Cash on Delivery", "Other payment methods"],
+  support: ["Talk to support"]
+};
+
 function messageStatusLabel(status) {
   if (status === "seen") return "Seen";
   if (status === "delivered") return "Delivered";
   return "Sent";
+}
+
+function suggestionsForMessages(messages = []) {
+  const text = messages.slice(-4).map((message) => message.body || "").join(" ").toLowerCase();
+  if (/order|track|cancel|status/.test(text)) return contextualSuggestions.order;
+  if (/available|stock|size|condition|product|apparel/.test(text)) return contextualSuggestions.product;
+  if (/shipping|delivery|deliver|fee/.test(text)) return contextualSuggestions.shipping;
+  if (/return|refund|replace/.test(text)) return contextualSuggestions.return;
+  if (/payment|gcash|cash|cod|pay/.test(text)) return contextualSuggestions.payment;
+  if (/admin|support|human|agent/.test(text)) return contextualSuggestions.support;
+  return initialSuggestions;
 }
 
 export function FloatingCustomerAssistant({ hidden = false }) {
@@ -44,9 +73,9 @@ export function FloatingCustomerAssistant({ hidden = false }) {
     return () => window.removeEventListener("retela:open-customer-assistant", openAssistant);
   }, []);
 
-  async function sendMessage(event) {
-    event?.preventDefault();
-    const text = prompt.trim();
+  async function sendMessage(eventOrText) {
+    if (eventOrText?.preventDefault) eventOrText.preventDefault();
+    const text = typeof eventOrText === "string" ? eventOrText.trim() : prompt.trim();
     if (!text || sending) return;
     setSending(true);
     setPrompt("");
@@ -65,23 +94,24 @@ export function FloatingCustomerAssistant({ hidden = false }) {
   }
 
   if (hidden) return null;
+  const quickSuggestions = suggestionsForMessages(messages);
 
   return (
     <div className="ai-chat-shell">
       {open ? (
-        <section className="ai-chat-window fade-slide rounded-[28px] border border-neonbrand/25 bg-[#07110d]/95 text-white shadow-[0_24px_90px_rgba(0,0,0,0.46),0_0_42px_rgba(56,255,136,0.16)] backdrop-blur-2xl">
-          <div className="flex items-center justify-between gap-3 border-b border-white/10 p-4">
+        <section className="ai-chat-window fade-slide rounded-[24px] border border-emerald-100 bg-[#fbfffc] text-slate-900 shadow-[0_18px_55px_rgba(15,23,42,0.18)] backdrop-blur-2xl">
+          <div className="ai-chat-header flex items-center justify-between gap-3 border-b border-emerald-100 bg-white p-3">
             <div className="flex min-w-0 items-center gap-3">
-              <span className="relative grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-neonbrand text-black shadow-[0_0_26px_rgba(56,255,136,0.35)]">
-                <Bot size={22} />
-                <span className="absolute -right-0.5 -top-0.5 h-3 w-3 rounded-full border-2 border-[#07110d] bg-emerald-300" />
+              <span className="relative grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-emerald-50 text-emerald-700 shadow-[0_0_20px_rgba(22,163,74,0.12)]">
+                <Bot size={20} />
+                <span className="absolute -right-0.5 -top-0.5 h-3 w-3 rounded-full border-2 border-white bg-emerald-500" />
               </span>
               <div className="min-w-0">
-                <h3 className="truncate font-display text-base font-bold">Retela Assistant</h3>
-                <p className="truncate text-xs font-semibold text-white/50">AI shopping help online</p>
+                <h3 className="truncate font-display text-base font-bold text-slate-950">Retela Assistant</h3>
+                <p className="truncate text-xs font-semibold text-slate-500">AI shopping help online</p>
               </div>
             </div>
-            <button type="button" onClick={() => setOpen(false)} className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl border border-white/10 bg-white/[0.06] text-white/70 transition hover:border-neonbrand/40 hover:text-neonbrand" aria-label="Close assistant">
+            <button type="button" onClick={() => setOpen(false)} className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl border border-slate-200 bg-white text-slate-500 transition hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700" aria-label="Close assistant">
               <X size={18} />
             </button>
           </div>
@@ -89,42 +119,48 @@ export function FloatingCustomerAssistant({ hidden = false }) {
           <div ref={scrollRef} className="ai-chat-messages grid content-start gap-3 p-4">
             {messages.length ? messages.map((message, index) => (
               <div key={message.id || index} className={`grid max-w-[84%] gap-1 ${message.sender_type === "customer" ? "ml-auto justify-items-end" : "justify-items-start"}`}>
-                <p className={`break-words rounded-2xl px-4 py-3 text-sm leading-6 shadow-sm ${message.sender_type === "customer" ? "bg-neonbrand text-black" : message.sender_type === "admin" ? "bg-emerald-500/15 text-emerald-100" : "bg-white/[0.08] text-white/82"}`}>
+                <p className={`break-words rounded-2xl px-4 py-3 text-sm leading-6 shadow-sm ${message.sender_type === "customer" ? "bg-emerald-700 text-white" : message.sender_type === "admin" ? "bg-emerald-50 text-slate-900" : "bg-[#F3FAF6] text-slate-900"}`}>
                   {message.body}
                 </p>
-                <span className="px-2 text-[11px] font-semibold text-white/35">{messageStatusLabel(message.delivery_status)}</span>
+                <span className="px-2 text-[11px] font-semibold text-slate-500">{messageStatusLabel(message.delivery_status)}</span>
               </div>
             )) : (
-              <div className="rounded-3xl border border-white/10 bg-white/[0.06] p-4 text-sm leading-6 text-white/70">
+              <div className="rounded-3xl border border-emerald-100 bg-[#F3FAF6] p-4 text-sm leading-6 text-slate-700">
                 Ask about available tees, caps, jackets, sizes, prices, stock, delivery, or payment.
               </div>
             )}
-            {sending ? <p className="inline-flex max-w-fit items-center gap-2 rounded-2xl bg-white/[0.08] px-4 py-3 text-sm text-white/60"><Loader2 size={15} className="animate-spin" /> Thinking</p> : null}
+            {sending ? <p className="inline-flex max-w-fit items-center gap-2 rounded-2xl bg-[#F3FAF6] px-4 py-3 text-sm text-slate-600"><Loader2 size={15} className="animate-spin text-emerald-700" /> Thinking</p> : null}
           </div>
 
-          <form onSubmit={sendMessage} className="ai-chat-input-container border-t border-white/10 p-3">
+          <div className="ai-chat-suggestions">
+            {quickSuggestions.map((suggestion) => (
+              <button key={suggestion} type="button" disabled={sending} onClick={() => sendMessage(suggestion)} className="quick-suggestion">
+                {suggestion}
+              </button>
+            ))}
+          </div>
+
+          <form onSubmit={sendMessage} className="ai-chat-input-container border-t border-emerald-100 bg-white p-3">
             <input
-              className="min-w-0 flex-1 rounded-2xl border border-white/10 bg-white/[0.07] px-4 py-3 text-sm text-white outline-none transition placeholder:text-white/35 focus:border-neonbrand/60"
+              className="min-w-0 flex-1 rounded-2xl border border-emerald-100 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-emerald-400"
               placeholder="Ask the assistant"
               value={prompt}
               onChange={(event) => setPrompt(event.target.value)}
             />
-            <button type="submit" disabled={!prompt.trim() || sending} className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-neonbrand text-black shadow-[0_0_24px_rgba(56,255,136,0.2)] transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-50" aria-label="Send message">
+            <button type="submit" disabled={!prompt.trim() || sending} className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-emerald-700 text-white shadow-[0_0_20px_rgba(22,163,74,0.2)] transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-50" aria-label="Send message">
               <Send size={18} />
             </button>
           </form>
         </section>
       ) : null}
 
-      <button type="button" onClick={() => setOpen((value) => !value)} className="ai-chat-button float-soft relative grid h-16 w-16 place-items-center overflow-hidden rounded-full border border-neonbrand/45 bg-[#0b1510] text-neonbrand shadow-[0_20px_70px_rgba(56,255,136,0.3)] transition hover:scale-105" aria-label="Open assistant">
-        <span className="absolute inset-1 rounded-full bg-neonbrand/10 shadow-[inset_0_0_24px_rgba(56,255,136,0.22)]" />
-        {open ? <X size={25} className="relative" /> : (
+      {!open ? <button type="button" onClick={() => setOpen(true)} className="ai-chat-button float-soft relative grid h-16 w-16 place-items-center overflow-hidden rounded-full border border-emerald-300 bg-white text-emerald-700 shadow-[0_16px_44px_rgba(22,101,52,0.22)] transition hover:scale-105" aria-label="Open assistant">
+        <span className="absolute inset-1 rounded-full bg-emerald-50 shadow-[inset_0_0_20px_rgba(22,163,74,0.12)]" />
           <span className="relative grid place-items-center">
             <Bot size={27} />
             <span className="mt-[-2px] text-[10px] font-black leading-none tracking-[0.12em]">AI</span>
           </span>
-        )}
-      </button>
+      </button> : null}
     </div>
   );
 }
