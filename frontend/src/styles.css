@@ -2041,6 +2041,149 @@ button {
   text-align: right;
 }
 
+.retela-shop-product-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+  min-width: 0;
+}
+
+.retela-product-card {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.retela-product-card-image-wrap {
+  aspect-ratio: 1 / 1;
+  border-radius: 16px 16px 0 0;
+}
+
+.retela-shop-product-image {
+  aspect-ratio: 1 / 1;
+  display: block;
+}
+
+.retela-product-stock-badge {
+  max-width: calc(100% - 16px);
+  padding: 4px 8px;
+  font-size: 10px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.retela-product-card-body {
+  gap: 5px;
+  padding: 12px;
+}
+
+.retela-product-card-title {
+  display: -webkit-box;
+  min-height: 2.35em;
+  overflow: hidden;
+  font-size: 0.95rem;
+  line-height: 1.18;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.retela-product-card-meta {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  font-size: 0.78rem;
+  line-height: 1.2;
+}
+
+.retela-product-card-meta .truncate {
+  min-width: 0;
+}
+
+.retela-product-card-price {
+  font-size: 1rem;
+  line-height: 1.15;
+}
+
+.retela-product-card-condition {
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: 0.72rem;
+  line-height: 1.2;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+}
+
+.retela-product-card-description {
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: 0.75rem;
+  line-height: 1.35;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.retela-product-card-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  padding-top: 8px;
+}
+
+.retela-product-action-button {
+  display: inline-flex;
+  min-width: 0;
+  min-height: 38px;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border-radius: 12px;
+  padding: 0 8px;
+  font-size: 0.75rem;
+  font-weight: 800;
+  line-height: 1;
+  white-space: nowrap;
+  transition: border-color 160ms ease, background-color 160ms ease, color 160ms ease, transform 160ms ease;
+}
+
+.retela-product-action-button:active {
+  transform: scale(0.98);
+}
+
+.retela-product-action-view {
+  border: 1px solid #d8e7df;
+  background: #ffffff;
+  color: #315243;
+}
+
+.retela-product-action-view:hover {
+  border-color: #9bd7b4;
+  background: #f0fbf4;
+  color: #0f6a3e;
+}
+
+.retela-product-action-add,
+.retela-product-action-buy {
+  border: 1px solid #16a36a;
+  background: #16a36a;
+  color: #ffffff;
+}
+
+.retela-product-action-add:hover,
+.retela-product-action-buy:hover {
+  border-color: #0d8754;
+  background: #0d8754;
+}
+
+.retela-product-action-buy {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 1024px) {
+  .retela-shop-product-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
 @media (max-width: 768px) {
   html,
   body,
@@ -2059,9 +2202,18 @@ button {
   .retela-page-content {
     width: 100%;
     max-width: 100%;
-    padding-left: 16px !important;
-    padding-right: 16px !important;
+    padding-left: 12px !important;
+    padding-right: 12px !important;
     padding-bottom: calc(120px + env(safe-area-inset-bottom)) !important;
+  }
+
+  .retela-shop-card {
+    padding: 10px !important;
+  }
+
+  .retela-shop-product-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
   }
 
   .retela-customer-checkout-layout,
@@ -2151,19 +2303,54 @@ button {
 
   .retela-product-card img {
     aspect-ratio: 1 / 1;
-    height: auto !important;
-    max-height: 420px;
-    object-fit: contain;
+    height: 100% !important;
+    max-height: none;
+    object-fit: cover;
+  }
+
+  .retela-product-card-image-wrap {
+    border-radius: 14px 14px 0 0;
+  }
+
+  .retela-product-card-body {
+    gap: 4px;
+    padding: 9px;
+  }
+
+  .retela-product-stock-badge {
+    right: 6px;
+    top: 6px;
+    padding: 3px 6px;
+    font-size: 9px;
+  }
+
+  .retela-product-card-title {
+    font-size: 0.82rem;
+    line-height: 1.16;
+  }
+
+  .retela-product-card-meta {
+    font-size: 0.7rem;
+  }
+
+  .retela-product-card-price {
+    font-size: 0.9rem;
+  }
+
+  .retela-product-card-condition,
+  .retela-product-card-description {
+    display: none;
   }
 
   .retela-product-card-actions {
-    flex-wrap: wrap;
-    gap: 10px;
+    gap: 6px;
+    padding-top: 6px;
   }
 
   .retela-product-card-actions > button {
-    flex: 1 1 calc(50% - 10px);
-    min-width: 128px;
+    min-height: 34px;
+    padding: 0 6px;
+    font-size: 0.68rem;
   }
 
   .retela-product-details-backdrop {
@@ -2280,8 +2467,13 @@ button {
 
 @media (max-width: 480px) {
   .retela-page-content {
-    padding-left: 12px !important;
-    padding-right: 12px !important;
+    padding-left: 10px !important;
+    padding-right: 10px !important;
+  }
+
+  .retela-shop-card {
+    padding-left: 8px !important;
+    padding-right: 8px !important;
   }
 
   .retela-customer-checkout-layout,
@@ -2297,8 +2489,17 @@ button {
     width: 100%;
   }
 
-  .retela-product-card-actions > button {
-    flex-basis: 100%;
+  .retela-shop-product-grid {
+    gap: 8px;
+  }
+
+  .retela-product-card-body {
+    padding: 8px;
+  }
+
+  .retela-product-action-button {
+    min-height: 34px;
+    border-radius: 10px;
   }
 
   .payment-methods {

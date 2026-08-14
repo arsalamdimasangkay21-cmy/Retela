@@ -1203,7 +1203,7 @@ function Shop({ products, addToCart, buyNow, filters, setFilters, filterOptions,
 
   return (
     <>
-      <Card>
+      <Card className="retela-shop-card">
         <div className="mb-4 grid gap-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
@@ -1217,34 +1217,36 @@ function Shop({ products, addToCart, buyNow, filters, setFilters, filterOptions,
           <CustomerFilters filters={filters} setFilters={setFilters} filterOptions={filterOptions} />
           <p className="text-sm text-white/55">{purchasableProducts.length} apparel items found</p>
         </div>
-        <div className="grid min-w-0 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        <div className="retela-shop-product-grid">
           {purchasableProducts.map((p) => {
             const status = stockStatus(p.stock);
             return (
-              <article key={p.id} className="retela-product-card flex h-full min-w-0 flex-col rounded-2xl border border-slate-100 bg-white p-3 shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg">
-                <div className="relative">
-                  <ProductImage product={p} className="h-48 w-full rounded-xl object-cover" alt={p.name} />
-                  <span className={`absolute right-3 top-3 rounded-full border px-3 py-1 text-xs font-black ${stockBadgeClass(p.stock)}`}>{status}</span>
+              <article key={p.id} className="retela-product-card flex h-full min-w-0 flex-col overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg">
+                <div className="retela-product-card-image-wrap relative overflow-hidden bg-slate-100">
+                  <ProductImage product={p} className="retela-shop-product-image h-full w-full object-cover" alt={p.name} />
+                  <span className={`retela-product-stock-badge absolute right-2 top-2 rounded-full border font-black ${stockBadgeClass(p.stock)}`}>{status}</span>
                 </div>
-                <h4 className="mt-3 break-words font-bold text-slate-950">{p.name}</h4>
-                <div className="mt-2 grid gap-1 text-sm text-slate-600">
-                  <p><span className="font-semibold text-slate-800">Brand:</span> {p.brand || "Other"}</p>
-                  <p><span className="font-semibold text-slate-800">Category:</span> {p.category || "T-Shirts"}</p>
-                  <p><span className="font-semibold text-slate-800">Size:</span> {p.size || "Free Size"}</p>
-                  <p><span className="font-semibold text-slate-800">Price:</span> PHP {Number(p.price || 0).toLocaleString()}</p>
-                  <p><span className="font-semibold text-slate-800">Status:</span> {status}</p>
-                </div>
-                {p.description ? <p className="mt-2 line-clamp-3 break-words text-xs leading-5 text-slate-500">{p.description}</p> : null}
-                <div className="retela-product-card-actions mt-auto flex items-stretch justify-between gap-3 pt-4">
-                  <button type="button" onClick={() => openDetails(p)} className="flex h-14 min-h-14 min-w-0 flex-1 items-center justify-center gap-1 whitespace-nowrap rounded-xl border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 transition hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700">
-                    <Eye size={15} /> View Details
-                  </button>
-                  <button type="button" onClick={() => addToCart(p)} className="flex h-14 min-h-14 min-w-0 flex-1 items-center justify-center gap-1 whitespace-nowrap rounded-xl bg-emerald-600 px-3 text-xs font-bold text-white shadow-xl transition hover:bg-emerald-700">
-                    <ShoppingCart size={16} /> Add
-                  </button>
-                  <button type="button" onClick={() => buyNow(p)} className="flex h-14 min-h-14 min-w-0 flex-1 items-center justify-center whitespace-nowrap rounded-xl bg-emerald-600 px-3 text-xs font-bold text-white shadow-xl transition hover:bg-emerald-700">
-                    Buy Now
-                  </button>
+                <div className="retela-product-card-body flex flex-1 min-w-0 flex-col">
+                  <h4 className="retela-product-card-title font-bold text-slate-950">{p.name}</h4>
+                  <p className="retela-product-card-meta min-w-0 text-slate-600">
+                    <span className="truncate">{p.brand || "Other"}</span>
+                    <span aria-hidden="true"> | </span>
+                    <span className="truncate">{p.size || "Free Size"}</span>
+                  </p>
+                  <p className="retela-product-card-price font-black text-emerald-700">PHP {Number(p.price || 0).toLocaleString()}</p>
+                  <p className="retela-product-card-condition text-slate-500">{p.condition || "Good"} condition</p>
+                  {p.description ? <p className="retela-product-card-description break-words text-slate-500">{p.description}</p> : null}
+                  <div className="retela-product-card-actions mt-auto">
+                    <button type="button" onClick={() => openDetails(p)} className="retela-product-action-button retela-product-action-view">
+                      <Eye size={14} /> View
+                    </button>
+                    <button type="button" onClick={() => addToCart(p)} className="retela-product-action-button retela-product-action-add">
+                      <ShoppingCart size={14} /> Add
+                    </button>
+                    <button type="button" onClick={() => buyNow(p)} className="retela-product-action-button retela-product-action-buy">
+                      Buy Now
+                    </button>
+                  </div>
                 </div>
               </article>
             );
