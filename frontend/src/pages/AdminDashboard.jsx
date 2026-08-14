@@ -2408,7 +2408,6 @@ function SalesAnalytics({ summary }) {
   const channelBreakdownTotal = channelBreakdownRows.reduce((sum, row) => sum + row.total, 0);
   const cards = [
     { title: "Total Sales", value: money(totalSales), change: "Live", caption: "database revenue", icon: TrendingUp, tone: "sales" },
-    { title: "Total Orders", value: totalOrders.toLocaleString(), change: "Live", caption: "database orders", icon: ReceiptText, tone: "orders" },
     { title: "Average Order Value", value: money(averageOrder), change: "Live", caption: "per reportable order", icon: WalletCards, tone: "aov" },
     { title: "Items Sold", value: itemsSold.toLocaleString(), change: "Live", caption: "database quantities", icon: ShoppingBag, tone: "items" },
     { title: "Average Rating", value: averageRating.toFixed(1), change: `${reviewCount} reviews`, caption: "customer feedback", icon: Star, tone: "rating" }
