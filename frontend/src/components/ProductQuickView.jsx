@@ -28,6 +28,8 @@ export default function ProductQuickView({
   const images = useMemo(() => productImages(product), [product]);
   const hasMultipleImages = images.length > 1;
   const isCustomer = mode === "customer";
+  const stock = Number(product?.stock || 0);
+  const outOfStock = stock <= 0;
 
   useEffect(() => {
     if (!isOpen) return undefined;
@@ -76,7 +78,7 @@ export default function ProductQuickView({
   }
 
   function runAction(callback) {
-    if (!callback) return;
+    if (!callback || outOfStock) return;
     callback(product);
   }
 
@@ -136,11 +138,11 @@ export default function ProductQuickView({
 
         {isCustomer ? (
           <footer className="product-quick-view-actions">
-            <button type="button" className="product-quick-view-buy" onClick={() => runAction(onBuyNow)}>
-              Buy Now
+            <button type="button" disabled={outOfStock} className="product-quick-view-buy" onClick={() => runAction(onBuyNow)}>
+              {outOfStock ? "Out of stock" : "Buy Now"}
             </button>
-            <button type="button" className="product-quick-view-add" onClick={() => runAction(onAddToCart)}>
-              <ShoppingCart size={16} /> Add to Cart
+            <button type="button" disabled={outOfStock} className="product-quick-view-add" onClick={() => runAction(onAddToCart)}>
+              <ShoppingCart size={16} /> {outOfStock ? "Out of stock" : "Add to Cart"}
             </button>
           </footer>
         ) : null}

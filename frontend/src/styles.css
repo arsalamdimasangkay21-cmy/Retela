@@ -3775,6 +3775,20 @@ button {
   transform: scale(0.98);
 }
 
+.retela-product-action-button:disabled {
+  cursor: not-allowed;
+  border-color: #d1d5db;
+  background: #f1f5f9;
+  color: #94a3b8;
+  transform: none;
+}
+
+.retela-product-action-button:disabled:hover {
+  border-color: #d1d5db;
+  background: #f1f5f9;
+  color: #94a3b8;
+}
+
 .retela-view-label-short {
   display: none;
 }
@@ -3954,6 +3968,13 @@ button {
   border: 1px solid #b8e7ca;
   background: #f3fff7;
   color: #0c7044;
+}
+
+.product-quick-view-actions button:disabled {
+  cursor: not-allowed;
+  border-color: #d1d5db;
+  background: #f1f5f9;
+  color: #94a3b8;
 }
 
 @keyframes productQuickViewIn {

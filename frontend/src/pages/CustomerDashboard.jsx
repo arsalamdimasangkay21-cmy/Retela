@@ -74,13 +74,14 @@ function paymentCheckoutUrl(payload) {
 
 function stockStatus(stock) {
   const quantity = Number(stock || 0);
-  if (quantity <= 0) return "Out of Stock";
-  return "In Stock";
+  if (quantity <= 0) return "Out of stock";
+  return `${quantity} in stock`;
 }
 
 function stockBadgeClass(stock) {
-  const status = stockStatus(stock);
-  if (status === "Out of Stock") return "border-rose-200 bg-rose-50 text-rose-700";
+  const quantity = Number(stock || 0);
+  if (quantity <= 0) return "border-rose-200 bg-rose-50 text-rose-700";
+  if (quantity <= 3) return "border-amber-200 bg-amber-50 text-amber-700";
   return "border-emerald-200 bg-emerald-50 text-emerald-700";
 }
 
@@ -146,7 +147,7 @@ export default function CustomerDashboard({ active, onChange }) {
     cartRef.current = cart;
   }, [cart]);
 
-  const visibleProducts = useMemo(() => products.filter((item) => Number(item.stock || 0) > 0), [products]);
+  const visibleProducts = useMemo(() => products, [products]);
   const filteredProducts = useMemo(() => {
     if (!shopProductIdsFilter.length) return visibleProducts;
     const productIds = new Set(shopProductIdsFilter.map(Number));
@@ -189,7 +190,7 @@ export default function CustomerDashboard({ active, onChange }) {
       cachedGet("/settings/promotions", {}, { cacheMs: 10000, retries: 1, force })
     ]);
     if (cancelled?.()) return;
-    setProducts(productRes.data.filter((item) => Number(item.stock || 0) > 0));
+    setProducts(productRes.data);
     setFilterOptions(filterRes.data);
     setOrders(orderRes.data);
     setNotifications(customerNotificationRows(notificationRes.data));
@@ -1179,7 +1180,7 @@ function FeaturedApparelDetailsModal({ item, onClose, onAddToCart }) {
             Close
           </button>
           <Button type="button" disabled={outOfStock} onClick={() => onAddToCart(item)}>
-            <ShoppingCart size={17} /> {outOfStock ? "Out of Stock" : "Add to Cart"}
+            <ShoppingCart size={17} /> {outOfStock ? "Out of stock" : "Add to Cart"}
           </Button>
         </div>
       </section>
@@ -1193,7 +1194,6 @@ function Shop({ products, addToCart, buyNow, filters, setFilters, filterOptions,
   const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
   const [isPhotoModalOpen, setIsPhotoModalOpen] = useState(false);
   const [quickViewProduct, setQuickViewProduct] = useState(null);
-  const purchasableProducts = useMemo(() => products.filter((item) => Number(item.stock || 0) > 0), [products]);
 
   function openDetails(item) {
     setSelectedApparel(item);
@@ -1228,7 +1228,7 @@ function Shop({ products, addToCart, buyNow, filters, setFilters, filterOptions,
 
   useEffect(() => {
     if (!selectedApparel) return;
-    const latest = purchasableProducts.find((item) => Number(item.id) === Number(selectedApparel.id));
+    const latest = products.find((item) => Number(item.id) === Number(selectedApparel.id));
     if (!latest) {
       setIsDetailsModalOpen(false);
       setIsPhotoModalOpen(false);
@@ -1236,7 +1236,7 @@ function Shop({ products, addToCart, buyNow, filters, setFilters, filterOptions,
       return;
     }
     if (latest !== selectedApparel) setSelectedApparel(latest);
-  }, [purchasableProducts, selectedApparel]);
+  }, [products, selectedApparel]);
 
   return (
     <>
@@ -1252,10 +1252,12 @@ function Shop({ products, addToCart, buyNow, filters, setFilters, filterOptions,
             </button>
           </div>
           <CustomerFilters filters={filters} setFilters={setFilters} filterOptions={filterOptions} />
-          <p className="text-sm text-white/55">{purchasableProducts.length} apparel items found</p>
+          <p className="text-sm text-white/55">{products.length} apparel items found</p>
         </div>
         <div className="retela-shop-product-grid">
-          {purchasableProducts.map((p) => {
+          {products.map((p) => {
+            const stock = Number(p.stock || 0);
+            const outOfStock = stock <= 0;
             const status = stockStatus(p.stock);
             return (
               <article key={p.id} className="retela-product-card flex h-full min-w-0 flex-col overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg">
@@ -1282,11 +1284,11 @@ function Shop({ products, addToCart, buyNow, filters, setFilters, filterOptions,
                     <button type="button" onClick={() => openDetails(p)} className="retela-product-action-button retela-product-action-view">
                       <Eye size={14} /> <span className="retela-view-label-full">View Details</span><span className="retela-view-label-short">View</span>
                     </button>
-                    <button type="button" onClick={() => addToCart(p)} className="retela-product-action-button retela-product-action-add">
-                      <ShoppingCart size={14} /> Add
+                    <button type="button" disabled={outOfStock} onClick={() => addToCart(p)} className="retela-product-action-button retela-product-action-add">
+                      <ShoppingCart size={14} /> {outOfStock ? "Out of stock" : "Add"}
                     </button>
-                    <button type="button" onClick={() => buyNow(p)} className="retela-product-action-button retela-product-action-buy">
-                      Buy Now
+                    <button type="button" disabled={outOfStock} onClick={() => buyNow(p)} className="retela-product-action-button retela-product-action-buy">
+                      {outOfStock ? "Out of stock" : "Buy Now"}
                     </button>
                   </div>
                 </div>
