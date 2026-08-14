@@ -2926,6 +2926,274 @@ button {
   }
 }
 
+@media (max-width: 768px) {
+  .admin-dashboard-shell {
+    gap: 12px !important;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    overflow-x: hidden;
+  }
+
+  .admin-dashboard-intro {
+    border-radius: 18px !important;
+    padding: 16px !important;
+    box-shadow: 0 10px 28px rgba(18, 92, 55, 0.08) !important;
+  }
+
+  .admin-dashboard-kicker {
+    gap: 6px !important;
+    padding: 6px 10px !important;
+    font-size: 0.66rem !important;
+    letter-spacing: 0.12em !important;
+  }
+
+  .admin-dashboard-intro h1 {
+    margin-top: 10px !important;
+    font-size: 1.55rem !important;
+    line-height: 1.08 !important;
+  }
+
+  .admin-dashboard-intro p {
+    margin-top: 8px !important;
+    max-width: 100% !important;
+    font-size: 0.86rem !important;
+    line-height: 1.45 !important;
+  }
+
+  .admin-dashboard-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 10px !important;
+  }
+
+  .admin-dashboard-stats .admin-commerce-stat-card:nth-child(5) {
+    grid-column: 1 / -1;
+  }
+
+  .admin-commerce-stat-card {
+    min-width: 0;
+    border-color: #d9eee2 !important;
+    border-radius: 16px !important;
+    background: #ffffff !important;
+    padding: 12px !important;
+    box-shadow: 0 10px 24px rgba(18, 92, 55, 0.08) !important;
+  }
+
+  .admin-commerce-stat-card > span:first-child {
+    width: 34px !important;
+    height: 34px !important;
+    border-radius: 12px !important;
+    border-color: #b7e4cf !important;
+    background: #ecfff3 !important;
+    color: #0f7a4a !important;
+  }
+
+  .admin-commerce-stat-card > span:first-child svg {
+    width: 17px;
+    height: 17px;
+  }
+
+  .admin-commerce-stat-card p {
+    margin-top: 10px !important;
+    color: #48685a !important;
+    font-size: 0.68rem !important;
+    letter-spacing: 0.1em !important;
+  }
+
+  .admin-commerce-stat-card strong {
+    margin-top: 4px !important;
+    color: #123526 !important;
+    font-size: 1.35rem !important;
+    line-height: 1.1 !important;
+  }
+
+  .admin-commerce-stat-card > span:last-child {
+    margin-top: 4px !important;
+    color: #658073 !important;
+    font-size: 0.72rem !important;
+  }
+
+  .admin-dashboard-main-grid,
+  .admin-dashboard-secondary-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 12px !important;
+  }
+
+  .admin-dashboard-chart-card,
+  .admin-signal-widget,
+  .admin-low-stock-panel {
+    border-color: #d9eee2 !important;
+    border-radius: 18px !important;
+    background: #ffffff !important;
+    padding: 14px !important;
+    box-shadow: 0 10px 28px rgba(18, 92, 55, 0.08) !important;
+  }
+
+  .admin-dashboard-chart-card h2,
+  .admin-signal-widget h3,
+  .admin-low-stock-panel h2 {
+    color: #13251d !important;
+    font-size: 1.05rem !important;
+    line-height: 1.2 !important;
+  }
+
+  .admin-dashboard-chart-card p,
+  .admin-low-stock-panel p {
+    color: #64796f !important;
+    font-size: 0.78rem !important;
+    line-height: 1.35 !important;
+  }
+
+  .admin-dashboard-chart-card .chart-stage {
+    height: 240px !important;
+    margin-top: 12px !important;
+    min-width: 0;
+  }
+
+  .admin-top-channels-panel .chart-stage {
+    height: 230px !important;
+  }
+
+  .admin-dashboard-notifications {
+    min-height: 0 !important;
+    border-color: #d9eee2 !important;
+    border-radius: 18px !important;
+    padding: 12px !important;
+    box-shadow: 0 10px 28px rgba(18, 92, 55, 0.08) !important;
+  }
+
+  .admin-dashboard-notifications > div:first-child span {
+    width: 32px !important;
+    height: 32px !important;
+    border-radius: 12px !important;
+  }
+
+  .admin-dashboard-notifications h2 {
+    font-size: 1rem !important;
+  }
+
+  .admin-dashboard-notifications > div:last-child {
+    margin-top: 10px !important;
+    gap: 8px !important;
+  }
+
+  .admin-dashboard-notifications button,
+  .admin-dashboard-notifications article {
+    gap: 8px !important;
+    border-radius: 14px !important;
+    padding: 8px !important;
+  }
+
+  .admin-dashboard-notifications button > span:first-child,
+  .admin-dashboard-notifications article > span:first-child {
+    width: 30px !important;
+    height: 30px !important;
+    border-radius: 12px !important;
+  }
+
+  .admin-dashboard-notifications strong {
+    font-size: 0.78rem !important;
+  }
+
+  .admin-dashboard-notifications p {
+    font-size: 0.72rem !important;
+    line-height: 1.35 !important;
+  }
+
+  .admin-dashboard-notifications .skeleton {
+    height: 54px !important;
+    border-radius: 14px !important;
+  }
+
+  .admin-signal-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 10px !important;
+  }
+
+  .admin-signal-widget {
+    padding: 12px !important;
+  }
+
+  .admin-signal-widget svg {
+    width: 17px;
+    height: 17px;
+  }
+
+  .admin-signal-widget > div:first-child {
+    gap: 8px !important;
+  }
+
+  .admin-signal-widget > div:last-child {
+    margin-top: 10px !important;
+    gap: 6px !important;
+  }
+
+  .admin-signal-widget > div:last-child p {
+    border-color: #dcefe4 !important;
+    border-radius: 12px !important;
+    background: #f7fff9 !important;
+    padding: 7px 9px !important;
+    color: #355447 !important;
+    font-size: 0.72rem !important;
+    line-height: 1.25 !important;
+  }
+
+  .admin-low-stock-header {
+    gap: 8px !important;
+  }
+
+  .admin-low-stock-header button {
+    min-height: 36px;
+    border-radius: 12px !important;
+    padding: 0 12px !important;
+    font-size: 0.78rem !important;
+  }
+
+  .admin-low-stock-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 8px !important;
+    margin-top: 12px !important;
+  }
+
+  .admin-low-stock-item {
+    border-color: #d9eee2 !important;
+    border-radius: 14px !important;
+    background: #f7fff9 !important;
+    padding: 10px !important;
+  }
+
+  .admin-low-stock-item strong {
+    color: #13251d !important;
+    font-size: 0.86rem !important;
+  }
+
+  .admin-low-stock-item p {
+    margin-top: 4px !important;
+    color: #557166 !important;
+    font-size: 0.74rem !important;
+  }
+}
+
+@media (max-width: 360px) {
+  .admin-dashboard-stats,
+  .admin-signal-grid,
+  .admin-low-stock-grid {
+    gap: 8px !important;
+  }
+
+  .admin-commerce-stat-card {
+    padding: 10px !important;
+  }
+
+  .admin-commerce-stat-card strong {
+    font-size: 1.16rem !important;
+  }
+
+  .admin-signal-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}
+
 .admin-customers-page {
   width: 100%;
   min-width: 0;

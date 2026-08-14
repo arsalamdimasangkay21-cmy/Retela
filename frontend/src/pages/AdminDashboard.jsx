@@ -2114,23 +2114,23 @@ function FuturisticDashboard({ summary, products, orders, users, notifications, 
   };
 
   return (
-    <motion.div className="grid min-w-0 gap-5" initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.45, ease: "easeOut" }}>
-      <section className="relative overflow-hidden rounded-2xl border border-[#DDEFE5] bg-white p-6 shadow-sm sm:p-8">
+    <motion.div className="admin-dashboard-shell grid min-w-0 gap-5" initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.45, ease: "easeOut" }}>
+      <section className="admin-dashboard-intro relative overflow-hidden rounded-2xl border border-[#DDEFE5] bg-white p-6 shadow-sm sm:p-8">
         <div className="relative max-w-3xl">
-          <span className="inline-flex items-center gap-2 rounded-full border border-[#DDEFE5] bg-[#DCFCE7] px-4 py-2 text-xs font-bold uppercase tracking-[0.18em] text-[#14532D]">
+          <span className="admin-dashboard-kicker inline-flex items-center gap-2 rounded-full border border-[#DDEFE5] bg-[#DCFCE7] px-4 py-2 text-xs font-bold uppercase tracking-[0.18em] text-[#14532D]">
             <Sparkles size={15} /> RETELA
           </span>
           <h1 className="mt-5 font-display text-4xl font-bold tracking-tight text-[#111827] sm:text-5xl">Commerce Admin Dashboard</h1>
-          <p className="mt-4 max-w-2xl text-base leading-7 text-slate-500">Sales, customers, conversations, inventory signals, and daily ecommerce operations.</p>
+          <p className="mt-4 max-w-2xl text-base leading-7 text-slate-500">Manage sales, customers, conversations, inventory signals, and daily ecommerce operations.</p>
         </div>
       </section>
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+      <div className="admin-dashboard-stats grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
         {cards.map((card, index) => <CommerceStatCard key={card.title} index={index} {...card} />)}
       </div>
 
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,1.45fr)_minmax(320px,0.85fr)]">
-        <ChartPanel title="Sales Overview" subtitle="Monthly database revenue trend" hasData={Boolean(salesTrendRows.length)}>
+      <div className="admin-dashboard-main-grid grid gap-5 xl:grid-cols-[minmax(0,1.45fr)_minmax(320px,0.85fr)]">
+        <ChartPanel title="Sales Overview" subtitle="Monthly database revenue trend" hasData={Boolean(salesTrendRows.length)} className="admin-sales-overview-panel">
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={salesTrendRows} margin={{ top: 20, right: 18, left: -16, bottom: 8 }}>
               <defs>
@@ -2174,16 +2174,16 @@ function FuturisticDashboard({ summary, products, orders, users, notifications, 
           onViewAll={() => onChange("Notifications")}
           onNotificationClick={onNotificationClick}
           emptyTitle="No admin notifications yet"
-          maxItems={4}
-          className="xl:sticky xl:top-24"
+          maxItems={3}
+          className="admin-dashboard-notifications xl:sticky xl:top-24"
         />
       </div>
 
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
-        <ChartPanel title="Top Channels" subtitle="Operational activity mix" hasData={orders.length || notifications.length}>
+      <div className="admin-dashboard-secondary-grid grid gap-5 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+        <ChartPanel title="Top Channels" subtitle="Operational activity mix" hasData={orders.length || notifications.length} className="admin-top-channels-panel">
           <Doughnut data={channelData} options={{ ...chartMotion, maintainAspectRatio: false, cutout: "68%", plugins: { legend: { position: "bottom", labels: { color: "#111827", boxWidth: 12, padding: 16 } } } }} />
         </ChartPanel>
-        <div className="grid gap-5 sm:grid-cols-2">
+        <div className="admin-signal-grid grid gap-5 sm:grid-cols-2">
           <SignalWidget title="Recent Activity" icon={Activity} items={orders.slice(0, 3).map((order) => `Order #${order.id} is ${order.status}`)} empty="No recent orders yet." />
           <SignalWidget title="AI Performance" icon={Bot} items={[`${aiConversations} message notifications`, `${notifications.filter((row) => row.type === "feedback").length} feedback events`, "Assistant uses live inventory only"]} />
           <SignalWidget title="Inventory Overview" icon={PackageCheck} items={[`${products.length} apparel items`, `${stockTotal} total stock`, `${lowStockProducts.length} low stock alerts`]} />
@@ -2191,19 +2191,19 @@ function FuturisticDashboard({ summary, products, orders, users, notifications, 
         </div>
       </div>
 
-      <Card>
-        <div className="flex flex-wrap items-center justify-between gap-3">
+      <Card className="admin-low-stock-panel">
+        <div className="admin-low-stock-header flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="font-display text-xl font-bold text-white">Low Stock Alerts</h2>
             <p className="mt-1 text-sm text-white/45">Only real inventory records are shown here.</p>
           </div>
           <button type="button" onClick={() => onChange("Inventory")} className="rounded-2xl border border-neonbrand/30 bg-neonbrand/10 px-4 py-2 text-sm font-bold text-neonbrand transition hover:bg-neonbrand hover:text-black">View Inventory</button>
         </div>
-        <div className="mt-4 grid gap-3 md:grid-cols-3">
+        <div className="admin-low-stock-grid mt-4 grid gap-3 md:grid-cols-3">
           {lowStockProducts.length ? lowStockProducts.slice(0, 3).map((product) => (
-            <div key={product.id} className="rounded-2xl border border-white/10 bg-white/[0.045] p-4">
+            <div key={product.id} className="admin-low-stock-item rounded-2xl border border-white/10 bg-white/[0.045] p-4">
               <strong className="block truncate text-white">{product.name}</strong>
-              <p className="mt-1 text-sm text-white/45">{product.category || "Apparel"} · {product.stock} left</p>
+              <p className="mt-1 text-sm text-white/45">{product.category || "Apparel"} | {product.stock} left</p>
             </div>
           )) : <p className="text-sm text-white/50 md:col-span-3">No low-stock apparel right now.</p>}
         </div>
@@ -2214,7 +2214,7 @@ function FuturisticDashboard({ summary, products, orders, users, notifications, 
 
 function CommerceStatCard({ title, value, hint, icon: Icon, action, index }) {
   return (
-    <motion.button type="button" onClick={action} className="group rounded-[26px] border border-white/10 bg-white/[0.06] p-5 text-left shadow-2xl shadow-black/25 backdrop-blur-2xl transition duration-300 hover:border-neonbrand/30 hover:shadow-[0_24px_70px_rgba(0,0,0,0.34),0_0_34px_rgba(56,255,136,0.08)]" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} whileHover={{ y: -4, scale: 1.015 }} transition={{ duration: 0.35, delay: index * 0.04 }}>
+    <motion.button type="button" onClick={action} className="admin-commerce-stat-card group rounded-[26px] border border-white/10 bg-white/[0.06] p-5 text-left shadow-2xl shadow-black/25 backdrop-blur-2xl transition duration-300 hover:border-neonbrand/30 hover:shadow-[0_24px_70px_rgba(0,0,0,0.34),0_0_34px_rgba(56,255,136,0.08)]" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} whileHover={{ y: -4, scale: 1.015 }} transition={{ duration: 0.35, delay: index * 0.04 }}>
       <span className="grid h-11 w-11 place-items-center rounded-2xl border border-neonbrand/20 bg-neonbrand/10 text-neonbrand shadow-[0_0_30px_rgba(56,255,136,0.12)]">
         <Icon size={21} />
       </span>
@@ -2225,9 +2225,9 @@ function CommerceStatCard({ title, value, hint, icon: Icon, action, index }) {
   );
 }
 
-function ChartPanel({ title, subtitle, hasData, children }) {
+function ChartPanel({ title, subtitle, hasData, children, className = "" }) {
   return (
-    <Card className="chart-3d-card">
+    <Card className={`chart-3d-card admin-dashboard-chart-card ${className}`}>
       <div>
         <h2 className="font-display text-xl font-bold text-white">{title}</h2>
         <p className="mt-1 text-sm text-white/45">{subtitle}</p>
@@ -2242,7 +2242,7 @@ function ChartPanel({ title, subtitle, hasData, children }) {
 function SignalWidget({ title, icon: Icon, items, empty }) {
   const visible = items.filter(Boolean);
   return (
-    <Card>
+    <Card className="admin-signal-widget">
       <div className="flex items-center justify-between gap-3">
         <h3 className="font-display text-lg font-bold text-white">{title}</h3>
         <Icon size={20} className="text-neonbrand" />
