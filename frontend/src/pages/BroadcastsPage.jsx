@@ -494,9 +494,9 @@ export default function BroadcastsPage() {
   }
 
   return (
-    <motion.div className="grid gap-5" initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, ease: "easeOut" }}>
-      <section className="relative overflow-hidden rounded-[32px] border border-emerald-300/15 bg-[linear-gradient(135deg,rgba(8,31,20,0.96),rgba(8,20,16,0.88))] p-5 shadow-[0_24px_90px_rgba(0,0,0,0.38)] backdrop-blur-2xl sm:p-7">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_18%_18%,rgba(74,222,128,0.2),transparent_28%),radial-gradient(circle_at_88%_10%,rgba(16,185,129,0.18),transparent_30%),linear-gradient(180deg,rgba(255,255,255,0.04),transparent)]" />
+    <motion.div className="broadcasts-page grid gap-5" initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, ease: "easeOut" }}>
+      <section className="broadcast-hero relative overflow-hidden rounded-[32px] border border-emerald-300/15 bg-[linear-gradient(135deg,rgba(8,31,20,0.96),rgba(8,20,16,0.88))] p-5 shadow-[0_24px_90px_rgba(0,0,0,0.38)] backdrop-blur-2xl sm:p-7">
+        <div className="broadcast-hero-accent absolute inset-0 bg-[radial-gradient(circle_at_18%_18%,rgba(74,222,128,0.2),transparent_28%),radial-gradient(circle_at_88%_10%,rgba(16,185,129,0.18),transparent_30%),linear-gradient(180deg,rgba(255,255,255,0.04),transparent)]" />
         <div className="relative flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
           <div className="min-w-0">
             <p className="text-xs font-bold uppercase tracking-[0.24em] text-emerald-200/75">RETELA campaign console</p>
@@ -518,7 +518,7 @@ export default function BroadcastsPage() {
       </div>
 
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1.1fr)_380px]">
-        <Card className="overflow-hidden border border-emerald-300/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.03))]">
+        <Card className="broadcast-surface-card overflow-hidden border border-emerald-300/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.03))]">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <p className="text-xs font-bold uppercase tracking-[0.18em] text-emerald-200/70">Broadcast builder</p>
@@ -533,7 +533,7 @@ export default function BroadcastsPage() {
           </div>
 
           <div className="mt-5 grid gap-4">
-            <section className="rounded-[24px] border border-emerald-300/15 bg-emerald-300/8 p-4">
+            <section className="broadcast-subsection rounded-[24px] border border-emerald-300/15 bg-emerald-300/8 p-4">
               <div className="mb-3 flex items-center justify-between gap-3">
                 <div>
                   <p className="text-xs font-bold uppercase tracking-[0.16em] text-emerald-100/65">Campaign Templates</p>
@@ -543,7 +543,7 @@ export default function BroadcastsPage() {
               </div>
               <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
                 {campaignTemplates.map((template) => (
-                  <button key={template.key} type="button" onClick={() => applyTemplate(template)} className="rounded-2xl border border-white/10 bg-white/[0.055] p-3 text-left transition hover:border-emerald-300/35 hover:bg-emerald-300/10">
+                  <button key={template.key} type="button" onClick={() => applyTemplate(template)} className="broadcast-template-card rounded-2xl border border-white/10 bg-white/[0.055] p-3 text-left transition hover:border-emerald-300/35 hover:bg-emerald-300/10">
                     <strong className="block text-sm text-white">{template.title}</strong>
                     <span className="mt-1 block text-xs leading-5 text-white/45">{template.message}</span>
                   </button>
@@ -575,7 +575,7 @@ export default function BroadcastsPage() {
             </div>
 
             <div className="grid gap-3 lg:grid-cols-2">
-              <section className="rounded-[24px] border border-white/10 bg-black/20 p-4">
+              <section className="broadcast-subsection rounded-[24px] border border-white/10 bg-black/20 p-4">
                 <div className="mb-3 flex items-center justify-between gap-3">
                   <div>
                     <p className="text-xs font-bold uppercase tracking-[0.16em] text-white/40">Broadcast Types</p>
@@ -592,7 +592,7 @@ export default function BroadcastsPage() {
                 </div>
               </section>
 
-              <section className="rounded-[24px] border border-white/10 bg-black/20 p-4">
+              <section className="broadcast-subsection rounded-[24px] border border-white/10 bg-black/20 p-4">
                 <div className="mb-3">
                   <p className="text-xs font-bold uppercase tracking-[0.16em] text-white/40">Delivery Channels</p>
                   <h3 className="mt-1 font-display text-lg font-bold text-white">Notification Destinations</h3>
@@ -606,7 +606,7 @@ export default function BroadcastsPage() {
               </section>
             </div>
 
-            <section className="rounded-[24px] border border-emerald-300/15 bg-emerald-300/8 p-4">
+            <section className="broadcast-subsection rounded-[24px] border border-emerald-300/15 bg-emerald-300/8 p-4">
               <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <p className="text-xs font-bold uppercase tracking-[0.16em] text-emerald-100/65">Sale Promotion</p>
@@ -648,7 +648,7 @@ export default function BroadcastsPage() {
               ) : null}
             </section>
 
-            <section className="rounded-[24px] border border-white/10 bg-black/20 p-4">
+            <section className="broadcast-subsection rounded-[24px] border border-white/10 bg-black/20 p-4">
               <div className="mb-3">
                 <p className="text-xs font-bold uppercase tracking-[0.16em] text-white/40">Audience Selector</p>
                 <h3 className="mt-1 font-display text-lg font-bold text-white">Customer Segment</h3>
@@ -704,7 +704,7 @@ export default function BroadcastsPage() {
               </div>
             </div>
 
-            <div className="flex flex-col gap-3 rounded-[24px] border border-emerald-300/15 bg-emerald-300/8 p-4 md:flex-row md:items-center md:justify-between">
+            <div className="broadcast-subsection flex flex-col gap-3 rounded-[24px] border border-emerald-300/15 bg-emerald-300/8 p-4 md:flex-row md:items-center md:justify-between">
               <div className="min-w-0 flex-1">
                 <p className="text-xs font-bold uppercase tracking-[0.16em] text-emerald-100/65">AI Generated Broadcast</p>
                 <p className="mt-1 text-sm text-white/58">Let AI draft a polished promotional message based on the campaign title, type, audience, and promo code.</p>
@@ -722,7 +722,7 @@ export default function BroadcastsPage() {
             </div>
 
             {submittingAction === "send" || submitProgress > 0 ? (
-              <div className="rounded-[24px] border border-emerald-300/20 bg-black/20 p-4">
+              <div className="broadcast-subsection rounded-[24px] border border-emerald-300/20 bg-black/20 p-4">
                 <div className="flex items-center justify-between gap-3">
                   <span className="text-sm font-bold text-white">Sending progress</span>
                   <span className="text-sm font-black text-emerald-200">{Math.round(submitProgress)}%</span>
@@ -854,7 +854,7 @@ export default function BroadcastsPage() {
             </div>
           </Card>
 
-          <Card className="border border-emerald-300/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.03))]">
+          <Card className="broadcast-surface-card border border-emerald-300/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.03))]">
             <p className="text-xs font-bold uppercase tracking-[0.18em] text-emerald-200/70">Delivery Status</p>
             <h3 className="mt-2 font-display text-xl font-bold text-white">Campaign Health</h3>
             <div className="mt-4 grid gap-3">
@@ -865,7 +865,7 @@ export default function BroadcastsPage() {
             </div>
           </Card>
 
-          <Card className="border border-emerald-300/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.03))]">
+          <Card className="broadcast-surface-card border border-emerald-300/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.03))]">
             <p className="text-xs font-bold uppercase tracking-[0.18em] text-emerald-200/70">Scheduled Queue</p>
             <h3 className="mt-2 font-display text-xl font-bold text-white">Upcoming Broadcasts</h3>
             <div className="mt-4 grid gap-3">
@@ -882,7 +882,7 @@ export default function BroadcastsPage() {
         </div>
       </div>
 
-      <Card className="overflow-hidden border border-emerald-300/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.03))]">
+      <Card className="broadcast-surface-card broadcast-history-card overflow-hidden border border-emerald-300/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.03))]">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <p className="text-xs font-bold uppercase tracking-[0.18em] text-emerald-200/70">Broadcast History</p>
@@ -1001,7 +1001,7 @@ export default function BroadcastsPage() {
 
 function HeroChip({ icon: Icon, label, value }) {
   return (
-    <div className="rounded-[24px] border border-white/10 bg-white/[0.06] px-4 py-3">
+    <div className="broadcast-hero-chip rounded-[24px] border border-white/10 bg-white/[0.06] px-4 py-3">
       <div className="flex items-center gap-3">
         <span className="grid h-11 w-11 place-items-center rounded-2xl border border-emerald-300/20 bg-emerald-300/10 text-emerald-200">
           <Icon size={20} />
@@ -1017,7 +1017,7 @@ function HeroChip({ icon: Icon, label, value }) {
 
 function MetricCard({ icon: Icon, label, value }) {
   return (
-    <Card className="group border border-emerald-300/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.03))]">
+    <Card className="broadcast-kpi-card group border border-emerald-300/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.03))]">
       <div className="flex items-center justify-between gap-4">
         <div>
           <p className="text-xs font-bold uppercase tracking-[0.18em] text-white/42">{label}</p>
@@ -1033,7 +1033,7 @@ function MetricCard({ icon: Icon, label, value }) {
 
 function ChoicePill({ active, onClick, children }) {
   return (
-    <button type="button" onClick={onClick} className={`rounded-2xl border px-3 py-3 text-left text-sm font-semibold transition ${active ? "border-emerald-300/40 bg-emerald-300/14 text-white shadow-[0_0_28px_rgba(16,185,129,0.12)]" : "border-white/10 bg-white/[0.045] text-white/68 hover:border-emerald-300/25 hover:text-white"}`}>
+    <button type="button" onClick={onClick} className={`broadcast-choice-pill rounded-2xl border px-3 py-3 text-left text-sm font-semibold transition ${active ? "is-active border-emerald-300/40 bg-emerald-300/14 text-white shadow-[0_0_28px_rgba(16,185,129,0.12)]" : "border-white/10 bg-white/[0.045] text-white/68 hover:border-emerald-300/25 hover:text-white"}`}>
       {children}
     </button>
   );
@@ -1041,7 +1041,7 @@ function ChoicePill({ active, onClick, children }) {
 
 function ChannelToggle({ label, description, checked, onChange, icon: Icon }) {
   return (
-    <button type="button" onClick={() => onChange(!checked)} className="flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/[0.045] px-4 py-3 text-left transition hover:border-emerald-300/25" aria-pressed={checked}>
+    <button type="button" onClick={() => onChange(!checked)} className="broadcast-channel-toggle flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/[0.045] px-4 py-3 text-left transition hover:border-emerald-300/25" aria-pressed={checked}>
       <div className="flex min-w-0 items-start gap-3">
         <span className="mt-0.5 grid h-10 w-10 shrink-0 place-items-center rounded-2xl border border-emerald-300/20 bg-emerald-300/10 text-emerald-200">
           <Icon size={18} />
@@ -1060,7 +1060,7 @@ function ChannelToggle({ label, description, checked, onChange, icon: Icon }) {
 
 function AudienceCard({ option, active, count, onClick }) {
   return (
-    <button type="button" onClick={onClick} className={`rounded-[24px] border p-4 text-left transition ${active ? "border-emerald-300/38 bg-emerald-300/12 shadow-[0_0_32px_rgba(16,185,129,0.1)]" : "border-white/10 bg-white/[0.045] hover:border-emerald-300/22"}`}>
+    <button type="button" onClick={onClick} className={`broadcast-audience-card rounded-[24px] border p-4 text-left transition ${active ? "is-active border-emerald-300/38 bg-emerald-300/12 shadow-[0_0_32px_rgba(16,185,129,0.1)]" : "border-white/10 bg-white/[0.045] hover:border-emerald-300/22"}`}>
       <div className="flex items-center justify-between gap-3">
         <strong className="font-display text-lg text-white">{option.label}</strong>
         <span className="rounded-full border border-white/10 bg-black/20 px-3 py-1 text-xs font-black text-emerald-100">{Number(count || 0).toLocaleString()}</span>
@@ -1072,7 +1072,7 @@ function AudienceCard({ option, active, count, onClick }) {
 
 function MiniStat({ label, value }) {
   return (
-    <div className="rounded-2xl border border-white/10 bg-white/[0.045] px-3 py-2">
+    <div className="broadcast-mini-stat rounded-2xl border border-white/10 bg-white/[0.045] px-3 py-2">
       <span className="block text-[10px] font-bold uppercase tracking-[0.14em] text-white/35">{label}</span>
       <strong className="mt-1 block truncate text-sm text-white/82">{value}</strong>
     </div>
@@ -1090,7 +1090,7 @@ function LightMiniStat({ label, value }) {
 
 function InfoLine({ icon: Icon, title, text }) {
   return (
-    <div className="rounded-2xl border border-white/10 bg-white/[0.045] p-4">
+    <div className="broadcast-info-line rounded-2xl border border-white/10 bg-white/[0.045] p-4">
       <div className="flex items-center gap-3">
         <Icon size={18} className="text-emerald-200" />
         <strong className="text-sm text-white">{title}</strong>
@@ -1102,7 +1102,7 @@ function InfoLine({ icon: Icon, title, text }) {
 
 function StatusLine({ icon: Icon, title, value, danger = false }) {
   return (
-    <div className="flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/[0.045] p-4">
+    <div className="broadcast-status-line flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/[0.045] p-4">
       <div className="flex min-w-0 items-center gap-3">
         <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-2xl border ${danger ? "border-rose-300/20 bg-rose-300/10 text-rose-200" : "border-emerald-300/20 bg-emerald-300/10 text-emerald-200"}`}>
           <Icon size={18} />
@@ -1117,7 +1117,7 @@ function StatusLine({ icon: Icon, title, value, danger = false }) {
 function ProgressBar({ value }) {
   const progress = Math.max(0, Math.min(100, Number(value || 0)));
   return (
-    <div className="min-w-[120px]">
+    <div className="broadcast-progress min-w-[120px]">
       <div className="flex items-center justify-between gap-2 text-[11px] font-bold text-white/45">
         <span>Progress</span>
         <span>{Math.round(progress)}%</span>
@@ -1150,7 +1150,7 @@ function StatusBadge({ status, liveStatus }) {
 
 function TableAction({ icon: Icon, label, onClick, danger = false, disabled = false }) {
   return (
-    <button type="button" disabled={disabled} onClick={onClick} className={`inline-flex items-center gap-2 rounded-2xl border px-3 py-2 text-xs font-bold transition disabled:cursor-not-allowed disabled:opacity-55 ${danger ? "border-rose-300/20 bg-rose-400/10 text-rose-200 hover:bg-rose-400/15" : "border-white/10 bg-white/[0.05] text-white/75 hover:border-emerald-300/35 hover:text-emerald-200"}`}>
+    <button type="button" disabled={disabled} onClick={onClick} className={`broadcast-table-action inline-flex items-center gap-2 rounded-2xl border px-3 py-2 text-xs font-bold transition disabled:cursor-not-allowed disabled:opacity-55 ${danger ? "is-danger border-rose-300/20 bg-rose-400/10 text-rose-200 hover:bg-rose-400/15" : "border-white/10 bg-white/[0.05] text-white/75 hover:border-emerald-300/35 hover:text-emerald-200"}`}>
       <Icon size={14} />
       {label}
     </button>
