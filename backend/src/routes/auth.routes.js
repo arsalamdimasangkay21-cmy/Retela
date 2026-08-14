@@ -183,7 +183,7 @@ async function getOrCreateAdministrator() {
       `UPDATE users
        SET username = :username,
            display_name = COALESCE(display_name, 'RETELA Admin'),
-           email = 'administrator@retela.local',
+           email = COALESCE(email, 'administrator@retela.local'),
            password_hash = :passwordHash,
            role = 'admin',
            status = 'approved',

@@ -651,8 +651,8 @@ export default function AdminDashboard({ active, onChange }) {
       Object.entries(profile || {}).forEach(([key, value]) => payload.append(key, value ?? ""));
       if (profilePhoto) payload.append("profilePhoto", profilePhoto);
       const { data } = await api.patch("/users/me", payload, { headers: { "Content-Type": "multipart/form-data" } });
-      localStorage.setItem("retela_user", JSON.stringify({ ...user, ...data }));
-      setUser({ ...user, ...data });
+      localStorage.setItem("retela_user", JSON.stringify(data));
+      setUser(data);
       setProfile(data);
       setProfilePhoto(null);
       clearGetCache("/users/me");

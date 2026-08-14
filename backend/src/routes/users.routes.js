@@ -9,6 +9,53 @@ import { upload } from "../middleware/upload.js";
 const router = Router();
 let userColumnsReady;
 
+const SAFE_USER_SELECT = `
+  SELECT id, username, display_name, email, phone_number, location,
+    DATE_FORMAT(birthday, '%Y-%m-%d') AS birthday,
+    gender, shop_description, profile_photo_url, gcash_number, debit_account_name, debit_account_number,
+    role, status, is_verified, is_verified AS isVerified
+  FROM users
+  WHERE id = :id
+  LIMIT 1`;
+
+function hasOwn(object, key) {
+  return Object.prototype.hasOwnProperty.call(object, key);
+}
+
+function nullableTrim(value) {
+  if (value === undefined) return undefined;
+  const next = String(value ?? "").trim();
+  return next || null;
+}
+
+function normalizeBirthday(value) {
+  const next = nullableTrim(value);
+  if (!next) return null;
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(next);
+  if (!match) throw new HttpError(400, "Birthday must use YYYY-MM-DD format");
+  const birthday = `${match[1]}-${match[2]}-${match[3]}`;
+  const date = new Date(`${birthday}T00:00:00Z`);
+  if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== birthday) {
+    throw new HttpError(400, "Birthday must be a valid date");
+  }
+  return birthday;
+}
+
+async function getSafeUser(userId) {
+  const users = await query(SAFE_USER_SELECT, { id: userId });
+  if (!users.length) throw new HttpError(404, "Account not found");
+  return users[0];
+}
+
+async function assertUniqueUserField(field, value, userId, message) {
+  if (!value) return;
+  const rows = await query(
+    `SELECT id FROM users WHERE ${field} = :value AND id <> :userId LIMIT 1`,
+    { value, userId }
+  );
+  if (rows.length) throw new HttpError(409, message);
+}
+
 function getPasswordBlueprint(password) {
   const value = String(password || "");
   return {
@@ -106,11 +153,7 @@ router.use(requireAuth);
 
 router.get("/me", asyncHandler(async (req, res) => {
   await ensureUserColumns();
-  const users = await query(
-    "SELECT id, username, display_name, email, phone_number, location, birthday, gender, shop_description, profile_photo_url, gcash_number, debit_account_name, debit_account_number, role, status, is_verified, is_verified AS isVerified FROM users WHERE id = :id",
-    { id: req.user.id }
-  );
-  res.json(users[0]);
+  res.json(await getSafeUser(req.user.id));
 }));
 
 router.patch("/me", upload.single("profilePhoto"), asyncHandler(async (req, res) => {
@@ -130,44 +173,88 @@ router.patch("/me", upload.single("profilePhoto"), asyncHandler(async (req, res)
     debit_account_number: z.string().trim().optional()
   });
   const input = schema.parse(req.body);
-  const profilePhotoUrl = req.file ? `/uploads/${req.file.filename}` : input.profile_photo_url;
-  await query(
-    `UPDATE users SET
-      username = CASE WHEN :role = 'admin' THEN username ELSE COALESCE(:username, username) END,
-      display_name = COALESCE(NULLIF(:displayName, ''), display_name),
-      email = COALESCE(NULLIF(:email, ''), email),
-      phone_number = :phone_number,
-      location = :location,
-      birthday = :birthday,
-      gender = :gender,
-      shop_description = :shop_description,
-      profile_photo_url = COALESCE(:profilePhotoUrl, profile_photo_url),
-      gcash_number = :gcash_number,
-      debit_account_name = :debit_account_name,
-      debit_account_number = :debit_account_number
-     WHERE id = :id`,
-    {
-      id: req.user.id,
-      role: req.user.role,
-      username: input.username || null,
-      displayName: input.display_name || null,
-      email: input.email || "",
-      phone_number: input.phone_number || null,
-      location: input.location || null,
-      birthday: input.birthday || null,
-      gender: input.gender || null,
-      shop_description: req.user.role === "admin" ? input.shop_description || null : null,
-      profilePhotoUrl: profilePhotoUrl || null,
-      gcash_number: req.user.role === "admin" ? input.gcash_number || null : null,
-      debit_account_name: req.user.role === "admin" ? input.debit_account_name || null : null,
-      debit_account_number: req.user.role === "admin" ? input.debit_account_number || null : null
+  const updates = [];
+  const params = { id: req.user.id };
+
+  if (req.user.role !== "admin" && hasOwn(input, "username")) {
+    const username = nullableTrim(input.username);
+    if (username) {
+      await assertUniqueUserField("username", username, req.user.id, "Username already exists");
+      updates.push("username = :username");
+      params.username = username;
     }
-  );
-  const users = await query(
-    "SELECT id, username, display_name, email, phone_number, location, birthday, gender, shop_description, profile_photo_url, gcash_number, debit_account_name, debit_account_number, role, status, is_verified, is_verified AS isVerified FROM users WHERE id = :id",
-    { id: req.user.id }
-  );
-  res.json(users[0]);
+  }
+
+  if (hasOwn(input, "display_name")) {
+    updates.push("display_name = :displayName");
+    params.displayName = nullableTrim(input.display_name);
+  }
+
+  if (hasOwn(input, "email")) {
+    const email = nullableTrim(input.email)?.toLowerCase() || null;
+    await assertUniqueUserField("email", email, req.user.id, "Email already exists");
+    updates.push("email = :email");
+    params.email = email;
+  }
+
+  if (hasOwn(input, "phone_number")) {
+    const phoneNumber = nullableTrim(input.phone_number);
+    await assertUniqueUserField("phone_number", phoneNumber, req.user.id, "Phone number already exists");
+    updates.push("phone_number = :phoneNumber");
+    params.phoneNumber = phoneNumber;
+  }
+
+  if (hasOwn(input, "location")) {
+    updates.push("location = :location");
+    params.location = nullableTrim(input.location);
+  }
+
+  if (hasOwn(input, "birthday")) {
+    updates.push("birthday = :birthday");
+    params.birthday = normalizeBirthday(input.birthday);
+  }
+
+  if (hasOwn(input, "gender")) {
+    updates.push("gender = :gender");
+    params.gender = nullableTrim(input.gender);
+  }
+
+  if (req.file) {
+    updates.push("profile_photo_url = :profilePhotoUrl");
+    params.profilePhotoUrl = `/uploads/${req.file.filename}`;
+  } else if (hasOwn(input, "profile_photo_url")) {
+    const profilePhotoUrl = nullableTrim(input.profile_photo_url);
+    if (!profilePhotoUrl || (!profilePhotoUrl.startsWith("blob:") && !profilePhotoUrl.startsWith("data:"))) {
+      updates.push("profile_photo_url = :profilePhotoUrl");
+      params.profilePhotoUrl = profilePhotoUrl;
+    }
+  }
+
+  if (req.user.role === "admin") {
+    if (hasOwn(input, "shop_description")) {
+      updates.push("shop_description = :shopDescription");
+      params.shopDescription = nullableTrim(input.shop_description);
+    }
+    if (hasOwn(input, "gcash_number")) {
+      updates.push("gcash_number = :gcashNumber");
+      params.gcashNumber = nullableTrim(input.gcash_number);
+    }
+    if (hasOwn(input, "debit_account_name")) {
+      updates.push("debit_account_name = :debitAccountName");
+      params.debitAccountName = nullableTrim(input.debit_account_name);
+    }
+    if (hasOwn(input, "debit_account_number")) {
+      updates.push("debit_account_number = :debitAccountNumber");
+      params.debitAccountNumber = nullableTrim(input.debit_account_number);
+    }
+  }
+
+  if (updates.length) {
+    await query(`UPDATE users SET ${updates.join(", ")} WHERE id = :id`, params);
+  }
+  const updatedUser = await getSafeUser(req.user.id);
+  console.log("[profile] updated user", { userId: updatedUser.id, role: updatedUser.role });
+  res.json(updatedUser);
 }));
 
 router.patch("/me/password", asyncHandler(async (req, res) => {

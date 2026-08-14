@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
-import { api, cachedGet } from "../api/client";
+import { api, clearGetCache } from "../api/client";
 import { disconnectSocket } from "../api/socket";
 
 const AuthContext = createContext(null);
@@ -21,13 +21,20 @@ export function AuthProvider({ children }) {
   const [token, setToken] = useState(localStorage.getItem("retela_token"));
   const [user, setUser] = useState(readStoredUser);
 
+  async function loadCurrentUser() {
+    clearGetCache("/users/me");
+    const { data } = await api.get("/users/me");
+    localStorage.setItem("retela_user", JSON.stringify(data));
+    console.log("[profile] loaded authenticated user", { userId: data?.id, role: data?.role });
+    return data;
+  }
+
   useEffect(() => {
     if (!token) return;
     let cancelled = false;
-    cachedGet("/users/me", {}, { cacheMs: 10000, retries: 1 })
-      .then(({ data }) => {
+    loadCurrentUser()
+      .then((data) => {
         if (cancelled) return;
-        localStorage.setItem("retela_user", JSON.stringify(data));
         setUser(data);
       })
       .catch(() => {
@@ -46,6 +53,8 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     function handleAuthExpired() {
       disconnectSocket("auth expired");
+      localStorage.removeItem("retela_token");
+      localStorage.removeItem("retela_user");
       setToken(null);
       setUser(null);
     }
@@ -56,7 +65,6 @@ export function AuthProvider({ children }) {
   async function login(credentials) {
     const { data } = await api.post("/auth/login", credentials);
     localStorage.setItem("retela_token", data.token);
-    localStorage.setItem("retela_user", JSON.stringify(data.user));
     const guestCart = localStorage.getItem("retela_guest_cart");
     if (guestCart && data.user?.role === "customer") {
       try {
@@ -70,7 +78,8 @@ export function AuthProvider({ children }) {
       }
     }
     setToken(data.token);
-    setUser(data.user);
+    const freshUser = await loadCurrentUser();
+    setUser(freshUser);
   }
 
   function logout() {

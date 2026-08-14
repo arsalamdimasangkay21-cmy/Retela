@@ -553,8 +553,8 @@ export default function CustomerDashboard({ active, onChange }) {
     try {
       const { data } = await api.patch("/users/me", payload, { headers: { "Content-Type": "multipart/form-data" } });
       clearGetCache("/users/me");
-      localStorage.setItem("retela_user", JSON.stringify({ ...user, ...data }));
-      setUser({ ...user, ...data });
+      localStorage.setItem("retela_user", JSON.stringify(data));
+      setUser(data);
       setProfile(data);
       setProfileInitial(data);
       setProfilePhoto(null);
@@ -2992,9 +2992,16 @@ function formatDate(value) {
 
 function formatDateInput(value) {
   if (!value) return "";
+  if (typeof value === "string") {
+    const match = /^(\d{4}-\d{2}-\d{2})/.exec(value);
+    if (match) return match[1];
+  }
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return String(value).slice(0, 10);
-  return date.toISOString().slice(0, 10);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 function calculateAge(value) {
