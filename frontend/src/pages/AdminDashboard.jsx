@@ -59,6 +59,7 @@ const fallbackApparelOptions = {
 };
 const productColors = ["Black", "White", "Gray", "Red", "Blue", "Green", "Yellow", "Brown", "Pink", "Purple", "Orange", "Other"];
 const blankProduct = { name: "", brand: "Other", category: "T-Shirts", gender: "Other", size: "Free Size", color: "Other", price: "", stock: "1", condition: "Good", description: "", image_url: "" };
+const defaultCustomerFilters = { search: "", status: "all", approval: "all", sort: "newest" };
 const SHOP_LOCATION = "Tela to Pera Thrift Shop, Midsayap, Cotabato, Philippines";
 const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || "";
 const commonCustomerLocations = ["Davao", "Cotabato", "Midsayap", "Kidapawan", "General Santos"];
@@ -189,6 +190,7 @@ export default function AdminDashboard({ active, onChange }) {
   const [editingProductId, setEditingProductId] = useState(null);
   const [inventoryModalOpen, setInventoryModalOpen] = useState(false);
   const [filters, setFilters] = useState({ search: "", category: "all", brand: "all", stock: "all", size: "all", condition: "all" });
+  const [customerFilters, setCustomerFilters] = useState(defaultCustomerFilters);
   const [profile, setProfile] = useState(null);
   const [profilePhoto, setProfilePhoto] = useState(null);
   const [rejectingUserIds, setRejectingUserIds] = useState([]);
@@ -767,26 +769,96 @@ export default function AdminDashboard({ active, onChange }) {
   }
 
   if (active === "Customers") {
-    const visibleCustomers = users.filter((row) => row.status !== "rejected");
-    const approvedCustomers = visibleCustomers.filter((row) => row.status === "approved");
+    const allCustomers = users.filter((row) => row.role !== "admin");
+    const normalizedSearch = customerFilters.search.trim().toLowerCase();
+    const filteredCustomers = allCustomers
+      .filter((customer) => {
+        const matchesSearch = !normalizedSearch || customerSearchText(customer).includes(normalizedSearch);
+        const matchesStatus = customerFilters.status === "all"
+          || (customerFilters.status === "active" && isCustomerActive(customer))
+          || (customerFilters.status === "offline" && !isCustomerActive(customer));
+        const approval = String(customer.status || "pending").toLowerCase();
+        const matchesApproval = customerFilters.approval === "all"
+          || (customerFilters.approval === "pending" && !["approved", "rejected", "suspended"].includes(approval))
+          || approval === customerFilters.approval;
+        return matchesSearch && matchesStatus && matchesApproval;
+      })
+      .sort((a, b) => {
+        if (customerFilters.sort === "oldest") return customerSortValue(a) - customerSortValue(b);
+        if (customerFilters.sort === "name-az") return customerDisplayName(a).localeCompare(customerDisplayName(b));
+        if (customerFilters.sort === "name-za") return customerDisplayName(b).localeCompare(customerDisplayName(a));
+        return customerSortValue(b) - customerSortValue(a);
+      });
+    const customerOverview = {
+      active: allCustomers.filter(isCustomerActive).length,
+      offline: allCustomers.filter((customer) => !isCustomerActive(customer)).length,
+      approved: allCustomers.filter((customer) => customer.status === "approved").length
+    };
+    const updateCustomerFilter = (key, value) => setCustomerFilters((current) => ({ ...current, [key]: value }));
+    const clearCustomerFilters = () => setCustomerFilters(defaultCustomerFilters);
+
     return (
       <div className="admin-customers-page grid gap-4">
-        <Card>
-          <h3 className="font-display text-lg font-bold">Listed Customers</h3>
-          <div className="listed-customers mt-3">
-            {approvedCustomers.map((customer) => (
-              <span key={customer.id} className="listed-customer-pill">
-                <PresenceDot status={customer.presence_status} />
-                <span className="listed-customer-pill-text">{customer.username} - {presenceLabel(customer.presence_status)}</span>
-                <button type="button" disabled={rejectingUserIds.includes(customer.id)} onClick={() => removeCustomer(customer.id)} className="listed-customer-remove" aria-label={`Delete customer ${customer.username || customer.id}`}>
-                  <Trash2 size={14} />
-                </button>
-              </span>
-            ))}
+        <Card className="admin-customers-card admin-customers-filter-card">
+          <div className="admin-customers-filter-heading">
+            <div className="min-w-0">
+              <p>Customer Directory</p>
+              <h3>Manage Customers</h3>
+              <span>{filteredCustomers.length} of {allCustomers.length} customers shown</span>
+            </div>
+            <button type="button" className="admin-customer-clear-link" onClick={clearCustomerFilters}>
+              Clear Filters
+            </button>
+          </div>
+
+          <Field
+            icon={Search}
+            placeholder="Search customer name, username, email, or phone"
+            value={customerFilters.search}
+            onChange={(event) => updateCustomerFilter("search", event.target.value)}
+            wrapperClassName="admin-customer-search"
+          />
+
+          <div className="admin-customer-filter-grid" aria-label="Customer filters">
+            <select value={customerFilters.status} onChange={(event) => updateCustomerFilter("status", event.target.value)} className="admin-customer-filter-control" aria-label="Filter by online status">
+              <option value="all">All Status</option>
+              <option value="active">Active</option>
+              <option value="offline">Offline</option>
+            </select>
+            <select value={customerFilters.approval} onChange={(event) => updateCustomerFilter("approval", event.target.value)} className="admin-customer-filter-control" aria-label="Filter by approval status">
+              <option value="all">All Approval</option>
+              <option value="approved">Approved</option>
+              <option value="pending">Pending</option>
+              <option value="rejected">Rejected</option>
+            </select>
+            <select value={customerFilters.sort} onChange={(event) => updateCustomerFilter("sort", event.target.value)} className="admin-customer-filter-control" aria-label="Sort customers">
+              <option value="newest">Newest</option>
+              <option value="oldest">Oldest</option>
+              <option value="name-az">Name A-Z</option>
+              <option value="name-za">Name Z-A</option>
+            </select>
+            <button type="button" className="admin-customer-filter-clear" onClick={clearCustomerFilters}>
+              Clear Filters
+            </button>
+          </div>
+
+          <div className="admin-customer-overview-grid" aria-label="Customer overview">
+            <div className="admin-customer-overview-card">
+              <span>Active</span>
+              <strong>{customerOverview.active}</strong>
+            </div>
+            <div className="admin-customer-overview-card">
+              <span>Offline</span>
+              <strong>{customerOverview.offline}</strong>
+            </div>
+            <div className="admin-customer-overview-card">
+              <span>Approved</span>
+              <strong>{customerOverview.approved}</strong>
+            </div>
           </div>
         </Card>
         <CustomersResponsiveView
-          rows={visibleCustomers}
+          rows={filteredCustomers}
           rejectingUserIds={rejectingUserIds}
           onApprove={(id) => approveUser(id, "approved")}
           onView={(id) => setSelectedDocumentCustomerId(id)}
@@ -3298,7 +3370,7 @@ function CustomerMobileCard({ customer, disabled, onApprove, onView, onDelete })
         <div className="customer-mobile-avatar" aria-hidden="true">{customerInitials(customer)}</div>
         <div className="customer-mobile-title">
           <div>
-            <h3>{customer.display_name || customer.username || `Customer #${customer.id}`}</h3>
+            <h3>{customerDisplayName(customer)}</h3>
             <p>@{customer.username || "customer"}</p>
           </div>
           <span className={`customer-presence-badge ${customer.presence_status === "active" ? "is-online" : ""}`}>
@@ -3308,33 +3380,48 @@ function CustomerMobileCard({ customer, disabled, onApprove, onView, onDelete })
       </div>
 
       <div className="mobile-customer-info">
-        <MobileCustomerRow label="Email" value={customer.email || "-"} />
+        <MobileCustomerRow label="Email" value={customer.email || "-"} wide />
         <MobileCustomerRow label="Phone" value={customer.phone_number || "-"} />
-        <MobileCustomerRow label="Location" value={customer.location || "-"} />
+        <MobileCustomerRow label="Location" value={customer.location || "-"} wide />
         <MobileCustomerRow label="Birthday" value={formatBirthday(customer.birthday)} />
         <MobileCustomerRow label="Gender" value={customer.gender || "-"} />
-        <div className="mobile-customer-row">
-          <span className="mobile-customer-label">Approval</span>
-          <CustomerApprovalStatus status={customer.status} />
-        </div>
       </div>
 
-      <div className="customer-mobile-actions">
-        <CustomerActions
+      <div className="customer-mobile-footer">
+        <CustomerApprovalControl
           customer={customer}
           disabled={disabled}
           onApprove={onApprove}
-          onView={onView}
-          onDelete={onDelete}
         />
+        <div className="customer-mobile-icon-actions">
+          <button
+            type="button"
+            onClick={() => onView?.(customer.id)}
+            className="customer-action-view"
+            aria-label={`View customer ${customer.username || customer.id}`}
+            title="View customer"
+          >
+            <Eye size={17} />
+          </button>
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={() => onDelete?.(customer.id)}
+            className="customer-action-delete"
+            aria-label={`Delete customer ${customer.username || customer.id}`}
+            title="Delete customer"
+          >
+            <Trash2 size={17} />
+          </button>
+        </div>
       </div>
     </article>
   );
 }
 
-function MobileCustomerRow({ label, value }) {
+function MobileCustomerRow({ label, value, wide = false }) {
   return (
-    <div className="mobile-customer-row">
+    <div className={`mobile-customer-row ${wide ? "is-wide" : ""}`}>
       <span className="mobile-customer-label">{label}</span>
       <strong className="mobile-customer-value">{value}</strong>
     </div>
@@ -3350,22 +3437,9 @@ function CustomerApprovalStatus({ status }) {
 }
 
 function CustomerActions({ customer, disabled, onApprove, onView, onDelete }) {
-  const approved = customer.status === "approved";
   return (
     <div className="customer-actions">
-      {approved ? (
-        <span className="customer-approved-compact">Approved</span>
-      ) : (
-        <button
-          type="button"
-          disabled={disabled}
-          onClick={() => onApprove?.(customer.id)}
-          className="customer-action-approve"
-          aria-label={`Approve customer ${customer.username || customer.id}`}
-        >
-          Approve
-        </button>
-      )}
+      <CustomerApprovalControl customer={customer} disabled={disabled} onApprove={onApprove} />
       <button
         type="button"
         onClick={() => onView?.(customer.id)}
@@ -3389,8 +3463,50 @@ function CustomerActions({ customer, disabled, onApprove, onView, onDelete }) {
   );
 }
 
+function CustomerApprovalControl({ customer, disabled, onApprove }) {
+  const approved = customer.status === "approved";
+  return approved ? (
+    <span className="customer-approved-compact">
+      <Check size={14} />
+      Approved
+    </span>
+  ) : (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={() => onApprove?.(customer.id)}
+      className="customer-action-approve"
+      aria-label={`Approve customer ${customer.username || customer.id}`}
+    >
+      Approve
+    </button>
+  );
+}
+
+function customerDisplayName(customer) {
+  return customer.display_name || customer.username || `Customer #${customer.id}`;
+}
+
+function customerSearchText(customer) {
+  return [
+    customer.display_name,
+    customer.username,
+    customer.email,
+    customer.phone_number
+  ].map((value) => String(value || "").toLowerCase()).join(" ");
+}
+
+function isCustomerActive(customer) {
+  return String(customer.presence_status || "").toLowerCase() === "active";
+}
+
+function customerSortValue(customer) {
+  const value = Date.parse(customer.registration_created_at || customer.created_at || customer.updated_at || "");
+  return Number.isFinite(value) ? value : Number(customer.id) || 0;
+}
+
 function customerInitials(customer) {
-  const source = customer.display_name || customer.username || "Customer";
+  const source = customerDisplayName(customer);
   return String(source)
     .split(/\s+/)
     .filter(Boolean)
