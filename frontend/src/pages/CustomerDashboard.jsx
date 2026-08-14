@@ -13,6 +13,7 @@ import { fetchFeaturedApparel } from "../api/customer";
 import { ChangePasswordForm } from "../components/ChangePasswordForm";
 import ConfirmDialog from "../components/ConfirmDialog";
 import FaceVerification from "../components/FaceVerification";
+import NotificationPreviewPanel from "../components/NotificationPreviewPanel";
 import ProductImage from "../components/ProductImage";
 import { Button, Card, Field } from "../components/ui";
 import { resolveAssetUrl } from "../config/branding";
@@ -789,47 +790,7 @@ function FloatingNotificationsWidget({ onViewAll }) {
       tone: "amber"
     }
   ];
-  const tones = {
-    emerald: "border-emerald-100 bg-emerald-50 text-emerald-700",
-    sky: "border-sky-100 bg-sky-50 text-sky-700",
-    amber: "border-amber-100 bg-amber-50 text-amber-700"
-  };
-
-  return (
-    <aside className="group h-fit min-h-[220px] rounded-[20px] border border-white/70 bg-white/85 p-4 shadow-[0_20px_55px_rgba(15,23,42,0.12)] backdrop-blur-2xl transition duration-300 hover:-translate-y-1 hover:shadow-[0_26px_70px_rgba(15,23,42,0.16)]">
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <span className="grid h-9 w-9 place-items-center rounded-2xl border border-emerald-100 bg-emerald-50 text-emerald-700">
-            <Bell size={18} />
-          </span>
-          <h2 className="font-display text-lg font-bold text-slate-950">Notifications</h2>
-        </div>
-        <button type="button" onClick={onViewAll} className="rounded-full px-2 py-1 text-xs font-bold text-emerald-700 transition hover:bg-emerald-50">
-          View All
-        </button>
-      </div>
-      <div className="mt-3 grid gap-2">
-        {items.map((item) => {
-          const Icon = item.icon;
-          return (
-            <article key={item.title} className="flex gap-3 rounded-2xl border border-slate-100 bg-white/88 p-2.5 shadow-sm transition duration-300 hover:-translate-y-0.5 hover:border-emerald-100 hover:shadow-md">
-              <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-2xl border ${tones[item.tone]}`}>
-                <Icon size={17} />
-              </span>
-              <div className="min-w-0 flex-1">
-                <div className="flex items-start justify-between gap-2">
-                  <strong className="text-sm text-slate-950">{item.title}</strong>
-                  <span className="shrink-0 text-[11px] font-semibold text-slate-400">{item.time}</span>
-                </div>
-                <p className="mt-0.5 line-clamp-2 text-xs leading-5 text-slate-500">{item.body}</p>
-                <span className="mt-1.5 inline-flex rounded-full border border-emerald-100 bg-emerald-50 px-2 py-0.5 text-[11px] font-bold text-emerald-700">{item.badge}</span>
-              </div>
-            </article>
-          );
-        })}
-      </div>
-    </aside>
-  );
+  return <NotificationPreviewPanel notifications={items} onViewAll={onViewAll} maxItems={3} />;
 }
 
 function CartPage({

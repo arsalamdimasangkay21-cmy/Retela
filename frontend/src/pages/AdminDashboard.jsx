@@ -10,6 +10,7 @@ import { createApparelOption, fetchApparelOptions } from "../api/apparelOptions"
 import { ChangePasswordForm } from "../components/ChangePasswordForm";
 import ConfirmDialog from "../components/ConfirmDialog";
 import CustomerDocumentsModal from "../components/CustomerDocumentsModal";
+import NotificationPreviewPanel from "../components/NotificationPreviewPanel";
 import ProductImage from "../components/ProductImage";
 import { Button, Card, Field, StatCard } from "../components/ui";
 import { useAuth } from "../context/AuthContext";
@@ -157,6 +158,16 @@ function notificationRowsFromResponse(data) {
   return [];
 }
 
+function adminNotificationTarget(row) {
+  if (row.type === "message") return "Messages";
+  if (["order", "order_cancelled", "payment"].includes(row.type)) return "Orders";
+  if (row.type === "inventory") return "Inventory";
+  if (["approval", "customer_registration", "registration"].includes(row.type)) return "Customers";
+  if (["return", "refund"].includes(row.type)) return "Returns";
+  if (row.type === "feedback") return "Feedback";
+  return "Notifications";
+}
+
 function duplicateOptionMessage(label) {
   return `This ${label.toLowerCase()} already exists.`;
 }
@@ -234,19 +245,24 @@ export default function AdminDashboard({ active, onChange }) {
   }, [canUpdate]);
 
   const loadDashboardData = useCallback(async ({ cancelled, force = false } = {}) => {
-    const [reportRes, inventoryRes, orderRes, userRes, notificationRes] = await Promise.all([
-      getShared("/reports/summary", {}, { force }),
-      getShared("/products/inventory", {}, { force }),
-      getShared("/orders", {}, { force }),
-      getShared("/users", {}, { force }),
-      getShared("/notifications", {}, { force })
-    ]);
-    if (!canUpdate(cancelled)) return;
-    setSummary(reportRes.data);
-    setInventoryProducts(normalizeProductRows(inventoryRes.data));
-    setOrders(orderRes.data);
-    setUsers(userRes.data);
-    setNotifications(notificationRowsFromResponse(notificationRes.data));
+    if (canUpdate(cancelled)) setNotificationsLoading(true);
+    try {
+      const [reportRes, inventoryRes, orderRes, userRes, notificationRes] = await Promise.all([
+        getShared("/reports/summary", {}, { force }),
+        getShared("/products/inventory", {}, { force }),
+        getShared("/orders", {}, { force }),
+        getShared("/users", {}, { force }),
+        getShared("/notifications", {}, { cacheMs: 0, force: true })
+      ]);
+      if (!canUpdate(cancelled)) return;
+      setSummary(reportRes.data);
+      setInventoryProducts(normalizeProductRows(inventoryRes.data));
+      setOrders(orderRes.data);
+      setUsers(userRes.data);
+      setNotifications(notificationRowsFromResponse(notificationRes.data));
+    } finally {
+      if (canUpdate(cancelled)) setNotificationsLoading(false);
+    }
   }, [canUpdate, getShared]);
 
   const loadCatalogData = useCallback(async ({ cancelled, force = false } = {}) => {
@@ -382,6 +398,16 @@ export default function AdminDashboard({ active, onChange }) {
   const markNotificationRead = useCallback((notificationId) => {
     setNotifications((current) => current.map((row) => Number(row.id) === Number(notificationId) ? { ...row, is_read: true } : row));
   }, []);
+
+  const openAdminNotification = useCallback(async (row) => {
+    if (row?.id) {
+      await api.patch(`/notifications/${row.id}/read`).catch(() => {});
+      clearGetCache("/notifications");
+      markNotificationRead(row.id);
+      window.dispatchEvent(new CustomEvent("retela:notification-read", { detail: { id: row.id, type: row.type } }));
+    }
+    onChange(adminNotificationTarget(row || {}));
+  }, [markNotificationRead, onChange]);
 
   async function saveProduct(event, resolvedForm = form, selectedImage = productImage) {
     event.preventDefault();
@@ -636,7 +662,7 @@ export default function AdminDashboard({ active, onChange }) {
   }
 
   if (active === "Dashboard") {
-    return <FuturisticDashboard summary={summary} products={inventoryProducts} orders={orders} users={users} notifications={notifications} onChange={onChange} />;
+    return <FuturisticDashboard summary={summary} products={inventoryProducts} orders={orders} users={users} notifications={notifications} notificationsLoading={notificationsLoading} onChange={onChange} onNotificationClick={openAdminNotification} />;
   }
 
   if (active === "Apparel") {
@@ -2056,7 +2082,7 @@ function DashboardRevenueTooltip({ active, payload, label }) {
   );
 }
 
-function FuturisticDashboard({ summary, products, orders, users, notifications, onChange }) {
+function FuturisticDashboard({ summary, products, orders, users, notifications, notificationsLoading = false, onChange, onNotificationClick }) {
   const totalRevenue = Number(summary?.sales?.total_sales || 0);
   const totalOrders = Number(summary?.sales?.order_count || orders.length || 0);
   const customerCount = users.filter((row) => row.status !== "rejected").length;
@@ -2140,16 +2166,28 @@ function FuturisticDashboard({ summary, products, orders, users, notifications, 
             </AreaChart>
           </ResponsiveContainer>
         </ChartPanel>
+        <NotificationPreviewPanel
+          notifications={notifications}
+          loading={notificationsLoading}
+          title="Notifications"
+          onViewAll={() => onChange("Notifications")}
+          onNotificationClick={onNotificationClick}
+          emptyTitle="No admin notifications yet"
+          maxItems={4}
+          className="xl:sticky xl:top-24"
+        />
+      </div>
+
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
         <ChartPanel title="Top Channels" subtitle="Operational activity mix" hasData={orders.length || notifications.length}>
           <Doughnut data={channelData} options={{ ...chartMotion, maintainAspectRatio: false, cutout: "68%", plugins: { legend: { position: "bottom", labels: { color: "#111827", boxWidth: 12, padding: 16 } } } }} />
         </ChartPanel>
-      </div>
-
-      <div className="grid gap-5 lg:grid-cols-2 xl:grid-cols-4">
-        <SignalWidget title="Recent Activity" icon={Activity} items={orders.slice(0, 3).map((order) => `Order #${order.id} is ${order.status}`)} empty="No recent orders yet." />
-        <SignalWidget title="AI Performance" icon={Bot} items={[`${aiConversations} message notifications`, `${notifications.filter((row) => row.type === "feedback").length} feedback events`, "Assistant uses live inventory only"]} />
-        <SignalWidget title="Inventory Overview" icon={PackageCheck} items={[`${products.length} apparel items`, `${stockTotal} total stock`, `${lowStockProducts.length} low stock alerts`]} />
-        <SignalWidget title="System Status" icon={Zap} items={["API connected", "Realtime notifications enabled", "Inventory source: database"]} />
+        <div className="grid gap-5 sm:grid-cols-2">
+          <SignalWidget title="Recent Activity" icon={Activity} items={orders.slice(0, 3).map((order) => `Order #${order.id} is ${order.status}`)} empty="No recent orders yet." />
+          <SignalWidget title="AI Performance" icon={Bot} items={[`${aiConversations} message notifications`, `${notifications.filter((row) => row.type === "feedback").length} feedback events`, "Assistant uses live inventory only"]} />
+          <SignalWidget title="Inventory Overview" icon={PackageCheck} items={[`${products.length} apparel items`, `${stockTotal} total stock`, `${lowStockProducts.length} low stock alerts`]} />
+          <SignalWidget title="System Status" icon={Zap} items={["API connected", "Realtime notifications enabled", "Inventory source: database"]} />
+        </div>
       </div>
 
       <Card>
@@ -3811,12 +3849,7 @@ function AdminNotifications({ rows, loading = false, users, rejectingUserIds = [
     clearGetCache("/notifications");
     onNotificationRead?.(row.id);
     window.dispatchEvent(new CustomEvent("retela:notification-read", { detail: { id: row.id, type: row.type } }));
-    if (row.type === "message") onChange?.("Messages");
-    else if (["order", "order_cancelled", "payment"].includes(row.type)) onChange?.("Orders");
-    else if (row.type === "inventory") onChange?.("Inventory");
-    else if (row.type === "approval" || row.type === "customer_registration" || row.type === "registration") onChange?.("Customers");
-    else if (row.type === "return" || row.type === "refund") onChange?.("Returns");
-    else onChange?.("Notifications");
+    onChange?.(adminNotificationTarget(row));
   }
 
   return (
