@@ -8,9 +8,7 @@ import { comparePassword, createOtp, hashPassword, isBcryptHash } from "../utils
 import { sendOtpEmail } from "../utils/email.js";
 import { asyncHandler, HttpError } from "../utils/errors.js";
 import { createAdminNotification } from "../utils/adminNotifications.js";
-import { verificationFileStatus } from "../utils/verificationFiles.js";
-
-const uploadDir = UPLOAD_ROOT;
+import { readVerificationImageFile, verificationFileStatus } from "../utils/verificationFiles.js";
 
 let verificationTablesReady;
 
@@ -224,14 +222,6 @@ function throwValidationErrors(errors) {
   }
 }
 
-async function saveBufferedUpload(file) {
-  await fs.mkdir(uploadDir, { recursive: true });
-  const ext = path.extname(file.originalname || "").toLowerCase() || ".jpg";
-  const filename = `${Date.now()}-${Math.round(Math.random() * 1e9)}${ext}`;
-  await fs.writeFile(path.join(uploadDir, filename), file.buffer);
-  return `/uploads/${filename}`;
-}
-
 function sha256(buffer) {
   return crypto.createHash("sha256").update(buffer).digest("hex");
 }
@@ -326,7 +316,11 @@ export async function ensureVerificationTables() {
         id_type VARCHAR(80) NOT NULL,
         id_number VARCHAR(120) NOT NULL,
         id_image VARCHAR(255) NULL,
+        government_id_data LONGBLOB NULL,
+        government_id_mime VARCHAR(100) NULL,
         selfie_image VARCHAR(255) NULL,
+        selfie_data LONGBLOB NULL,
+        selfie_mime VARCHAR(100) NULL,
         face_match_score DECIMAL(5,2) NOT NULL DEFAULT 0,
         otp_verified BOOLEAN NOT NULL DEFAULT false,
         identity_verified BOOLEAN NOT NULL DEFAULT false,
@@ -337,6 +331,18 @@ export async function ensureVerificationTables() {
         CONSTRAINT fk_identity_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
       )`
     );
+    const identityColumns = await query(
+      `SELECT COLUMN_NAME
+       FROM INFORMATION_SCHEMA.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE()
+         AND TABLE_NAME = 'identity_verifications'
+         AND COLUMN_NAME IN ('government_id_data','government_id_mime','selfie_data','selfie_mime')`
+    );
+    const identityColumnSet = new Set(identityColumns.map((row) => row.COLUMN_NAME));
+    if (!identityColumnSet.has("government_id_data")) await query("ALTER TABLE identity_verifications ADD COLUMN government_id_data LONGBLOB NULL AFTER id_image");
+    if (!identityColumnSet.has("government_id_mime")) await query("ALTER TABLE identity_verifications ADD COLUMN government_id_mime VARCHAR(100) NULL AFTER government_id_data");
+    if (!identityColumnSet.has("selfie_data")) await query("ALTER TABLE identity_verifications ADD COLUMN selfie_data LONGBLOB NULL AFTER selfie_image");
+    if (!identityColumnSet.has("selfie_mime")) await query("ALTER TABLE identity_verifications ADD COLUMN selfie_mime VARCHAR(100) NULL AFTER selfie_data");
 
     const indexes = await query(
       `SELECT INDEX_NAME, GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX) AS COLUMNS
@@ -367,7 +373,11 @@ export async function ensureVerificationTables() {
         consumed_at DATETIME NULL,
         registration_payload JSON NULL,
         id_image_path VARCHAR(255) NULL,
+        id_image_data LONGBLOB NULL,
+        id_image_mime VARCHAR(100) NULL,
         selfie_image_path VARCHAR(255) NULL,
+        selfie_image_data LONGBLOB NULL,
+        selfie_image_mime VARCHAR(100) NULL,
         face_match_score DECIMAL(5,2) NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -382,11 +392,15 @@ export async function ensureVerificationTables() {
        FROM INFORMATION_SCHEMA.COLUMNS
        WHERE TABLE_SCHEMA = DATABASE()
          AND TABLE_NAME = 'otp_codes'
-         AND COLUMN_NAME IN ('resend_count','max_resends')`
+         AND COLUMN_NAME IN ('resend_count','max_resends','id_image_data','id_image_mime','selfie_image_data','selfie_image_mime')`
     );
     const otpColumnSet = new Set(otpColumns.map((row) => row.COLUMN_NAME));
     if (!otpColumnSet.has("resend_count")) await query("ALTER TABLE otp_codes ADD COLUMN resend_count INT NOT NULL DEFAULT 0 AFTER max_attempts");
     if (!otpColumnSet.has("max_resends")) await query("ALTER TABLE otp_codes ADD COLUMN max_resends INT NOT NULL DEFAULT 3 AFTER resend_count");
+    if (!otpColumnSet.has("id_image_data")) await query("ALTER TABLE otp_codes ADD COLUMN id_image_data LONGBLOB NULL AFTER id_image_path");
+    if (!otpColumnSet.has("id_image_mime")) await query("ALTER TABLE otp_codes ADD COLUMN id_image_mime VARCHAR(100) NULL AFTER id_image_data");
+    if (!otpColumnSet.has("selfie_image_data")) await query("ALTER TABLE otp_codes ADD COLUMN selfie_image_data LONGBLOB NULL AFTER selfie_image_path");
+    if (!otpColumnSet.has("selfie_image_mime")) await query("ALTER TABLE otp_codes ADD COLUMN selfie_image_mime VARCHAR(100) NULL AFTER selfie_image_data");
   })().catch((error) => {
     verificationTablesReady = undefined;
     throw error;
@@ -499,18 +513,42 @@ export const sendRegistrationOtp = asyncHandler(async (req, res) => {
       id_type: input.idType,
       id_number: input.idNumber
     };
-    const [idImagePath, selfieImagePath] = await Promise.all([
-      saveBufferedUpload(idImage),
-      saveBufferedUpload(selfieImage)
-    ]);
+    const idImagePath = null;
+    const selfieImagePath = null;
 
     let insertedOtpId;
     try {
       const result = await query(
         `INSERT INTO otp_codes
-          (contact, purpose, otp_code, expires_at, resend_available_at, max_resends, registration_payload, id_image_path, selfie_image_path, face_match_score)
+          (contact,
+           purpose,
+           otp_code,
+           expires_at,
+           resend_available_at,
+           max_resends,
+           registration_payload,
+           id_image_path,
+           id_image_data,
+           id_image_mime,
+           selfie_image_path,
+           selfie_image_data,
+           selfie_image_mime,
+           face_match_score)
          VALUES
-          (:email, 'registration', :otp, :expiresAt, :resendAvailableAt, :maxResends, :payload, :idImage, :selfieImage, :faceMatchScore)`,
+          (:email,
+           'registration',
+           :otp,
+           :expiresAt,
+           :resendAvailableAt,
+           :maxResends,
+           :payload,
+           :idImagePath,
+           :idImageData,
+           :idImageMime,
+           :selfieImagePath,
+           :selfieImageData,
+           :selfieImageMime,
+           :faceMatchScore)`,
         {
           email: input.email,
           otp: otpHash,
@@ -518,8 +556,12 @@ export const sendRegistrationOtp = asyncHandler(async (req, res) => {
           resendAvailableAt: getResendAvailableAt(),
           maxResends: getOtpMaxResends(),
           payload: JSON.stringify(payload),
-          idImage: idImagePath,
-          selfieImage: selfieImagePath,
+          idImagePath,
+          idImageData: idImage.buffer,
+          idImageMime: idImage.mimetype,
+          selfieImagePath,
+          selfieImageData: selfieImage.buffer,
+          selfieImageMime: selfieImage.mimetype,
           faceMatchScore: input.faceMatchScore
         }
       );
@@ -652,6 +694,30 @@ export const resendRegistrationOtp = asyncHandler(async (req, res) => {
   });
 });
 
+async function getPendingVerificationImage(pending, { pathColumn, dataColumn, mimeColumn }) {
+  const storedBuffer = pending[dataColumn];
+  if (Buffer.isBuffer(storedBuffer) && storedBuffer.length > 0) {
+    return {
+      path: pending[pathColumn] || null,
+      buffer: storedBuffer,
+      mime: pending[mimeColumn] || "image/jpeg",
+      source: "database"
+    };
+  }
+
+  const file = await readVerificationImageFile(pending[pathColumn]);
+  if (file.exists && file.buffer?.length) {
+    return {
+      path: pending[pathColumn] || null,
+      buffer: file.buffer,
+      mime: file.mime,
+      source: "legacy_file"
+    };
+  }
+
+  throw new HttpError(410, "Registration verification images are unavailable. Please restart registration.");
+}
+
 export const completeRegistration = asyncHandler(async (req, res) => {
   await ensureVerificationTables();
   const input = completeRegistrationSchema.parse(req.body);
@@ -704,6 +770,16 @@ export const completeRegistration = asyncHandler(async (req, res) => {
       idNumber: payload.id_number
     }, errors, run);
     throwValidationErrors(errors);
+    const governmentIdImage = await getPendingVerificationImage(pending, {
+      pathColumn: "id_image_path",
+      dataColumn: "id_image_data",
+      mimeColumn: "id_image_mime"
+    });
+    const selfieImage = await getPendingVerificationImage(pending, {
+      pathColumn: "selfie_image_path",
+      dataColumn: "selfie_image_data",
+      mimeColumn: "selfie_image_mime"
+    });
 
     const result = await run(
       `INSERT INTO users
@@ -724,18 +800,54 @@ export const completeRegistration = asyncHandler(async (req, res) => {
 
     await run(
       `INSERT INTO identity_verifications
-        (user_id, id_type, id_number, id_image, selfie_image, face_match_score, otp_verified, identity_verified)
+        (user_id,
+         id_type,
+         id_number,
+         id_image,
+         government_id_data,
+         government_id_mime,
+         selfie_image,
+         selfie_data,
+         selfie_mime,
+         face_match_score,
+         otp_verified,
+         identity_verified)
        VALUES
-        (:userId, :idType, :idNumber, :idImage, :selfieImage, :faceMatchScore, true, true)`,
+        (:userId,
+         :idType,
+         :idNumber,
+         :idImage,
+         :governmentIdData,
+         :governmentIdMime,
+         :selfieImage,
+         :selfieData,
+         :selfieMime,
+         :faceMatchScore,
+         true,
+         true)`,
       {
         userId: result.insertId,
         idType: payload.id_type,
         idNumber: payload.id_number,
-        idImage: pending.id_image_path,
-        selfieImage: pending.selfie_image_path,
+        idImage: governmentIdImage.path,
+        governmentIdData: governmentIdImage.buffer,
+        governmentIdMime: governmentIdImage.mime,
+        selfieImage: selfieImage.path,
+        selfieData: selfieImage.buffer,
+        selfieMime: selfieImage.mime,
         faceMatchScore: pending.face_match_score
       }
     );
+    console.log("[verification image storage]", {
+      verificationId: null,
+      customerId: result.insertId,
+      hasGovernmentId: true,
+      governmentIdBytes: governmentIdImage.buffer.length,
+      governmentIdSource: governmentIdImage.source,
+      hasSelfie: true,
+      selfieBytes: selfieImage.buffer.length,
+      selfieSource: selfieImage.source
+    });
     await run("UPDATE otp_codes SET consumed_at = NOW(), attempts = attempts + 1 WHERE id = :id", { id: pending.id });
 
     return {
@@ -761,6 +873,62 @@ export const completeRegistration = asyncHandler(async (req, res) => {
   });
 });
 
+async function verificationImageMetadata(verification, kind) {
+  const isSelfie = kind === "selfie";
+  const bytesKey = isSelfie ? "selfie_bytes" : "government_id_bytes";
+  const pathKey = isSelfie ? "selfie_image" : "id_image";
+  const endpoint = verification.id ? `/identity-verifications/${verification.id}/${isSelfie ? "selfie" : "government-id"}` : null;
+  const bytes = Number(verification[bytesKey] || 0);
+
+  if (bytes > 0) {
+    return {
+      path: verification[pathKey] || null,
+      exists: true,
+      reason: null,
+      source: "database",
+      bytes,
+      endpoint
+    };
+  }
+
+  const file = await readVerificationImageFile(verification[pathKey]);
+  if (file.exists && file.buffer?.length && verification.id) {
+    await query(
+      `UPDATE identity_verifications
+       SET ${isSelfie ? "selfie_data" : "government_id_data"} = :imageData,
+           ${isSelfie ? "selfie_mime" : "government_id_mime"} = :imageMime,
+           updated_at = NOW()
+       WHERE id = :id`,
+      { id: verification.id, imageData: file.buffer, imageMime: file.mime }
+    );
+    console.log("[verification image storage]", {
+      verificationId: verification.id,
+      customerId: verification.user_id,
+      migratedFromFile: true,
+      kind,
+      bytes: file.buffer.length
+    });
+    return {
+      path: verification[pathKey] || null,
+      exists: true,
+      reason: null,
+      source: "migrated_file",
+      bytes: file.buffer.length,
+      endpoint
+    };
+  }
+
+  const status = verificationFileStatus(verification[pathKey]);
+  return {
+    path: status.path,
+    exists: false,
+    reason: status.reason || "FILE_MISSING",
+    source: "missing",
+    bytes: 0,
+    endpoint: null
+  };
+}
+
 export const getCustomerDocuments = asyncHandler(async (req, res) => {
   await ensureVerificationTables();
   if (req.user.role !== "admin") return res.status(403).json({ message: "Forbidden" });
@@ -773,22 +941,38 @@ export const getCustomerDocuments = asyncHandler(async (req, res) => {
   );
   if (!users.length) throw new HttpError(404, "Customer account not found");
   const verifications = await query(
-    `SELECT id, user_id, id_type, id_number, id_image, selfie_image, face_match_score, otp_verified, identity_verified, created_at, updated_at
+    `SELECT id,
+            user_id,
+            id_type,
+            id_number,
+            id_image,
+            OCTET_LENGTH(government_id_data) AS government_id_bytes,
+            government_id_mime,
+            selfie_image,
+            OCTET_LENGTH(selfie_data) AS selfie_bytes,
+            selfie_mime,
+            face_match_score,
+            otp_verified,
+            identity_verified,
+            created_at,
+            updated_at
      FROM identity_verifications
      WHERE user_id = :id
      LIMIT 1`,
     { id: req.params.customerId }
   );
   const verification = verifications[0] || {};
-  const governmentIdStatus = verificationFileStatus(verification.id_image);
-  const selfieStatus = verificationFileStatus(verification.selfie_image);
+  const governmentIdStatus = await verificationImageMetadata(verification, "government-id");
+  const selfieStatus = await verificationImageMetadata(verification, "selfie");
   console.log("[verification paths]", {
     verificationId: verification.id || null,
     customerId: Number(req.params.customerId),
     governmentIdPath: governmentIdStatus.path,
     governmentIdExists: governmentIdStatus.exists,
+    governmentIdBytes: governmentIdStatus.bytes || 0,
     selfiePath: selfieStatus.path,
-    selfieExists: selfieStatus.exists
+    selfieExists: selfieStatus.exists,
+    selfieBytes: selfieStatus.bytes || 0
   });
   res.json({
     user: users[0],
@@ -803,13 +987,17 @@ export const getCustomerDocuments = asyncHandler(async (req, res) => {
         path: governmentIdStatus.path,
         exists: governmentIdStatus.exists,
         reason: governmentIdStatus.reason,
-        endpoint: verification.id && governmentIdStatus.exists ? `/identity-verifications/${verification.id}/government-id` : null
+        source: governmentIdStatus.source,
+        bytes: governmentIdStatus.bytes,
+        endpoint: governmentIdStatus.endpoint
       },
       selfie_verification_image: {
         path: selfieStatus.path,
         exists: selfieStatus.exists,
         reason: selfieStatus.reason,
-        endpoint: verification.id && selfieStatus.exists ? `/identity-verifications/${verification.id}/selfie` : null
+        source: selfieStatus.source,
+        bytes: selfieStatus.bytes,
+        endpoint: selfieStatus.endpoint
       },
       face_match_score: verification.face_match_score ?? "",
       otp_verified: Boolean(verification.otp_verified),

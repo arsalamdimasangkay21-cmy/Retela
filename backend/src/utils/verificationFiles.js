@@ -65,6 +65,20 @@ export function sendVerificationImage(res, storedPath) {
   return res.sendFile(resolved.resolvedPath);
 }
 
+export async function readVerificationImageFile(storedPath) {
+  const status = verificationFileStatus(storedPath);
+  if (!status.exists) return { ...status, buffer: null, mime: null };
+
+  const resolved = resolveVerificationPath(storedPath);
+  const ext = path.extname(resolved.resolvedPath).toLowerCase();
+  const buffer = await fsp.readFile(resolved.resolvedPath);
+  return {
+    ...status,
+    buffer,
+    mime: extensionTypes.get(ext) || "image/jpeg"
+  };
+}
+
 export async function saveVerificationUpload({ file, customerId, kind }) {
   if (!allowedImageTypes.has(file?.mimetype)) {
     throw new HttpError(400, "Only JPEG, PNG, and WebP images are allowed.");

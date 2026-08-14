@@ -63,7 +63,7 @@ function attachSqlContext(err, sql, params) {
 }
 
 function sanitizeParams(params = {}) {
-  const sensitivePattern = /(password|token|secret|key|otp|authorization|cookie)/i;
+  const sensitivePattern = /(password|token|secret|key|otp|authorization|cookie|imagedata|governmentiddata|selfiedata|image_data|_data$|blob|buffer)/i;
   return Object.fromEntries(Object.entries(params || {}).map(([key, value]) => [
     key,
     sensitivePattern.test(key) ? "[redacted]" : value
@@ -769,7 +769,11 @@ async function ensureCommunicationTables() {
       id_type VARCHAR(80) NOT NULL,
       id_number VARCHAR(120) NOT NULL,
       id_image VARCHAR(255) NULL,
+      government_id_data LONGBLOB NULL,
+      government_id_mime VARCHAR(100) NULL,
       selfie_image VARCHAR(255) NULL,
+      selfie_data LONGBLOB NULL,
+      selfie_mime VARCHAR(100) NULL,
       face_match_score DECIMAL(5,2) NOT NULL DEFAULT 0,
       otp_verified BOOLEAN NOT NULL DEFAULT false,
       identity_verified BOOLEAN NOT NULL DEFAULT false,
@@ -780,6 +784,10 @@ async function ensureCommunicationTables() {
     )
   `);
   await ensureAutoIncrementId("identity_verifications");
+  await ensureColumn("identity_verifications", "government_id_data", "government_id_data LONGBLOB NULL AFTER id_image");
+  await ensureColumn("identity_verifications", "government_id_mime", "government_id_mime VARCHAR(100) NULL AFTER government_id_data");
+  await ensureColumn("identity_verifications", "selfie_data", "selfie_data LONGBLOB NULL AFTER selfie_image");
+  await ensureColumn("identity_verifications", "selfie_mime", "selfie_mime VARCHAR(100) NULL AFTER selfie_data");
   await ensureIndex("identity_verifications", "uq_identity_id_number", "CREATE UNIQUE INDEX uq_identity_id_number ON identity_verifications (id_number)", ["id_number"]);
 
   await ensureTable("otp_codes", `
@@ -795,7 +803,11 @@ async function ensureCommunicationTables() {
       consumed_at DATETIME NULL,
       registration_payload JSON NULL,
       id_image_path VARCHAR(255) NULL,
+      id_image_data LONGBLOB NULL,
+      id_image_mime VARCHAR(100) NULL,
       selfie_image_path VARCHAR(255) NULL,
+      selfie_image_data LONGBLOB NULL,
+      selfie_image_mime VARCHAR(100) NULL,
       face_match_score DECIMAL(5,2) NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -804,6 +816,10 @@ async function ensureCommunicationTables() {
     )
   `);
   await ensureAutoIncrementId("otp_codes");
+  await ensureColumn("otp_codes", "id_image_data", "id_image_data LONGBLOB NULL AFTER id_image_path");
+  await ensureColumn("otp_codes", "id_image_mime", "id_image_mime VARCHAR(100) NULL AFTER id_image_data");
+  await ensureColumn("otp_codes", "selfie_image_data", "selfie_image_data LONGBLOB NULL AFTER selfie_image_path");
+  await ensureColumn("otp_codes", "selfie_image_mime", "selfie_image_mime VARCHAR(100) NULL AFTER selfie_image_data");
 
   await ensureTable("conversations", `
     CREATE TABLE IF NOT EXISTS conversations (
