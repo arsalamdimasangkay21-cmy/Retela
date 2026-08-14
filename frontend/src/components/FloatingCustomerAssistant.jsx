@@ -3,22 +3,69 @@ import { Bot, Loader2, Send, X } from "lucide-react";
 import { api } from "../api/client";
 
 const initialSuggestions = [
-  "Track my order",
+  "Browse products",
   "Product availability",
+  "Available sizes",
+  "Track my order",
   "Shipping fee",
-  "Return an item",
-  "Payment methods",
-  "Talk to support"
+  "Payment methods"
+];
+
+const fallbackSuggestions = [
+  "Browse products",
+  "Product availability",
+  "Track my order",
+  "Shipping fee",
+  "Payment methods"
 ];
 
 const contextualSuggestions = {
-  order: ["Track my order", "Order status", "Cancel an order"],
-  product: ["Is this available?", "Available sizes", "Product condition"],
-  shipping: ["Shipping fee", "Delivery time"],
-  return: ["Return policy", "Start a return"],
-  payment: ["GCash", "Cash on Delivery", "Other payment methods"],
-  support: ["Talk to support"]
+  product: ["Is this available?", "Available sizes", "Product condition", "View similar products", "How much is this?"],
+  order: ["Track my order", "Order status", "Delivery status", "Cancel an order"],
+  shop: ["Browse products", "What's available?", "How to order", "Shipping information", "Payment methods"],
+  shipping: ["Shipping fee", "Delivery time", "Delivery status", "Shipping areas"],
+  payment: ["GCash", "Cash on Delivery", "Payment methods", "Payment status"],
+  return: ["Return policy", "Start a return", "Refund status", "Return requirements"]
 };
+
+const maxVisibleSuggestions = 5;
+
+function latestCustomerText(messages = []) {
+  const latest = [...messages].reverse().find((message) => message.sender_type === "customer" && message.body);
+  return String(latest?.body || "").trim();
+}
+
+function recentCustomerContext(messages = []) {
+  return messages
+    .filter((message) => message.sender_type === "customer" && message.body)
+    .slice(-3)
+    .map((message) => message.body)
+    .join(" ");
+}
+
+function categoryForText(text) {
+  const source = String(text || "").toLowerCase();
+  if (!source) return "";
+
+  if (/\b(product availability|available sizes?|product condition|view similar products?|how much is this|is this available)\b/i.test(source)) return "product";
+  if (/\b(track my order|where is my order|order status|delivery status|cancel an order)\b/i.test(source)) return "order";
+  if (/\b(shipping fee|delivery time|shipping areas?|shipping information)\b/i.test(source)) return "shipping";
+  if (/\b(payment methods?|payment status|gcash|cash on delivery)\b/i.test(source)) return "payment";
+  if (/\b(return policy|start a return|refund status|return requirements?)\b/i.test(source)) return "return";
+  if (/\b(browse products?|what'?s available|what is available|how to order)\b/i.test(source)) return "shop";
+
+  if (/\b(return|refund|exchange)\b/i.test(source)) return "return";
+  if (/\b(payment|gcash|cod|cash|paid)\b/i.test(source)) return "payment";
+  if (/\b(order|track|tracking|purchase|checkout|status|cancel)\b/i.test(source)) return "order";
+  if (/\b(shipping|delivery|courier|fee)\b/i.test(source)) return "shipping";
+  if (/\b(product|item|shirt|apparel|size|stock|available|availability|condition|price)\b/i.test(source)) return "product";
+  if (/\b(shop|store|retela|browse|buy|shopping)\b/i.test(source)) return "shop";
+  return "";
+}
+
+function limitedSuggestions(category, fallback = fallbackSuggestions) {
+  return (contextualSuggestions[category] || fallback).slice(0, maxVisibleSuggestions);
+}
 
 function messageStatusLabel(status) {
   if (status === "seen") return "Seen";
@@ -27,14 +74,10 @@ function messageStatusLabel(status) {
 }
 
 function suggestionsForMessages(messages = []) {
-  const text = messages.slice(-4).map((message) => message.body || "").join(" ").toLowerCase();
-  if (/order|track|cancel|status/.test(text)) return contextualSuggestions.order;
-  if (/available|stock|size|condition|product|apparel/.test(text)) return contextualSuggestions.product;
-  if (/shipping|delivery|deliver|fee/.test(text)) return contextualSuggestions.shipping;
-  if (/return|refund|replace/.test(text)) return contextualSuggestions.return;
-  if (/payment|gcash|cash|cod|pay/.test(text)) return contextualSuggestions.payment;
-  if (/admin|support|human|agent/.test(text)) return contextualSuggestions.support;
-  return initialSuggestions;
+  if (!messages.length) return initialSuggestions;
+  const latestCategory = categoryForText(latestCustomerText(messages));
+  if (latestCategory) return limitedSuggestions(latestCategory);
+  return limitedSuggestions(categoryForText(recentCustomerContext(messages)));
 }
 
 export function FloatingCustomerAssistant({ hidden = false }) {
