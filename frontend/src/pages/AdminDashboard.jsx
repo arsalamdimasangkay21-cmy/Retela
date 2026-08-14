@@ -3100,7 +3100,7 @@ function OrderManagement({ rows, updateOrder }) {
     customer: row.username || "Walk-in Customer",
     status: orderStatusLabel(row.status),
     status_key: row.status,
-    total: `PHP ${row.total_amount}`,
+    total: money(row.total_amount),
     payment: paymentLabel(row.payment_method),
     payment_key: row.payment_method,
     fulfillment: row.fulfillment_method === "pickup" ? "Pick up" : "Delivery",
@@ -3148,19 +3148,19 @@ function OrderManagement({ rows, updateOrder }) {
   }
 
   return (
-    <div className="grid gap-4">
-      <Card>
-        <div className="flex flex-wrap items-center justify-between gap-3">
+    <div className="admin-orders-page grid gap-4">
+      <Card className="admin-orders-header-card">
+        <div className="admin-orders-header">
           <div>
-            <p className="text-xs font-bold uppercase tracking-[0.18em] text-neonbrand/75">Order Management</p>
-            <h3 className="mt-2 font-display text-2xl font-bold text-white">Orders</h3>
+            <p>Order Management</p>
+            <h3>Orders</h3>
           </div>
-          <p className="rounded-full bg-[#DCFCE7] px-4 py-2 text-sm font-bold text-[#14532D]">Showing {visible.length} of {rows.length} orders</p>
+          <span>Showing {visible.length} of {rows.length} orders</span>
         </div>
       </Card>
-      <section className="rounded-[18px] border border-[#DDEFE5] bg-white p-4 shadow-sm sm:p-5">
-        <div className="grid gap-3 lg:grid-cols-[minmax(260px,1.4fr)_repeat(4,minmax(150px,1fr))_auto]">
-          <Field icon={Search} placeholder="Search customer, order ID, payment, or tracking" value={orderSearch} onChange={(event) => setOrderSearch(event.target.value)} />
+      <section className="admin-orders-filter-card">
+        <div className="admin-orders-filter-grid">
+          <Field icon={Search} placeholder="Search customer, order ID, payment, or tracking" value={orderSearch} onChange={(event) => setOrderSearch(event.target.value)} wrapperClassName="admin-orders-search" />
           <OrderFilterSelect label="Status" value={orderFilters.status} onChange={(value) => updateOrderFilter("status", value)} options={[
             ["all", "All"],
             ["pending", "Pending"],
@@ -3192,7 +3192,7 @@ function OrderManagement({ rows, updateOrder }) {
           </button>
         </div>
       </section>
-      <TableCard rows={visible} columns={["order_no", "list_no", "customer", "status", "total", "payment", "fulfillment", "items", "tracking"]} rowClassName={() => "transition hover:bg-neonbrand/5"} actions={(row) => <button onClick={() => setSelectedOrderId(row.id)} className="inline-flex items-center gap-2 rounded-lg bg-white px-3 py-2 text-xs font-bold text-bluebrand shadow transition hover:scale-[1.02]"><Eye size={16} /> View Details</button>} />
+      <OrdersResponsiveView rows={visible} onViewDetails={setSelectedOrderId} />
       <AnimatePresence>
         {selectedOrderId ? (
           <OrderDetailsModal
@@ -3208,6 +3208,109 @@ function OrderManagement({ rows, updateOrder }) {
         ) : null}
       </AnimatePresence>
     </div>
+  );
+}
+
+function OrdersResponsiveView({ rows, onViewDetails }) {
+  if (!rows.length) {
+    return (
+      <Card className="admin-orders-list-card">
+        <EmptyState title="No orders found" subtitle="Matching customer orders and POS sales will appear here." />
+      </Card>
+    );
+  }
+
+  return (
+    <Card className="admin-orders-list-card">
+      <div className="orders-desktop-view">
+        <div className="orders-table-wrapper" role="region" aria-label="Orders table" tabIndex={0}>
+          <table className="orders-table">
+            <colgroup>
+              <col className="orders-col-order" />
+              <col className="orders-col-list" />
+              <col className="orders-col-customer" />
+              <col className="orders-col-status" />
+              <col className="orders-col-total" />
+              <col className="orders-col-payment" />
+              <col className="orders-col-action" />
+            </colgroup>
+            <thead>
+              <tr>
+                <th>Order No.</th>
+                <th>List No.</th>
+                <th>Customer</th>
+                <th>Status</th>
+                <th>Total</th>
+                <th>Payment</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((order) => (
+                <tr key={order.id}>
+                  <td>{order.order_no}</td>
+                  <td>List #{order.list_no}</td>
+                  <td className="orders-customer-cell">{order.customer}</td>
+                  <td><OrderStatusPill status={order.status_key} label={order.status} /></td>
+                  <td className="orders-total-cell">{order.total}</td>
+                  <td>{order.payment}</td>
+                  <td><OrderDetailsButton order={order} onViewDetails={onViewDetails} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="orders-mobile-list">
+        {rows.map((order) => (
+          <article key={order.id} className="order-mobile-card">
+            <div className="order-mobile-card-top">
+              <div>
+                <h3>{order.order_no}</h3>
+                <span>List #{order.list_no}</span>
+              </div>
+              <OrderStatusPill status={order.status_key} label={order.status} />
+            </div>
+            <div className="order-info-grid">
+              <OrderInfoItem label="Customer" value={order.customer} />
+              <OrderInfoItem label="Status" value={<OrderStatusPill status={order.status_key} label={order.status} />} />
+              <OrderInfoItem label="Total" value={order.total} strong />
+              <OrderInfoItem label="Payment" value={order.payment} />
+            </div>
+            <div className="order-mobile-actions">
+              <OrderDetailsButton order={order} onViewDetails={onViewDetails} />
+            </div>
+          </article>
+        ))}
+      </div>
+    </Card>
+  );
+}
+
+function OrderInfoItem({ label, value, strong = false }) {
+  return (
+    <div className="order-info-item">
+      <span>{label}</span>
+      <strong className={strong ? "is-strong" : ""}>{value}</strong>
+    </div>
+  );
+}
+
+function OrderDetailsButton({ order, onViewDetails }) {
+  return (
+    <button type="button" onClick={() => onViewDetails(order.id)} className="order-details-button" aria-label={`View details for ${order.order_no}`}>
+      <Eye size={16} />
+      Details
+    </button>
+  );
+}
+
+function OrderStatusPill({ status, label }) {
+  return (
+    <span className={`order-status-pill is-${status || "pending"}`}>
+      {label || orderStatusLabel(status)}
+    </span>
   );
 }
 
