@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { Eye, EyeOff, KeyRound, Save } from "lucide-react";
 import { api, getApiErrorMessage } from "../api/client";
+import { dispatchCustomerToast } from "./CustomerToastStack";
 import { Button } from "./ui";
 import { getPasswordBlueprint, getPasswordStrength, PasswordBlueprint } from "./PasswordBlueprint";
 
@@ -31,9 +32,12 @@ export function ChangePasswordForm() {
         newPassword: form.newPassword
       });
       setMessage(data.message);
+      dispatchCustomerToast({ type: "success", message: data.message || "Password updated successfully." });
       setForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
     } catch (error) {
-      setMessage(getApiErrorMessage(error, "Could not change password"));
+      const nextMessage = getApiErrorMessage(error, "Could not change password");
+      setMessage(nextMessage);
+      dispatchCustomerToast({ type: "error", message: nextMessage });
     } finally {
       setLoading(false);
     }

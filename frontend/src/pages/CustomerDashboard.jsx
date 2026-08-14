@@ -12,6 +12,7 @@ import { api, API_URL, cachedGet, clearGetCache } from "../api/client";
 import { fetchFeaturedApparel } from "../api/customer";
 import { ChangePasswordForm } from "../components/ChangePasswordForm";
 import ConfirmDialog from "../components/ConfirmDialog";
+import { dispatchCustomerToast } from "../components/CustomerToastStack";
 import FaceVerification from "../components/FaceVerification";
 import NotificationPreviewPanel from "../components/NotificationPreviewPanel";
 import ProductImage from "../components/ProductImage";
@@ -45,6 +46,27 @@ const paymentNumberHelp = {
   credit: "Credit card details are entered only on the secure PayMongo card page.",
   maya: "This number is sent to the secure checkout before opening Maya."
 };
+const adminOnlyNotificationTypes = new Set([
+  "inventory",
+  "low_stock",
+  "out_of_stock",
+  "stock",
+  "stock_alert",
+  "product_stock",
+  "new_sale",
+  "sale",
+  "admin",
+  "system"
+]);
+const adminOnlyNotificationText = /\b(low stock|out of stock|inventory|new sale|stock management|admin system|internal shop|management alert)\b/i;
+
+function customerNotificationRows(rows = []) {
+  return (Array.isArray(rows) ? rows : []).filter((row) => {
+    const type = String(row?.type || "").toLowerCase();
+    const text = [row?.title, row?.body, row?.message].map((value) => String(value || "")).join(" ");
+    return !adminOnlyNotificationTypes.has(type) && !adminOnlyNotificationText.test(text);
+  });
+}
 
 function paymentCheckoutUrl(payload) {
   return payload?.checkoutUrl || payload?.checkout_url || payload?.url || "";
@@ -95,7 +117,6 @@ export default function CustomerDashboard({ active, onChange }) {
   const [checkoutSummaryOpen, setCheckoutSummaryOpen] = useState(false);
   const [promotions, setPromotions] = useState({ shipping: { type: "fixed", fee: 0 }, coupons: [], sales: [] });
   const [cartEditing, setCartEditing] = useState(false);
-  const [cartToast, setCartToast] = useState(null);
   const [paymentMethod, setPaymentMethod] = useState("cod");
   const [paymentDetails, setPaymentDetails] = useState({ gcashNumber: "", debitNumber: "", creditNumber: "", mayaNumber: "" });
   const [paymentError, setPaymentError] = useState("");
@@ -111,7 +132,6 @@ export default function CustomerDashboard({ active, onChange }) {
   const [profile, setProfile] = useState(null);
   const [profileInitial, setProfileInitial] = useState(null);
   const [profilePhoto, setProfilePhoto] = useState(null);
-  const [profileToast, setProfileToast] = useState(null);
   const [deactivating, setDeactivating] = useState(false);
   const [deactivateConfirmOpen, setDeactivateConfirmOpen] = useState(false);
   const filtersRef = useRef(filters);
@@ -172,7 +192,7 @@ export default function CustomerDashboard({ active, onChange }) {
     setProducts(productRes.data.filter((item) => Number(item.stock || 0) > 0));
     setFilterOptions(filterRes.data);
     setOrders(orderRes.data);
-    setNotifications(notificationRes.data);
+    setNotifications(customerNotificationRows(notificationRes.data));
     setShopInfo(shopInfoRes.data);
     setProfile(profileRes.data);
     setProfileInitial(profileRes.data);
@@ -248,16 +268,14 @@ export default function CustomerDashboard({ active, onChange }) {
     }));
   }, [profile?.phone_number]);
 
-  function notifyCart(message) {
-    setCartToast(message);
-    window.clearTimeout(notifyCart.timer);
-    notifyCart.timer = window.setTimeout(() => setCartToast(null), 2200);
+  function notifyCart(message, type = "success") {
+    dispatchCustomerToast({ type, message });
   }
 
   async function addToCart(product, successMessage = "Item added to cart") {
     const stock = Number(product.stock || 0);
     if (stock <= 0) {
-      notifyCart("This apparel item is out of stock.");
+      notifyCart("This apparel item is out of stock.", "warning");
       return;
     }
     try {
@@ -266,14 +284,14 @@ export default function CustomerDashboard({ active, onChange }) {
       replaceCart(data);
       notifyCart(successMessage);
     } catch (error) {
-      notifyCart(error?.response?.data?.message || "Unable to add this item.");
+      notifyCart(error?.response?.data?.message || "Unable to add this item.", "error");
     }
   }
 
   async function buyNow(product) {
     const stock = Number(product.stock || 0);
     if (stock <= 0) {
-      notifyCart("This apparel item is out of stock.");
+      notifyCart("This apparel item is out of stock.", "warning");
       return;
     }
     try {
@@ -284,7 +302,7 @@ export default function CustomerDashboard({ active, onChange }) {
       replaceCart(data);
       onChange("Cart");
     } catch (error) {
-      notifyCart(error?.response?.data?.message || "Unable to prepare checkout.");
+      notifyCart(error?.response?.data?.message || "Unable to prepare checkout.", "error");
     }
   }
 
@@ -298,7 +316,7 @@ export default function CustomerDashboard({ active, onChange }) {
       replaceCart(data);
       notifyCart("Quantity updated");
     } catch (error) {
-      notifyCart(error?.response?.data?.message || "Unable to update quantity.");
+      notifyCart(error?.response?.data?.message || "Unable to update quantity.", "error");
     }
   }
 
@@ -309,7 +327,7 @@ export default function CustomerDashboard({ active, onChange }) {
       replaceCart(data);
       notifyCart("Item removed");
     } catch (error) {
-      notifyCart(error?.response?.data?.message || "Unable to remove item.");
+      notifyCart(error?.response?.data?.message || "Unable to remove item.", "error");
     }
   }
 
@@ -433,7 +451,7 @@ export default function CustomerDashboard({ active, onChange }) {
       });
     }
     setCart(nextCart);
-    if (!ok && !silent) notifyCart(message || "Cart stock was updated.");
+    if (!ok && !silent) notifyCart(message || "Cart stock was updated.", "warning");
     return ok;
   }
 
@@ -459,7 +477,7 @@ export default function CustomerDashboard({ active, onChange }) {
     if (paymentMethod !== "cod" && !isValidPaymentNumber(billingPhone)) {
       const message = `Enter a valid ${paymentNumberLabels[paymentMethod].toLowerCase()}.`;
       setPaymentError(message);
-      notifyCart(message);
+      notifyCart(message, "error");
       return;
     }
 
@@ -467,7 +485,7 @@ export default function CustomerDashboard({ active, onChange }) {
     let didRedirect = false;
     try {
       if (!selectedCartItems.length) {
-        notifyCart("Please select at least one item.");
+        notifyCart("Please select at least one item.", "warning");
         return;
       }
       const { data } = await api.post("/orders", {
@@ -499,7 +517,7 @@ export default function CustomerDashboard({ active, onChange }) {
         window.location.href = checkoutUrl;
         return;
       }
-      notifyCart("Checkout submitted.");
+      notifyCart("Order placed successfully.", "success");
       await load(filtersRef.current, { force: true });
     } catch (error) {
       if (paymentMethod !== "cod") {
@@ -509,7 +527,7 @@ export default function CustomerDashboard({ active, onChange }) {
         console.error("Checkout failed:", error);
       }
       const fallback = paymentMethod !== "cod" ? "Unable to continue to GCash payment." : "Checkout failed. Please try again.";
-      notifyCart(error?.response?.data?.message || error?.message || fallback);
+      notifyCart(error?.response?.data?.message || error?.message || fallback, "error");
     } finally {
       if (!didRedirect) {
         setCheckoutLoading(false);
@@ -521,7 +539,7 @@ export default function CustomerDashboard({ active, onChange }) {
   function openCheckoutSummary() {
     if (!selectedCartItems.length) {
       setCouponError("Please select at least one item.");
-      notifyCart("Please select at least one item.");
+      notifyCart("Please select at least one item.", "warning");
       return;
     }
     setCheckoutSummaryOpen(true);
@@ -540,16 +558,16 @@ export default function CustomerDashboard({ active, onChange }) {
       setProfile(data);
       setProfileInitial(data);
       setProfilePhoto(null);
-      setProfileToast({ type: "success", message: "Profile saved successfully." });
+      dispatchCustomerToast({ type: "success", message: "Profile saved successfully." });
     } catch (error) {
-      setProfileToast({ type: "error", message: error?.response?.data?.message || "Could not save profile changes." });
+      dispatchCustomerToast({ type: "error", message: error?.response?.data?.message || "Could not save profile changes." });
     }
   }
 
   function resetProfile() {
     setProfile(profileInitial);
     setProfilePhoto(null);
-    setProfileToast({ type: "success", message: "Profile changes were reset." });
+    dispatchCustomerToast({ type: "info", message: "Profile changes were reset." });
   }
 
   async function deactivateAccount() {
@@ -562,7 +580,7 @@ export default function CustomerDashboard({ active, onChange }) {
       await api.patch("/users/me/deactivate");
       logout();
     } catch (error) {
-      setProfileToast({ type: "error", message: error?.response?.data?.message || "Could not deactivate account." });
+      dispatchCustomerToast({ type: "error", message: error?.response?.data?.message || "Could not deactivate account." });
       setDeactivating(false);
     }
   }
@@ -580,7 +598,6 @@ export default function CustomerDashboard({ active, onChange }) {
           <FloatingNotificationsWidget onViewAll={() => onChange("Notifications")} />
         </div>
         <Shop products={filteredProducts.slice(0, 6)} addToCart={addToCart} buyNow={buyNow} filters={filters} setFilters={updateFilters} filterOptions={filterOptions} />
-        {cartToast ? <CartToast message={cartToast} /> : null}
       </div>
     );
   }
@@ -589,7 +606,6 @@ export default function CustomerDashboard({ active, onChange }) {
     return (
       <div className="grid min-w-0 gap-5">
         <Shop products={filteredProducts} addToCart={addToCart} buyNow={buyNow} filters={filters} setFilters={updateFilters} filterOptions={filterOptions} clearFilters={clearFilters} />
-        {cartToast ? <CartToast message={cartToast} /> : null}
       </div>
     );
   }
@@ -634,7 +650,6 @@ export default function CustomerDashboard({ active, onChange }) {
             onClose={() => setCheckoutSummaryOpen(false)}
           />
         ) : null}
-        {cartToast ? <CartToast message={cartToast} /> : null}
         {redirectingPayment ? <PaymentLoadingOverlay method={redirectingPayment} /> : null}
       </>
     );
@@ -713,7 +728,6 @@ export default function CustomerDashboard({ active, onChange }) {
             <Button disabled={!cart.length || checkoutLoading} onClick={checkout}><ShoppingCart size={17} /> {checkoutLoading ? "Preparing..." : paymentMethod === "cod" ? "Check out" : `Check out with ${paymentLabel(paymentMethod)}`}</Button>
           </div>
         </Card>
-        {cartToast ? <CartToast message={cartToast} /> : null}
         {redirectingPayment ? <PaymentLoadingOverlay method={redirectingPayment} /> : null}
       </div>
     );
@@ -749,7 +763,6 @@ export default function CustomerDashboard({ active, onChange }) {
   return (
     <>
       <Profile profile={profile} setProfile={setProfile} profilePhoto={profilePhoto} setProfilePhoto={setProfilePhoto} saveProfile={saveProfile} onReset={resetProfile} onDeactivate={deactivateAccount} deactivating={deactivating} />
-      {profileToast ? <PortalToast toast={profileToast} onClose={() => setProfileToast(null)} /> : null}
       <ConfirmDialog
         open={deactivateConfirmOpen}
         title="Deactivate your account?"
@@ -1475,14 +1488,6 @@ function SelectionCircle({ selected }) {
   );
 }
 
-function CartToast({ message }) {
-  return (
-    <div className="fade-slide fixed bottom-5 right-5 z-[260] rounded-2xl border border-neonbrand/20 bg-black/85 px-4 py-3 text-sm font-bold text-white shadow-[0_0_45px_rgba(56,255,136,0.18)] backdrop-blur-2xl">
-      {message}
-    </div>
-  );
-}
-
 function PaymentDetailsPanel({ method, value, error, onChange }) {
   const Icon = method === "debit" || method === "credit" ? CreditCard : WalletCards;
   return (
@@ -1596,7 +1601,7 @@ function PaymentLoadingOverlay({ method }) {
   if (!showBlockingLoader) {
     return (
       <motion.div
-        className="fixed bottom-4 left-4 right-4 z-[180] mx-auto max-w-sm rounded-2xl border border-neonbrand/25 bg-[#07110d]/95 p-4 text-white shadow-2xl shadow-black/35 backdrop-blur-xl"
+        className="fixed right-3 top-[calc(env(safe-area-inset-top)+12px)] z-[9999] w-[calc(100vw-24px)] max-w-xs rounded-2xl border border-neonbrand/25 bg-[#07110d]/95 p-4 text-white shadow-2xl shadow-black/35 backdrop-blur-xl sm:right-5 sm:top-5"
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0, y: 12 }}
@@ -1639,13 +1644,6 @@ function PaymentLoadingOverlay({ method }) {
 
 function Notifications({ rows, onRead, onShopSale, onNavigate }) {
   const [selectedNotification, setSelectedNotification] = useState(null);
-  const [toast, setToast] = useState("");
-
-  useEffect(() => {
-    if (!toast) return undefined;
-    const timer = window.setTimeout(() => setToast(""), 2200);
-    return () => window.clearTimeout(timer);
-  }, [toast]);
 
   async function openNotification(notification) {
     const nextNotification = { ...notification, is_read: true };
@@ -1673,7 +1671,7 @@ function Notifications({ rows, onRead, onShopSale, onNavigate }) {
     const promoCode = String(code || "").trim();
     if (!promoCode) return;
     navigator.clipboard?.writeText(promoCode).catch(() => {});
-    setToast("Promo code copied.");
+    dispatchCustomerToast({ type: "success", message: "Promo code copied." });
   }
 
   return (
@@ -1707,7 +1705,6 @@ function Notifications({ rows, onRead, onShopSale, onNavigate }) {
           </Card>
         )}
       </div>
-      {toast ? <CartToast message={toast} /> : null}
       <AnimatePresence>
         {selectedNotification ? (
           <NotificationDetailModal
@@ -1913,7 +1910,6 @@ function Orders({ rows, profile, reviews = [], returnRequests = [], onNavigate, 
   const [payingOrderId, setPayingOrderId] = useState(null);
   const [cancellingOrderId, setCancellingOrderId] = useState(null);
   const [cancelDialogOrder, setCancelDialogOrder] = useState(null);
-  const [paymentMessage, setPaymentMessage] = useState("");
   const [redirectingPayment, setRedirectingPayment] = useState(null);
   const reviewedOrderIds = useMemo(() => new Set(reviews.map((review) => Number(review.order_id))), [reviews]);
   const returnStateByOrder = useMemo(() => {
@@ -1922,18 +1918,12 @@ function Orders({ rows, profile, reviews = [], returnRequests = [], onNavigate, 
     return map;
   }, [returnRequests]);
 
-  useEffect(() => {
-    if (!paymentMessage) return undefined;
-    const timer = window.setTimeout(() => setPaymentMessage(""), 3000);
-    return () => window.clearTimeout(timer);
-  }, [paymentMessage]);
-
   async function payOrder(order, event) {
     event?.stopPropagation();
     if (!order || order.payment_method === "cod" || payingOrderId || isOrderCancelled(order)) return;
     const billingPhone = profile?.phone_number || order.phone_number || "";
     if (!isValidPaymentNumber(billingPhone)) {
-      setPaymentMessage(`Add a valid ${paymentNumberLabels[order.payment_method].toLowerCase()} in your Profile before paying.`);
+      dispatchCustomerToast({ type: "error", message: `Add a valid ${paymentNumberLabels[order.payment_method].toLowerCase()} in your Profile before paying.` });
       return;
     }
     setPayingOrderId(order.id);
@@ -1953,7 +1943,7 @@ function Orders({ rows, profile, reviews = [], returnRequests = [], onNavigate, 
     } catch (error) {
       console.error("GCash checkout failed:", error);
       console.error("GCash server response:", error?.response?.data);
-      setPaymentMessage(error?.response?.data?.message || error?.message || "Unable to continue to GCash payment.");
+      dispatchCustomerToast({ type: "error", message: error?.response?.data?.message || error?.message || "Unable to continue to GCash payment." });
     } finally {
       if (!didRedirect) {
         setPayingOrderId(null);
@@ -2009,10 +1999,10 @@ function Orders({ rows, profile, reviews = [], returnRequests = [], onNavigate, 
       setSelectedOrder((current) => current?.order && Number(current.order.id) === Number(updatedOrder.id)
         ? { ...current, order: { ...current.order, ...updatedOrder } }
         : current);
-      setPaymentMessage(data?.message || "Order cancelled successfully.");
+      dispatchCustomerToast({ type: "success", message: data?.message || "Order cancelled successfully." });
       setCancelDialogOrder(null);
     } catch (error) {
-      setPaymentMessage(error?.response?.data?.message || "This order can no longer be cancelled.");
+      dispatchCustomerToast({ type: "error", message: error?.response?.data?.message || "This order can no longer be cancelled." });
     } finally {
       setCancellingOrderId(null);
     }
@@ -2020,7 +2010,6 @@ function Orders({ rows, profile, reviews = [], returnRequests = [], onNavigate, 
 
   return (
     <div className="grid gap-4">
-      {paymentMessage ? <CartToast message={paymentMessage} /> : null}
       {rows.map((order) => {
         const cancelled = isOrderCancelled(order);
         const canCancel = canCancelOrder(order);
@@ -2324,7 +2313,6 @@ function Feedback({ orders, reviews, onSaved }) {
   const [orderDetails, setOrderDetails] = useState(null);
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [toast, setToast] = useState(null);
   const selectedOrder = orders.find((order) => Number(order.id) === Number(form.order_id));
   const feedbackBlocked = selectedOrder && selectedOrder.status !== "completed";
 
@@ -2343,9 +2331,7 @@ function Feedback({ orders, reviews, onSaved }) {
   }, [form.order_id]);
 
   function showToast(type, message) {
-    setToast({ type, message });
-    window.clearTimeout(showToast.timer);
-    showToast.timer = window.setTimeout(() => setToast(null), 3200);
+    dispatchCustomerToast({ type, message });
   }
 
   async function submit(event) {
@@ -2445,7 +2431,6 @@ function Feedback({ orders, reviews, onSaved }) {
           {reviews.length ? reviews.map((review) => <FeedbackHistoryCard key={review.id} review={review} />) : <EmptyPanel light title="No feedback yet" text="Your submitted feedback history will appear here." />}
         </div>
       </Card>
-      {toast ? <PortalToast toast={toast} onClose={() => setToast(null)} /> : null}
     </motion.div>
   );
 }
@@ -2457,7 +2442,6 @@ function ReturnForm({ orders, returnRequests, onSaved }) {
   const [orderDetails, setOrderDetails] = useState(null);
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [toast, setToast] = useState(null);
   const selectedOrder = orders.find((order) => Number(order.id) === Number(form.order_id));
   const selectedReturn = returnRequests.find((row) => Number(row.order_id) === Number(form.order_id));
   const validation = getReturnValidation(selectedOrder, selectedReturn);
@@ -2479,9 +2463,7 @@ function ReturnForm({ orders, returnRequests, onSaved }) {
   }, [form.order_id]);
 
   function showToast(type, message) {
-    setToast({ type, message });
-    window.clearTimeout(showToast.timer);
-    showToast.timer = window.setTimeout(() => setToast(null), 3200);
+    dispatchCustomerToast({ type, message });
   }
 
   async function submit(event) {
@@ -2588,7 +2570,6 @@ function ReturnForm({ orders, returnRequests, onSaved }) {
           </div>
         </Card>
       </div>
-      {toast ? <PortalToast toast={toast} onClose={() => setToast(null)} /> : null}
     </motion.div>
   );
 }
@@ -2911,17 +2892,6 @@ function ReturnHistoryCard({ request }) {
       </div>
       <p className="mt-3 line-clamp-3 text-sm leading-6 text-slate-600">{request.reason}</p>
     </article>
-  );
-}
-
-function PortalToast({ toast, onClose }) {
-  const success = toast.type === "success";
-  return (
-    <div className={`fixed bottom-5 right-5 z-[170] flex max-w-sm items-start gap-3 rounded-[24px] border p-4 text-white shadow-2xl backdrop-blur-2xl ${success ? "border-neonbrand/25 bg-black/85" : "border-rose-300/25 bg-rose-950/85"}`}>
-      {success ? <CheckCircle2 className="mt-0.5 shrink-0 text-neonbrand" size={20} /> : <AlertCircle className="mt-0.5 shrink-0 text-rose-200" size={20} />}
-      <p className="min-w-0 flex-1 text-sm leading-6 text-white/72">{toast.message}</p>
-      <button type="button" onClick={onClose} className="shrink-0 rounded-full px-2 text-white/45 hover:bg-white/10 hover:text-white">x</button>
-    </div>
   );
 }
 
@@ -3338,7 +3308,7 @@ function Profile({ profile, setProfile, profilePhoto, setProfilePhoto, saveProfi
               onNext={uploadSelfieCapture}
             />
             {selfieUploadBusy ? (
-              <div className="fixed inset-x-0 bottom-5 z-[1810] mx-auto flex w-[min(92vw,360px)] items-center justify-center gap-2 rounded-2xl border border-neonbrand/20 bg-black/85 px-4 py-3 text-sm font-bold text-neonbrand shadow-2xl">
+              <div className="fixed right-3 top-[calc(env(safe-area-inset-top)+12px)] z-[9999] flex w-[calc(100vw-24px)] max-w-xs items-center justify-center gap-2 rounded-2xl border border-neonbrand/20 bg-black/85 px-4 py-3 text-sm font-bold text-neonbrand shadow-2xl sm:right-5 sm:top-5">
                 <Loader2 size={17} className="animate-spin" /> Uploading selfie
               </div>
             ) : null}

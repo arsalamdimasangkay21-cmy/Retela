@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Bell, CalendarDays, MessageCircle, Moon, ShoppingCart, Sun, UserCircle } from "lucide-react";
 import { api, cachedGet, clearGetCache } from "../../api/client";
 import { acquireSocket, releaseSocket } from "../../api/socket";
+import CustomerToastStack from "../CustomerToastStack";
 import ProductImage from "../ProductImage";
 import { logoFromSettings, RETELA_LOGO_URL } from "../../config/branding";
 import { useAuth } from "../../context/AuthContext";
@@ -17,6 +18,7 @@ export default function AppLayout({ children, active, onChange }) {
   const { token, user } = useAuth();
   const profileName = user?.display_name || user?.username;
   const [toast, setToast] = useState(null);
+  const [customerToasts, setCustomerToasts] = useState([]);
   const [notificationCount, setNotificationCount] = useState(0);
   const [messageCount, setMessageCount] = useState(0);
   const [now, setNow] = useState(new Date());
@@ -52,6 +54,30 @@ export default function AppLayout({ children, active, onChange }) {
       });
   }, [applyNotificationCounts, token]);
 
+  const dismissCustomerToast = useCallback((toastId) => {
+    setCustomerToasts((items) => items.filter((item) => item.id !== toastId));
+  }, []);
+
+  const pushCustomerToast = useCallback((toast) => {
+    const id = toast.id || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const nextToast = {
+      id,
+      type: toast.type || "info",
+      title: toast.title || "",
+      message: toast.message || "",
+      actionLabel: toast.actionLabel || "",
+      onAction: toast.onAction,
+      duration: Number(toast.duration || 3200)
+    };
+    if (!nextToast.message) return;
+    setCustomerToasts((items) => [...items, nextToast].slice(-5));
+    window.setTimeout(() => dismissCustomerToast(id), nextToast.duration);
+  }, [dismissCustomerToast]);
+
+  const openToastPayload = useCallback((payload) => {
+    onChange(toastTarget(payload?.type, user?.role));
+  }, [onChange, user?.role]);
+
   useEffect(() => {
     if (!token) {
       setSocket(null);
@@ -73,9 +99,20 @@ export default function AppLayout({ children, active, onChange }) {
     };
     const handleNewNotification = (payload) => {
       if (user?.role === "admin" && !["approval", "customer_registration", "registration", "message", "feedback", "order", "order_cancelled", "payment", "inventory", "refund", "return", "system"].includes(payload?.type)) return;
-      if (user?.role === "customer" && !["order", "broadcast"].includes(payload?.type)) return;
+      if (user?.role === "customer" && !customerCanReceiveNotification(payload)) return;
       clearGetCache("/notifications");
-      setToast(payload);
+      if (user?.role === "customer") {
+        pushCustomerToast({
+          type: customerNotificationToastType(payload?.type),
+          title: payload?.title || "Notification",
+          message: payload?.body || payload?.message || "You have a new notification.",
+          actionLabel: "View",
+          onAction: () => openToastPayload(payload),
+          duration: 4000
+        });
+      } else {
+        setToast(payload);
+      }
       window.dispatchEvent(new CustomEvent("retela:notification-new", { detail: payload }));
       refreshNotificationCounts();
       if (["order", "order_cancelled", "payment", "inventory", "new_product"].includes(payload?.type)) {
@@ -119,7 +156,19 @@ export default function AppLayout({ children, active, onChange }) {
       socket.off("shipping:update", handleShippingUpdate);
       socket.off("user:status", handleUserStatus);
     };
-  }, [refreshNotificationCounts, socket, user?.role]);
+  }, [openToastPayload, pushCustomerToast, refreshNotificationCounts, socket, user?.role]);
+
+  useEffect(() => {
+    if (user?.role !== "customer") {
+      setCustomerToasts([]);
+      return undefined;
+    }
+    function handleCustomerToast(event) {
+      pushCustomerToast(event.detail || {});
+    }
+    window.addEventListener("retela:customer-toast", handleCustomerToast);
+    return () => window.removeEventListener("retela:customer-toast", handleCustomerToast);
+  }, [pushCustomerToast, user?.role]);
 
   useEffect(() => {
     if (!socket || !user?.id) return undefined;
@@ -314,7 +363,7 @@ export default function AppLayout({ children, active, onChange }) {
         </header>
         <div className="retela-page-content min-w-0 p-3 pt-2 sm:p-5 sm:pt-2 lg:p-8 lg:pt-3">{children}</div>
       </main>
-      {toast ? (
+      {toast && user?.role !== "customer" ? (
         <div className="fixed inset-x-4 bottom-5 z-50 max-w-sm rounded-[20px] border border-emerald-100 bg-white p-4 text-slate-900 shadow-xl shadow-slate-200/80 sm:left-auto sm:right-5">
           <strong>{toast.title}</strong>
           <p className="mt-1 text-sm text-slate-600">{toast.body}</p>
@@ -322,8 +371,23 @@ export default function AppLayout({ children, active, onChange }) {
           <button className="mt-3 text-sm font-bold text-emerald-700" onClick={openToastTarget}>View now...</button>
         </div>
       ) : null}
+      {user?.role === "customer" ? <CustomerToastStack toasts={customerToasts} onDismiss={dismissCustomerToast} /> : null}
     </div>
   );
+}
+
+function customerNotificationToastType(type) {
+  if (["order", "payment", "return", "refund"].includes(type)) return "success";
+  if (["order_cancelled", "payment_failed"].includes(type)) return "warning";
+  return "info";
+}
+
+function customerCanReceiveNotification(payload) {
+  const type = String(payload?.type || "").toLowerCase();
+  const allowed = ["order", "order_cancelled", "payment", "broadcast", "new_product", "return", "refund"];
+  const blocked = ["inventory", "low_stock", "out_of_stock", "stock", "stock_alert", "product_stock", "new_sale", "sale", "admin", "system"];
+  const text = [payload?.title, payload?.body, payload?.message].map((value) => String(value || "")).join(" ");
+  return allowed.includes(type) && !blocked.includes(type) && !/\b(low stock|out of stock|inventory|new sale|stock management|admin system|internal shop|management alert)\b/i.test(text);
 }
 
 function toastTarget(type, role) {

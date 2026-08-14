@@ -21,6 +21,34 @@ const router = Router();
 const allowedBrands = ["Adidas", "Nike", "Lacoste", "Essentials", "Uniqlo", "H&M", "Zara", "Bench", "Penshoppe", "Champion", "Puma", "Reebok", "Under Armour", "Jordan", "Levi's", "Ralph Lauren", "Tommy Hilfiger", "GAP", "Old Navy", "Dickies", "Carhartt", "Stussy", "Converse", "Vans", "New Balance", "Gildan", "Hanes", "Fruit of the Loom", "Blue Corner", "Regatta", "Other"];
 const allowedColors = ["Black", "White", "Gray", "Red", "Blue", "Green", "Yellow", "Brown", "Pink", "Purple", "Orange", "Other"];
 
+async function notifyApprovedCustomersAboutNewProduct(app, product) {
+  const customers = await query("SELECT id FROM users WHERE role = 'customer' AND status = 'approved'");
+  if (!customers.length) return;
+  const title = "New Item Available";
+  const body = `New arrival: ${product.name || "Apparel item"} is now available.`;
+  const values = customers.map((_, index) => `(:userId${index}, 'new_product', :title, :body, :productId)`).join(", ");
+  const params = {
+    title,
+    body,
+    productId: product.id,
+    ...Object.fromEntries(customers.map((customer, index) => [`userId${index}`, customer.id]))
+  };
+  await query(
+    `INSERT INTO notifications (user_id, type, title, body, product_id)
+     VALUES ${values}`,
+    params
+  );
+  customers.forEach((customer) => {
+    app.get("io")?.to(`user:${customer.id}`).emit("notification:new", {
+      type: "new_product",
+      title,
+      body,
+      product,
+      product_id: product.id
+    });
+  });
+}
+
 function normalizeCategory(category) {
   const value = String(category || "").trim().replace(/\s+/g, " ");
   return value || "T-Shirts";
@@ -453,7 +481,7 @@ router.post("/", requireAuth, requireRole("admin"), productUpload.single("image"
       return createdProductResponse(created);
     });
 
-    query("INSERT INTO notifications (type, title, body, product_id) VALUES ('new_product', 'New apparel posted!', 'View now...', :id)", { id: product.id })
+    notifyApprovedCustomersAboutNewProduct(req.app, product)
       .catch((notificationError) => {
         console.warn("Create apparel notification failed:", {
           message: notificationError.message,
@@ -462,7 +490,6 @@ router.post("/", requireAuth, requireRole("admin"), productUpload.single("image"
         });
       });
     req.app.get("io")?.emit("product:new", product);
-    req.app.get("io")?.emit("notification:new", { type: "new_product", title: "New apparel posted!", body: "View now...", product });
     return res.status(201).json({
       success: true,
       message: "Apparel item created successfully",

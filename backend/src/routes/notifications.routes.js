@@ -10,6 +10,58 @@ let notificationBroadcastSchemaReady;
 
 const ADMIN_TYPES_SQL = ADMIN_NOTIFICATION_TYPES.map((type) => `'${type}'`).join(", ");
 const REGISTRATION_TYPES_SQL = "'approval', 'customer_registration', 'registration'";
+const CUSTOMER_PRIVATE_TYPES = ["approval", "order", "order_cancelled", "payment", "message", "refund", "return", "new_product"];
+const CUSTOMER_PUBLIC_TYPES = ["new_product"];
+const CUSTOMER_PRIVATE_TYPES_SQL = CUSTOMER_PRIVATE_TYPES.map((type) => `'${type}'`).join(", ");
+const CUSTOMER_PUBLIC_TYPES_SQL = CUSTOMER_PUBLIC_TYPES.map((type) => `'${type}'`).join(", ");
+const CUSTOMER_BLOCKED_TITLE_SQL = [
+  "new sale",
+  "sale completed",
+  "pos sale completed",
+  "low stock alert",
+  "out of stock"
+].map((title) => `'${title}'`).join(", ");
+const CUSTOMER_BLOCKED_TEXT_PATTERNS = [
+  "% sold %",
+  "% sold in %",
+  "% items sold%",
+  "% item sold%",
+  "%+% sales%",
+  "%sales count%",
+  "%sales total%",
+  "%sales analytics%",
+  "%sales activity%",
+  "%revenue%",
+  "%low stock%",
+  "%out of stock%",
+  "%out-of-stock%",
+  "%inventory%",
+  "%stock adjustment%",
+  "%stock management%",
+  "%stock warning%",
+  "%admin activity%",
+  "%admin system%",
+  "%internal shop%",
+  "%dashboard analytics%",
+  "%orders received%"
+];
+const CUSTOMER_BLOCKED_TEXT_SQL = CUSTOMER_BLOCKED_TEXT_PATTERNS
+  .map((pattern, index) => `AND LOWER(CONCAT_WS(' ', COALESCE(n.title, ''), COALESCE(n.body, ''))) NOT LIKE :customerBlockedText${index}`)
+  .join("\n  ");
+const CUSTOMER_BLOCKED_TEXT_PARAMS = Object.fromEntries(
+  CUSTOMER_BLOCKED_TEXT_PATTERNS.map((pattern, index) => [`customerBlockedText${index}`, pattern])
+);
+
+const CUSTOMER_ADMIN_ACTIVITY_FILTER_SQL = `
+  AND LOWER(COALESCE(n.title, '')) NOT IN (${CUSTOMER_BLOCKED_TITLE_SQL})
+  ${CUSTOMER_BLOCKED_TEXT_SQL}
+`;
+
+const CUSTOMER_VISIBILITY_FILTER = `WHERE (
+       (n.user_id = :id AND n.type IN (${CUSTOMER_PRIVATE_TYPES_SQL}, 'broadcast'))
+       OR (n.user_id IS NULL AND n.type IN (${CUSTOMER_PUBLIC_TYPES_SQL}))
+     )
+     ${CUSTOMER_ADMIN_ACTIVITY_FILTER_SQL}`;
 
 function setDynamicNotificationHeaders(res) {
   res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
@@ -177,8 +229,7 @@ router.get("/", asyncHandler(async (req, res) => {
   await ensureNotificationBroadcastSchema();
   setDynamicNotificationHeaders(res);
   const visibilityFilter = req.user.role === "customer"
-    ? `WHERE n.user_id = :id
-       AND n.type IN ('order', 'broadcast')`
+    ? CUSTOMER_VISIBILITY_FILTER
     : `WHERE (
          n.user_id IS NULL
          OR n.type IN (${REGISTRATION_TYPES_SQL})
@@ -223,7 +274,7 @@ router.get("/", asyncHandler(async (req, res) => {
          LEFT JOIN users u ON u.id = n.user_id
          ${visibilityFilter}
          ORDER BY n.created_at DESC, n.id DESC LIMIT 100`,
-    { id: req.user.id }
+    req.user.role === "customer" ? { id: req.user.id, ...CUSTOMER_BLOCKED_TEXT_PARAMS } : { id: req.user.id }
   );
   if (req.user.role !== "admin") {
     return res.json(await attachCustomerNotificationDetails(rows));
@@ -253,7 +304,7 @@ router.patch("/read-all", asyncHandler(async (req, res) => {
       `UPDATE notifications
        SET is_read = true
        WHERE user_id = :userId
-         AND type IN ('order', 'broadcast')`,
+         AND type IN (${CUSTOMER_PRIVATE_TYPES_SQL}, 'broadcast')`,
       { userId: req.user.id }
     );
     await query(
@@ -289,7 +340,7 @@ router.patch("/read-type/:type", asyncHandler(async (req, res) => {
        SET is_read = true
        WHERE user_id = :userId
          AND type = :type
-         AND type IN ('order', 'broadcast')`,
+         AND type IN (${CUSTOMER_PRIVATE_TYPES_SQL}, 'broadcast')`,
       { userId: req.user.id, type: req.params.type }
     );
     if (req.params.type === "broadcast") {
@@ -341,7 +392,7 @@ router.patch("/:id/read", asyncHandler(async (req, res) => {
        SET is_read = true
        WHERE id = :id
          AND user_id = :userId
-         AND type IN ('order', 'broadcast')`,
+         AND type IN (${CUSTOMER_PRIVATE_TYPES_SQL}, 'broadcast')`,
       {
       id: req.params.id,
       userId: req.user.id
