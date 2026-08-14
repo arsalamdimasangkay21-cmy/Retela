@@ -3094,10 +3094,11 @@ function OrderManagement({ rows, updateOrder }) {
     return () => { alive = false; };
   }, [selectedOrderId, reloadToken]);
 
-  const filteredOrders = rows.map((row, index) => ({
+  const onlineOrders = rows.filter((row) => String(row.order_channel || "online").toLowerCase() !== "pos");
+  const filteredOrders = onlineOrders.map((row, index) => ({
     id: row.id,
     order_no: `Order #${row.id}`,
-    list_no: rows.length - index,
+    list_no: onlineOrders.length - index,
     customer: row.username || "Walk-in Customer",
     status: orderStatusLabel(row.status),
     status_key: row.status,
@@ -3127,7 +3128,7 @@ function OrderManagement({ rows, updateOrder }) {
 
   useEffect(() => {
     setOrderPage(1);
-  }, [orderSearch, orderFilters.status, orderFilters.payment, orderFilters.fulfillment, orderFilters.date, rows.length]);
+  }, [orderSearch, orderFilters.status, orderFilters.payment, orderFilters.fulfillment, orderFilters.date, onlineOrders.length]);
 
   function updateOrderFilter(key, value) {
     setOrderFilters((filters) => ({ ...filters, [key]: value }));
@@ -3166,7 +3167,7 @@ function OrderManagement({ rows, updateOrder }) {
             <p>Order Management</p>
             <h3>Orders</h3>
           </div>
-          <span>Showing {filteredOrders.length} of {rows.length} orders</span>
+          <span>Showing {filteredOrders.length} of {onlineOrders.length} orders</span>
         </div>
       </Card>
       <section className="admin-orders-filter-card">
