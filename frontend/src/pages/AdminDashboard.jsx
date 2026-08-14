@@ -3069,6 +3069,8 @@ function OrderManagement({ rows, updateOrder }) {
   const [trackingNumber, setTrackingNumber] = useState("");
   const [orderSearch, setOrderSearch] = useState("");
   const [orderFilters, setOrderFilters] = useState({ status: "all", payment: "all", fulfillment: "all", date: "all" });
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [orderPage, setOrderPage] = useState(1);
 
   useEffect(() => {
     if (!selectedOrderId) {
@@ -3093,7 +3095,7 @@ function OrderManagement({ rows, updateOrder }) {
     return () => { alive = false; };
   }, [selectedOrderId, reloadToken]);
 
-  const visible = rows.map((row, index) => ({
+  const filteredOrders = rows.map((row, index) => ({
     id: row.id,
     order_no: `Order #${row.id}`,
     list_no: rows.length - index,
@@ -3118,6 +3120,15 @@ function OrderManagement({ rows, updateOrder }) {
     const matchesDate = orderFilters.date === "all" || isOrderInDateRange(row.created_at, orderFilters.date);
     return matchesSearch && matchesStatus && matchesPayment && matchesFulfillment && matchesDate;
   });
+  const ordersPerPage = 8;
+  const pageCount = Math.max(1, Math.ceil(filteredOrders.length / ordersPerPage));
+  const currentPage = Math.min(orderPage, pageCount);
+  const visible = filteredOrders.slice((currentPage - 1) * ordersPerPage, currentPage * ordersPerPage);
+  const activeFilterCount = Object.values(orderFilters).filter((value) => value !== "all").length + (orderSearch.trim() ? 1 : 0);
+
+  useEffect(() => {
+    setOrderPage(1);
+  }, [orderSearch, orderFilters.status, orderFilters.payment, orderFilters.fulfillment, orderFilters.date, rows.length]);
 
   function updateOrderFilter(key, value) {
     setOrderFilters((filters) => ({ ...filters, [key]: value }));
@@ -3126,6 +3137,7 @@ function OrderManagement({ rows, updateOrder }) {
   function clearOrderFilters() {
     setOrderSearch("");
     setOrderFilters({ status: "all", payment: "all", fulfillment: "all", date: "all" });
+    setFiltersOpen(false);
   }
 
   useEffect(() => {
@@ -3155,12 +3167,19 @@ function OrderManagement({ rows, updateOrder }) {
             <p>Order Management</p>
             <h3>Orders</h3>
           </div>
-          <span>Showing {visible.length} of {rows.length} orders</span>
+          <span>Showing {filteredOrders.length} of {rows.length} orders</span>
         </div>
       </Card>
       <section className="admin-orders-filter-card">
-        <div className="admin-orders-filter-grid">
+        <div className="orders-toolbar">
           <Field icon={Search} placeholder="Search customer, order ID, payment, or tracking" value={orderSearch} onChange={(event) => setOrderSearch(event.target.value)} wrapperClassName="admin-orders-search" />
+          <button type="button" onClick={() => setFiltersOpen((open) => !open)} className="orders-filter-btn" aria-expanded={filtersOpen} aria-controls="orders-filter-panel">
+            <SlidersHorizontal size={16} />
+            Filters
+            {activeFilterCount ? <span>{activeFilterCount}</span> : null}
+          </button>
+        </div>
+        <div id="orders-filter-panel" className={`admin-orders-filter-grid ${filtersOpen ? "is-open" : ""}`}>
           <OrderFilterSelect label="Status" value={orderFilters.status} onChange={(value) => updateOrderFilter("status", value)} options={[
             ["all", "All"],
             ["pending", "Pending"],
@@ -3193,6 +3212,7 @@ function OrderManagement({ rows, updateOrder }) {
         </div>
       </section>
       <OrdersResponsiveView rows={visible} onViewDetails={setSelectedOrderId} />
+      <OrdersPagination page={currentPage} pageCount={pageCount} onPageChange={setOrderPage} />
       <AnimatePresence>
         {selectedOrderId ? (
           <OrderDetailsModal
@@ -3227,7 +3247,6 @@ function OrdersResponsiveView({ rows, onViewDetails }) {
           <table className="orders-table">
             <colgroup>
               <col className="orders-col-order" />
-              <col className="orders-col-list" />
               <col className="orders-col-customer" />
               <col className="orders-col-status" />
               <col className="orders-col-total" />
@@ -3237,7 +3256,6 @@ function OrdersResponsiveView({ rows, onViewDetails }) {
             <thead>
               <tr>
                 <th>Order No.</th>
-                <th>List No.</th>
                 <th>Customer</th>
                 <th>Status</th>
                 <th>Total</th>
@@ -3248,10 +3266,12 @@ function OrdersResponsiveView({ rows, onViewDetails }) {
             <tbody>
               {rows.map((order) => (
                 <tr key={order.id}>
-                  <td>{order.order_no}</td>
-                  <td>List #{order.list_no}</td>
+                  <td>
+                    <strong className="orders-order-number">{order.order_no}</strong>
+                    <span className="orders-list-number">List #{order.list_no}</span>
+                  </td>
                   <td className="orders-customer-cell">{order.customer}</td>
-                  <td><OrderStatusPill status={order.status_key} label={order.status} /></td>
+                  <td><OrderStatusBadge status={order.status_key} label={order.status} /></td>
                   <td className="orders-total-cell">{order.total}</td>
                   <td>{order.payment}</td>
                   <td><OrderDetailsButton order={order} onViewDetails={onViewDetails} /></td>
@@ -3262,19 +3282,19 @@ function OrdersResponsiveView({ rows, onViewDetails }) {
         </div>
       </div>
 
-      <div className="orders-mobile-list">
+      <div className="orders-mobile-view">
         {rows.map((order) => (
           <article key={order.id} className="order-mobile-card">
-            <div className="order-mobile-card-top">
+            <div className="order-mobile-header">
               <div>
                 <h3>{order.order_no}</h3>
                 <span>List #{order.list_no}</span>
               </div>
-              <OrderStatusPill status={order.status_key} label={order.status} />
+              <OrderStatusBadge status={order.status_key} label={order.status} />
             </div>
-            <div className="order-info-grid">
+            <div className="order-mobile-grid">
               <OrderInfoItem label="Customer" value={order.customer} />
-              <OrderInfoItem label="Status" value={<OrderStatusPill status={order.status_key} label={order.status} />} />
+              <OrderInfoItem label="Status" value={<OrderStatusBadge status={order.status_key} label={order.status} />} />
               <OrderInfoItem label="Total" value={order.total} strong />
               <OrderInfoItem label="Payment" value={order.payment} />
             </div>
@@ -3290,7 +3310,7 @@ function OrdersResponsiveView({ rows, onViewDetails }) {
 
 function OrderInfoItem({ label, value, strong = false }) {
   return (
-    <div className="order-info-item">
+    <div className="order-mobile-field">
       <span>{label}</span>
       <strong className={strong ? "is-strong" : ""}>{value}</strong>
     </div>
@@ -3299,18 +3319,32 @@ function OrderInfoItem({ label, value, strong = false }) {
 
 function OrderDetailsButton({ order, onViewDetails }) {
   return (
-    <button type="button" onClick={() => onViewDetails(order.id)} className="order-details-button" aria-label={`View details for ${order.order_no}`}>
+    <button type="button" onClick={() => onViewDetails(order.id)} className="order-details-btn" aria-label={`View details for ${order.order_no}`}>
       <Eye size={16} />
       Details
     </button>
   );
 }
 
-function OrderStatusPill({ status, label }) {
+function OrderStatusBadge({ status, label }) {
   return (
-    <span className={`order-status-pill is-${status || "pending"}`}>
+    <span className={`order-status-badge is-${status || "pending"}`}>
       {label || orderStatusLabel(status)}
     </span>
+  );
+}
+
+function OrdersPagination({ page, pageCount, onPageChange }) {
+  return (
+    <nav className="orders-pagination" aria-label="Orders pagination">
+      <button type="button" disabled={page <= 1} onClick={() => onPageChange(Math.max(1, page - 1))} aria-label="Previous orders page">
+        <ChevronLeft size={16} />
+      </button>
+      <span>{page} of {pageCount}</span>
+      <button type="button" disabled={page >= pageCount} onClick={() => onPageChange(Math.min(pageCount, page + 1))} aria-label="Next orders page">
+        <ChevronRight size={16} />
+      </button>
+    </nav>
   );
 }
 
