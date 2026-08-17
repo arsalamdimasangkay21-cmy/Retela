@@ -707,10 +707,11 @@ router.post("/ai", requireAuth, requireApproved, asyncHandler(async (req, res) =
         history,
         orders,
         settings: settingsResult.config,
-        customer: customerProfile
+        customer: customerProfile,
+        provider: settingsResult.config?.ai?.aiProvider
       });
     } catch (error) {
-      throw new HttpError(error.status || 503, assistantUnavailableMessage);
+      throw new HttpError(error.status || 502, assistantUnavailableMessage);
     }
     const body = aiResult.body;
     if (!body) throw new HttpError(503, assistantUnavailableMessage);

@@ -3,7 +3,7 @@ import { query } from "../config/db.js";
 import { generateGeminiResult, isGeminiConfigured } from "./gemini.js";
 import { generateOpenAiResult, isOpenAiConfigured } from "./openai.js";
 
-const PROVIDERS = new Set(["openai", "gemini"]);
+const PROVIDERS = new Set(["openai", "gemini", "auto"]);
 
 let lastProviderUsed = "";
 let lastProviderStatus = "Not checked";
@@ -13,22 +13,24 @@ let startupDiagnosticsLogged = false;
 function logAIStartupDiagnostics() {
   if (startupDiagnosticsLogged) return;
   startupDiagnosticsLogged = true;
-  console.log("[AI] Gemini configured:", Boolean(process.env.GEMINI_API_KEY?.trim()));
-  console.log("[AI] OpenAI configured:", Boolean(process.env.OPENAI_API_KEY?.trim()));
-  console.log("[AI] Preferred provider:", normalizeProvider(process.env.AI_PROVIDER));
-  console.log("[AI] Gemini model:", process.env.GEMINI_MODEL?.trim() || "gemini-2.5-flash");
-  console.log("[AI] OpenAI model:", process.env.OPENAI_MODEL?.trim() || "gpt-4o-mini");
+  console.log("[ai] Provider configuration", {
+    gemini: hasProviderConfig("gemini"),
+    openai: hasProviderConfig("openai"),
+    primary: normalizeProvider(process.env.AI_PROVIDER),
+    geminiModel: process.env.GEMINI_MODEL?.trim() || "gemini-2.5-flash",
+    openaiModel: process.env.OPENAI_MODEL?.trim() || "gpt-4o-mini"
+  });
 }
 
 function normalizeProvider(value) {
-  const provider = String(value || "gemini").trim().toLowerCase();
-  return PROVIDERS.has(provider) ? provider : "gemini";
+  const provider = String(value || "auto").trim().toLowerCase();
+  return PROVIDERS.has(provider) ? provider : "auto";
 }
 
 function providerLabel(provider) {
   if (provider === "openai") return "OpenAI";
   if (provider === "gemini") return "Gemini";
-  return "Gemini";
+  return "Auto";
 }
 
 function getProviderConfig(contextProvider) {
@@ -38,7 +40,7 @@ function getProviderConfig(contextProvider) {
 
 async function runOpenAi(message, context) {
   const result = await generateOpenAiResult({ ...context, prompt: message });
-  if (!result?.text) throw new HttpError(503, "OpenAI API key is missing.");
+  if (!result?.text) throw new HttpError(502, "OpenAI returned an empty response.");
   return {
     body: result.text,
     provider: "openai",
@@ -48,7 +50,7 @@ async function runOpenAi(message, context) {
 
 async function runGemini(message, context) {
   const result = await generateGeminiResult({ ...context, prompt: message });
-  if (!result?.text) throw new HttpError(503, "Gemini API key is missing.");
+  if (!result?.text) throw new HttpError(502, "Gemini returned an empty response.");
   return {
     body: result.text,
     provider: "gemini",
@@ -60,7 +62,7 @@ function markProviderUsed(provider, status = "Ready") {
   lastProviderUsed = provider;
   lastProviderStatus = status;
   lastProviderCheckedAt = new Date().toISOString();
-  console.info(`[AI] Provider used: ${providerLabel(provider)}`);
+  console.info(`[ai] Provider used: ${providerLabel(provider)}`);
 }
 
 function providerOrder(preferredProvider) {
@@ -117,9 +119,10 @@ function logProviderFailure(provider, error, context = "") {
   const failure = classifyProviderFailure(provider, error);
   const label = providerLabel(provider);
   const suffix = context ? ` ${context}` : "";
-  console.warn(`[AI] ${label} failed${suffix}: ${failure.category}`, {
+  console.warn(`[ai] ${label} request failed${suffix}`, {
     status: failure.status,
-    detail: failure.detail
+    code: error?.code || failure.category,
+    message: failure.detail
   });
   return failure;
 }
@@ -134,7 +137,10 @@ export async function generateAIResponse(message, context = {}) {
   const hasOpenAI = hasProviderConfig("openai");
 
   if (!hasGemini && !hasOpenAI) {
-    const error = new HttpError(503, "No AI provider is configured.");
+    console.warn("[ai] All configured providers failed", {
+      configured: { gemini: false, openai: false }
+    });
+    const error = new HttpError(502, "Retela Assistant is temporarily unavailable. Please try again shortly.");
     markProviderFailure(error);
     throw error;
   }
@@ -144,19 +150,19 @@ export async function generateAIResponse(message, context = {}) {
 
   for (const provider of providerOrder(selectedProvider)) {
     if (!hasProviderConfig(provider)) {
-      console.info(`[AI] ${providerLabel(provider)} skipped: missing API key`);
+      console.info(`[ai] ${providerLabel(provider)} skipped: missing API key`);
       continue;
     }
 
     attempted.push(provider);
-    console.info(`[AI] Trying ${providerLabel(provider)}`);
+    console.info(`[ai] Trying ${providerLabel(provider)}`);
     try {
       const result = provider === "gemini"
         ? await runGemini(message, context)
         : await runOpenAi(message, context);
       const responseTime = Date.now() - start;
       markProviderUsed(result.provider);
-      console.info(`[AI] ${providerLabel(result.provider)} response generated successfully`);
+      console.info(`[ai] ${providerLabel(result.provider)} response generated successfully`);
       return {
         body: result.body,
         provider: result.provider,
@@ -168,11 +174,15 @@ export async function generateAIResponse(message, context = {}) {
       markProviderFailure(error);
       logProviderFailure(provider, error);
       const nextProvider = providerOrder(selectedProvider).find((candidate) => candidate !== provider && hasProviderConfig(candidate) && !attempted.includes(candidate));
-      if (nextProvider) console.info(`[AI] ${providerLabel(provider)} failed, trying ${providerLabel(nextProvider)}`);
+      if (nextProvider) console.info(`[ai] Falling back to ${providerLabel(nextProvider)}`);
     }
   }
 
-  const unavailableError = new HttpError(503, "AI providers are temporarily unavailable.");
+  console.warn("[ai] All configured providers failed", {
+    attempted,
+    configured: { gemini: hasGemini, openai: hasOpenAI }
+  });
+  const unavailableError = new HttpError(502, "Retela Assistant is temporarily unavailable. Please try again shortly.");
   unavailableError.cause = lastError;
   throw unavailableError;
 }
@@ -191,7 +201,8 @@ export async function getAIProviderStatus(settings = null) {
          ORDER BY created_at DESC
          LIMIT 1`
       );
-      durableLastProvider = normalizeProvider(rows[0]?.ai_provider || "");
+      const rawProvider = rows[0]?.ai_provider;
+      durableLastProvider = rawProvider ? normalizeProvider(rawProvider) : "";
     } catch {
       durableLastProvider = "";
     }

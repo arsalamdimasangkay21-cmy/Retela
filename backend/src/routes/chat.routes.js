@@ -34,10 +34,11 @@ router.post("/", asyncHandler(async (req, res) => {
       history: [],
       orders: [],
       settings: config,
-      customer: {}
+      customer: {},
+      provider: config?.ai?.aiProvider
     });
   } catch (error) {
-    throw new HttpError(error.status || 503, "Retela Assistant is temporarily unavailable. Please try again shortly.");
+    throw new HttpError(error.status || 502, "Retela Assistant is temporarily unavailable. Please try again shortly.");
   }
 
   res.json({

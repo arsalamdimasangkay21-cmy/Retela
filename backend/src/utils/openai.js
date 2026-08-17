@@ -37,10 +37,10 @@ function providerTimeoutSignal() {
 }
 
 export async function generateOpenAiResult({ prompt, products, history, orders = [], settings = {}, customer = {} }) {
-  const runtime = await getOpenAiRuntimeSettings();
   const apiKey = process.env.OPENAI_API_KEY?.trim() || "";
   if (!apiKey) return null;
 
+  const runtime = settings?.ai ? settings.ai : await getOpenAiRuntimeSettings();
   const model = process.env.OPENAI_MODEL?.trim() || DEFAULT_MODEL;
   const inventory = products.length
     ? products.slice(0, 30).map((product, index) => `${index + 1}. ${productLine(product)}`).join("\n")
@@ -73,7 +73,7 @@ export async function generateOpenAiResult({ prompt, products, history, orders =
     signal: providerTimeoutSignal(),
     body: JSON.stringify({
       model,
-      temperature: Number(runtime.temperature ?? 0.25),
+      temperature: Number(runtime.aiChatTemperature ?? runtime.temperature ?? 0.25),
       max_tokens: 500,
       messages: [
         {
