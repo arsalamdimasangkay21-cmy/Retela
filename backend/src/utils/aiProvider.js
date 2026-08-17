@@ -13,13 +13,23 @@ let startupDiagnosticsLogged = false;
 function logAIStartupDiagnostics() {
   if (startupDiagnosticsLogged) return;
   startupDiagnosticsLogged = true;
-  console.log("[ai] configuration", {
-    geminiConfigured: hasProviderConfig("gemini"),
-    openaiConfigured: hasProviderConfig("openai"),
-    geminiModel: process.env.GEMINI_MODEL?.trim() || "gemini-2.5-flash",
-    openaiModel: process.env.OPENAI_MODEL?.trim() || "gpt-4o-mini",
+  console.log("[ai] provider config", {
+    geminiConfigured: Boolean(process.env.GEMINI_API_KEY?.trim()),
+    openaiConfigured: Boolean(process.env.OPENAI_API_KEY?.trim())
+  });
+  console.log("[ai] selected models", {
+    geminiModel: geminiModelName(),
+    openaiModel: openAiModelName(),
     primaryProvider: normalizeProvider(process.env.AI_PROVIDER)
   });
+}
+
+function geminiModelName() {
+  return process.env.GEMINI_MODEL?.trim() || "gemini-2.5-flash";
+}
+
+function openAiModelName() {
+  return process.env.OPENAI_MODEL?.trim() || "gpt-4o-mini";
 }
 
 function normalizeProvider(value) {
@@ -41,7 +51,7 @@ function getProviderConfig(contextProvider) {
 async function runOpenAi(message, context) {
   const result = await generateOpenAiResult({ ...context, prompt: message });
   if (!result?.text) {
-    console.warn("[ai] provider returned empty response", { provider: "OpenAI" });
+    console.error("[ai] OpenAI returned empty response");
     const error = new HttpError(502, "OpenAI returned an empty response.");
     error.code = "EMPTY_PROVIDER_RESPONSE";
     throw error;
@@ -56,7 +66,7 @@ async function runOpenAi(message, context) {
 async function runGemini(message, context) {
   const result = await generateGeminiResult({ ...context, prompt: message });
   if (!result?.text) {
-    console.warn("[ai] provider returned empty response", { provider: "Gemini" });
+    console.error("[ai] Gemini returned empty response");
     const error = new HttpError(502, "Gemini returned an empty response.");
     error.code = "EMPTY_PROVIDER_RESPONSE";
     throw error;
@@ -80,7 +90,7 @@ function providerOrder(preferredProvider) {
 }
 
 function hasProviderConfig(provider) {
-  if (provider === "gemini") return Boolean(process.env.GEMINI_API_KEY?.trim() || process.env.GOOGLE_API_KEY?.trim());
+  if (provider === "gemini") return Boolean(process.env.GEMINI_API_KEY?.trim());
   if (provider === "openai") return Boolean(process.env.OPENAI_API_KEY?.trim());
   return false;
 }
@@ -91,7 +101,8 @@ function markProviderFailure(error) {
 }
 
 function redactProviderMessage(value) {
-  return String(value || "")
+  const raw = typeof value === "string" ? value : JSON.stringify(value || "");
+  return String(raw || "")
     .replace(/sk-[A-Za-z0-9_-]{12,}/g, "[redacted-openai-key]")
     .replace(/AIza[0-9A-Za-z_-]{20,}/g, "[redacted-google-key]")
     .replace(/Bearer\s+[A-Za-z0-9._~+/-]+=*/gi, "Bearer [redacted]")
@@ -99,39 +110,61 @@ function redactProviderMessage(value) {
     .slice(0, 240);
 }
 
+function providerErrorMessage(error) {
+  return error?.response?.data?.error?.message
+    || error?.response?.data?.message
+    || error?.response?.data
+    || error?.message
+    || error?.cause?.message
+    || "";
+}
+
+function providerErrorCode(error) {
+  return error?.response?.data?.error?.code
+    || error?.response?.data?.code
+    || error?.code
+    || null;
+}
+
+function providerErrorStatus(error) {
+  return Number(error?.response?.status || error?.providerStatus || error?.status || error?.statusCode || 0) || null;
+}
+
 function classifyProviderFailure(provider, error) {
-  const status = Number(error?.providerStatus || error?.status || 0);
-  const message = redactProviderMessage(error?.message || error?.cause?.message || "");
+  const status = providerErrorStatus(error);
+  const message = redactProviderMessage(providerErrorMessage(error));
   const lower = message.toLowerCase();
 
   if (/api key is missing|missing api key|not configured/.test(lower)) {
-    return { category: "missing_api_key", status: status || null, detail: message };
+    return { category: "missing_api_key", status, detail: message };
   }
   if (status === 401 || status === 403 || /invalid api key|api key not valid|incorrect api key|permission denied|unauthorized|forbidden/.test(lower)) {
-    return { category: "invalid_api_key", status: status || null, detail: message };
+    return { category: "invalid_api_key", status, detail: message };
   }
   if (status === 404 || /model.*not found|not found.*model|model.*does not exist|unsupported model|invalid model/.test(lower)) {
-    return { category: "unsupported_or_incorrect_model", status: status || null, detail: message };
+    return { category: "unsupported_or_incorrect_model", status, detail: message };
   }
   if (status === 429 || /quota|rate.?limit|resource_exhausted|too many requests|insufficient_quota/.test(lower)) {
-    return { category: "quota_or_rate_limit", status: status || null, detail: message };
+    return { category: "quota_or_rate_limit", status, detail: message };
   }
   if (/fetch failed|network|enotfound|eai_again|econnreset|etimedout|timeout|socket|tls/.test(lower) || ["ENOTFOUND", "EAI_AGAIN", "ECONNRESET", "ETIMEDOUT"].includes(error?.code)) {
-    return { category: "network_error", status: status || null, detail: message || error?.code || "Network request failed" };
+    return { category: "network_error", status, detail: message || error?.code || "Network request failed" };
   }
   if (status >= 400) {
     return { category: "provider_api_request_failure", status, detail: message };
   }
-  return { category: "provider_unavailable", status: status || null, detail: message || "Provider failed without details" };
+  return { category: "provider_unavailable", status, detail: message || "Provider failed without details" };
 }
 
-function logProviderFailure(provider, error, context = "") {
+function logProviderError(provider, error, context = "") {
   const failure = classifyProviderFailure(provider, error);
   const label = providerLabel(provider);
   const suffix = context ? ` ${context}` : "";
-  console.warn(`[ai] ${label} failed${suffix}`, {
+  console.error(`[ai] ${label} failed${suffix}`, {
+    name: error?.name || null,
+    message: failure.detail,
     status: failure.status,
-    code: error?.code || failure.category,
+    code: providerErrorCode(error) || failure.category,
     providerMessage: failure.detail,
     errorName: error?.name || null
   });
@@ -152,17 +185,21 @@ export async function generateAIResponse(message, context = {}) {
     historyCount: Array.isArray(context.history) ? context.history.length : 0,
     hasProductContext: Array.isArray(context.products) && context.products.length > 0,
     productCount: Array.isArray(context.products) ? context.products.length : 0,
-    primaryProvider: selectedProvider
+    primaryProvider: selectedProvider,
+    geminiModel: geminiModelName(),
+    openaiModel: openAiModelName()
   });
 
   if (!hasGemini && !hasOpenAI) {
-    console.warn("[ai] all providers failed", { configured: { gemini: false, openai: false } });
+    console.error("[ai] all configured providers failed", { configured: { gemini: false, openai: false } });
     const error = new HttpError(502, "Retela Assistant is temporarily unavailable. Please try again shortly.");
     markProviderFailure(error);
     throw error;
   }
 
   let lastError = null;
+  let geminiError = null;
+  let openaiError = null;
   const attempted = [];
 
   for (const provider of providerOrder(selectedProvider)) {
@@ -188,16 +225,20 @@ export async function generateAIResponse(message, context = {}) {
       };
     } catch (error) {
       lastError = error;
+      if (provider === "gemini") geminiError = error;
+      if (provider === "openai") openaiError = error;
       markProviderFailure(error);
-      logProviderFailure(provider, error);
+      logProviderError(provider, error);
       const nextProvider = providerOrder(selectedProvider).find((candidate) => candidate !== provider && hasProviderConfig(candidate) && !attempted.includes(candidate));
       if (nextProvider) console.info(`[ai] falling back to ${providerLabel(nextProvider)}`);
     }
   }
 
-  console.warn("[ai] all providers failed", {
+  console.error("[ai] all configured providers failed", {
     attempted,
-    configured: { gemini: hasGemini, openai: hasOpenAI }
+    configured: { gemini: hasGemini, openai: hasOpenAI },
+    geminiFailure: geminiError ? classifyProviderFailure("gemini", geminiError) : null,
+    openaiFailure: openaiError ? classifyProviderFailure("openai", openaiError) : null
   });
   const unavailableError = new HttpError(502, "Retela Assistant is temporarily unavailable. Please try again shortly.");
   unavailableError.cause = lastError;

@@ -595,7 +595,7 @@ router.post("/", requireAuth, requireApproved, asyncHandler(async (req, res) => 
 }));
 
 router.post("/ai", requireAuth, requireApproved, asyncHandler(async (req, res) => {
-  console.info("[ai-route] request authenticated", {
+  console.info("[ai-route] authenticated", {
     userId: req.user.id,
     role: req.user.role,
     hasPrompt: Boolean(String(req.body?.prompt || "").trim()),
@@ -612,13 +612,17 @@ router.post("/ai", requireAuth, requireApproved, asyncHandler(async (req, res) =
     ? (await query("SELECT id, admin_takeover, ai_processing, is_archived FROM conversations WHERE id = :id AND customer_id = :customerId AND is_deleted = FALSE", { id: input.conversation_id, customerId: req.user.id }))[0]
     : await getOrCreateCustomerConversation(req.user.id);
   if (!conversation) return res.status(404).json({ message: "Conversation not found" });
-  console.info("[ai-route] conversation loaded", {
+  console.info("[ai-route] conversation ready", {
     conversationId: conversation.id,
     adminTakeover: Boolean(conversation.admin_takeover),
     aiProcessing: Boolean(conversation.ai_processing)
   });
 
   const historyBefore = await getConversationHistory(conversation.id);
+  console.info("[ai-route] history ready", {
+    conversationId: conversation.id,
+    historyCount: historyBefore.length
+  });
   const latestCustomer = [...historyBefore].reverse().find((message) => message.sender_type === "customer");
   const latestAi = [...historyBefore].reverse().find((message) => message.sender_type === "ai");
   const duplicateCustomer = await recentDuplicateMessage({ conversationId: conversation.id, senderType: "customer", body: input.prompt, seconds: 90 });
@@ -724,7 +728,7 @@ router.post("/ai", requireAuth, requireApproved, asyncHandler(async (req, res) =
     );
     const suggestions = buildInventorySuggestions(input.prompt, products);
     const availableProducts = products.filter((product) => Number(product.stock || 0) > 0);
-    console.info("[ai-route] product context loaded", {
+    console.info("[ai-route] product context ready", {
       conversationId: conversation.id,
       productCount: products.length,
       availableProductCount: availableProducts.length,
@@ -758,13 +762,19 @@ router.post("/ai", requireAuth, requireApproved, asyncHandler(async (req, res) =
       });
     } catch (error) {
       console.error("[ai-route] provider failed", safeAiRouteError(error));
-      throw new HttpError(error.status || 502, assistantUnavailableMessage);
+      const safeError = new HttpError(error.status || 502, assistantUnavailableMessage);
+      safeError.cause = error;
+      throw safeError;
     }
     console.info("[ai-route] provider returned", {
       conversationId: conversation.id,
       provider: aiResult.provider,
       responseTime: aiResult.responseTime,
       hasBody: Boolean(String(aiResult.body || "").trim())
+    });
+    console.info("[ai-route] provider success", {
+      conversationId: conversation.id,
+      provider: aiResult.provider
     });
     const body = aiResult.body;
     if (!body) throw new HttpError(503, assistantUnavailableMessage);
@@ -806,7 +816,7 @@ router.post("/ai", requireAuth, requireApproved, asyncHandler(async (req, res) =
         created_at: new Date().toISOString()
       });
     }
-    console.info("[ai-route] assistant response saved", {
+    console.info("[ai-route] assistant message saved", {
       conversationId: conversation.id,
       provider: aiProvider
     });

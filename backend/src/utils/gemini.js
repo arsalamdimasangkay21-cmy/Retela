@@ -11,7 +11,7 @@ function safeProviderErrorText(value) {
 }
 
 function getGeminiApiKey() {
-  return process.env.GEMINI_API_KEY?.trim() || process.env.GOOGLE_API_KEY?.trim() || "";
+  return process.env.GEMINI_API_KEY?.trim() || "";
 }
 
 function providerTimeoutSignal() {
