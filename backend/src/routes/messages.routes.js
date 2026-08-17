@@ -29,6 +29,20 @@ const availabilityPattern = /available|avail|stock|meron|size|do you have|mayroo
 const sizePattern = /\b(xs|s|m|l|xl|xxl|free size|free)\b/i;
 const assistantUnavailableMessage = "Retela Assistant is temporarily unavailable. Please try again shortly.";
 
+function safeAiRouteError(error) {
+  return {
+    status: error?.status || error?.statusCode || error?.providerStatus || null,
+    code: error?.code || null,
+    providerMessage: String(error?.message || error?.cause?.message || "Unknown error")
+      .replace(/sk-[A-Za-z0-9_-]{12,}/g, "[redacted-openai-key]")
+      .replace(/AIza[0-9A-Za-z_-]{20,}/g, "[redacted-google-key]")
+      .replace(/Bearer\s+[A-Za-z0-9._~+/-]+=*/gi, "Bearer [redacted]")
+      .replace(/x-goog-api-key['":\s]+[A-Za-z0-9_-]+/gi, "x-goog-api-key [redacted]")
+      .slice(0, 240),
+    errorName: error?.name || null
+  };
+}
+
 async function ensureMessagingIdentityColumns() {
   messagingIdentityColumnsReady ||= (async () => {
     await ensureAutoIncrementId("conversations");
@@ -581,6 +595,13 @@ router.post("/", requireAuth, requireApproved, asyncHandler(async (req, res) => 
 }));
 
 router.post("/ai", requireAuth, requireApproved, asyncHandler(async (req, res) => {
+  console.info("[ai-route] request authenticated", {
+    userId: req.user.id,
+    role: req.user.role,
+    hasPrompt: Boolean(String(req.body?.prompt || "").trim()),
+    promptLength: String(req.body?.prompt || "").length,
+    conversationProvided: Boolean(req.body?.conversation_id)
+  });
   await ensureMessageStatusColumns();
   await ensureConversationAiMetadataColumns();
   await ensureConversationLifecycleColumns();
@@ -591,6 +612,11 @@ router.post("/ai", requireAuth, requireApproved, asyncHandler(async (req, res) =
     ? (await query("SELECT id, admin_takeover, ai_processing, is_archived FROM conversations WHERE id = :id AND customer_id = :customerId AND is_deleted = FALSE", { id: input.conversation_id, customerId: req.user.id }))[0]
     : await getOrCreateCustomerConversation(req.user.id);
   if (!conversation) return res.status(404).json({ message: "Conversation not found" });
+  console.info("[ai-route] conversation loaded", {
+    conversationId: conversation.id,
+    adminTakeover: Boolean(conversation.admin_takeover),
+    aiProcessing: Boolean(conversation.ai_processing)
+  });
 
   const historyBefore = await getConversationHistory(conversation.id);
   const latestCustomer = [...historyBefore].reverse().find((message) => message.sender_type === "customer");
@@ -616,6 +642,11 @@ router.post("/ai", requireAuth, requireApproved, asyncHandler(async (req, res) =
       emit: false
     });
   }
+  console.info("[ai-route] customer message processed", {
+    conversationId: conversation.id,
+    duplicateCustomer: Boolean(duplicateCustomer),
+    historyCount: historyBefore.length
+  });
 
   await query(
     "UPDATE conversations SET is_archived = FALSE, archived_at = NULL, updated_at = NOW() WHERE id = :conversationId",
@@ -693,6 +724,12 @@ router.post("/ai", requireAuth, requireApproved, asyncHandler(async (req, res) =
     );
     const suggestions = buildInventorySuggestions(input.prompt, products);
     const availableProducts = products.filter((product) => Number(product.stock || 0) > 0);
+    console.info("[ai-route] product context loaded", {
+      conversationId: conversation.id,
+      productCount: products.length,
+      availableProductCount: availableProducts.length,
+      suggestionCount: suggestions.length
+    });
 
     const [orders, settingsResult, customerProfile, history] = await Promise.all([
       getCustomerOrders(req.user.id),
@@ -700,6 +737,15 @@ router.post("/ai", requireAuth, requireApproved, asyncHandler(async (req, res) =
       getCustomerProfile(req.user.id),
       getConversationHistory(conversation.id)
     ]);
+    console.info("[ai-route] calling provider", {
+      conversationId: conversation.id,
+      hasMessage: Boolean(String(input.prompt || "").trim()),
+      messageLength: String(input.prompt || "").length,
+      historyCount: history.length,
+      orderCount: orders.length,
+      hasProductContext: availableProducts.length > 0,
+      configuredProvider: settingsResult.config?.ai?.aiProvider || process.env.AI_PROVIDER || "auto"
+    });
     let aiResult;
     try {
       aiResult = await generateAIResponse(input.prompt, {
@@ -711,8 +757,15 @@ router.post("/ai", requireAuth, requireApproved, asyncHandler(async (req, res) =
         provider: settingsResult.config?.ai?.aiProvider
       });
     } catch (error) {
+      console.error("[ai-route] provider failed", safeAiRouteError(error));
       throw new HttpError(error.status || 502, assistantUnavailableMessage);
     }
+    console.info("[ai-route] provider returned", {
+      conversationId: conversation.id,
+      provider: aiResult.provider,
+      responseTime: aiResult.responseTime,
+      hasBody: Boolean(String(aiResult.body || "").trim())
+    });
     const body = aiResult.body;
     if (!body) throw new HttpError(503, assistantUnavailableMessage);
 
@@ -726,6 +779,11 @@ router.post("/ai", requireAuth, requireApproved, asyncHandler(async (req, res) =
     }
 
     const aiProvider = aiResult.provider === "gemini" ? "Gemini" : "OpenAI";
+    console.info("[ai-route] saving assistant response", {
+      conversationId: conversation.id,
+      provider: aiProvider,
+      bodyLength: String(body || "").length
+    });
     await query(
       "INSERT INTO messages (conversation_id, sender_id, sender_type, body, delivery_status, delivered_at, mode, ai_provider, response_time_ms, token_usage) VALUES (:conversationId, NULL, 'ai', :body, 'delivered', NOW(), 'ai', :aiProvider, :responseTime, :tokenUsage)",
       { conversationId: conversation.id, body, aiProvider, responseTime: aiResult.responseTime, tokenUsage: aiResult.tokenUsage }
@@ -748,7 +806,14 @@ router.post("/ai", requireAuth, requireApproved, asyncHandler(async (req, res) =
         created_at: new Date().toISOString()
       });
     }
+    console.info("[ai-route] assistant response saved", {
+      conversationId: conversation.id,
+      provider: aiProvider
+    });
     res.json({ conversation_id: conversation.id, body, provider: aiProvider, responseTime: aiResult.responseTime, tokenUsage: aiResult.tokenUsage, admin_takeover: false, suggestions, products: availableProducts.slice(0, 12) });
+  } catch (error) {
+    console.error("[ai-route] failed", safeAiRouteError(error));
+    throw error;
   } finally {
     aiProcessingLocks.delete(lockKey);
     await query("UPDATE conversations SET ai_processing = FALSE WHERE id = :conversationId", { conversationId: conversation.id }).catch(() => {});

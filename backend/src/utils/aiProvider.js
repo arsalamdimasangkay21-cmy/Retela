@@ -13,12 +13,12 @@ let startupDiagnosticsLogged = false;
 function logAIStartupDiagnostics() {
   if (startupDiagnosticsLogged) return;
   startupDiagnosticsLogged = true;
-  console.log("[ai] Provider configuration", {
-    gemini: hasProviderConfig("gemini"),
-    openai: hasProviderConfig("openai"),
-    primary: normalizeProvider(process.env.AI_PROVIDER),
+  console.log("[ai] configuration", {
+    geminiConfigured: hasProviderConfig("gemini"),
+    openaiConfigured: hasProviderConfig("openai"),
     geminiModel: process.env.GEMINI_MODEL?.trim() || "gemini-2.5-flash",
-    openaiModel: process.env.OPENAI_MODEL?.trim() || "gpt-4o-mini"
+    openaiModel: process.env.OPENAI_MODEL?.trim() || "gpt-4o-mini",
+    primaryProvider: normalizeProvider(process.env.AI_PROVIDER)
   });
 }
 
@@ -40,7 +40,12 @@ function getProviderConfig(contextProvider) {
 
 async function runOpenAi(message, context) {
   const result = await generateOpenAiResult({ ...context, prompt: message });
-  if (!result?.text) throw new HttpError(502, "OpenAI returned an empty response.");
+  if (!result?.text) {
+    console.warn("[ai] provider returned empty response", { provider: "OpenAI" });
+    const error = new HttpError(502, "OpenAI returned an empty response.");
+    error.code = "EMPTY_PROVIDER_RESPONSE";
+    throw error;
+  }
   return {
     body: result.text,
     provider: "openai",
@@ -50,7 +55,12 @@ async function runOpenAi(message, context) {
 
 async function runGemini(message, context) {
   const result = await generateGeminiResult({ ...context, prompt: message });
-  if (!result?.text) throw new HttpError(502, "Gemini returned an empty response.");
+  if (!result?.text) {
+    console.warn("[ai] provider returned empty response", { provider: "Gemini" });
+    const error = new HttpError(502, "Gemini returned an empty response.");
+    error.code = "EMPTY_PROVIDER_RESPONSE";
+    throw error;
+  }
   return {
     body: result.text,
     provider: "gemini",
@@ -70,7 +80,7 @@ function providerOrder(preferredProvider) {
 }
 
 function hasProviderConfig(provider) {
-  if (provider === "gemini") return Boolean(process.env.GEMINI_API_KEY?.trim());
+  if (provider === "gemini") return Boolean(process.env.GEMINI_API_KEY?.trim() || process.env.GOOGLE_API_KEY?.trim());
   if (provider === "openai") return Boolean(process.env.OPENAI_API_KEY?.trim());
   return false;
 }
@@ -119,10 +129,11 @@ function logProviderFailure(provider, error, context = "") {
   const failure = classifyProviderFailure(provider, error);
   const label = providerLabel(provider);
   const suffix = context ? ` ${context}` : "";
-  console.warn(`[ai] ${label} request failed${suffix}`, {
+  console.warn(`[ai] ${label} failed${suffix}`, {
     status: failure.status,
     code: error?.code || failure.category,
-    message: failure.detail
+    providerMessage: failure.detail,
+    errorName: error?.name || null
   });
   return failure;
 }
@@ -135,11 +146,17 @@ export async function generateAIResponse(message, context = {}) {
   const selectedProvider = getProviderConfig(context.provider);
   const hasGemini = hasProviderConfig("gemini");
   const hasOpenAI = hasProviderConfig("openai");
+  console.info("[ai] request context", {
+    hasMessage: Boolean(String(message || "").trim()),
+    messageLength: String(message || "").length,
+    historyCount: Array.isArray(context.history) ? context.history.length : 0,
+    hasProductContext: Array.isArray(context.products) && context.products.length > 0,
+    productCount: Array.isArray(context.products) ? context.products.length : 0,
+    primaryProvider: selectedProvider
+  });
 
   if (!hasGemini && !hasOpenAI) {
-    console.warn("[ai] All configured providers failed", {
-      configured: { gemini: false, openai: false }
-    });
+    console.warn("[ai] all providers failed", { configured: { gemini: false, openai: false } });
     const error = new HttpError(502, "Retela Assistant is temporarily unavailable. Please try again shortly.");
     markProviderFailure(error);
     throw error;
@@ -155,14 +172,14 @@ export async function generateAIResponse(message, context = {}) {
     }
 
     attempted.push(provider);
-    console.info(`[ai] Trying ${providerLabel(provider)}`);
+    console.info(`[ai] attempting ${providerLabel(provider)}`);
     try {
       const result = provider === "gemini"
         ? await runGemini(message, context)
         : await runOpenAi(message, context);
       const responseTime = Date.now() - start;
       markProviderUsed(result.provider);
-      console.info(`[ai] ${providerLabel(result.provider)} response generated successfully`);
+      console.info(`[ai] ${providerLabel(result.provider)} success`, { responseTime });
       return {
         body: result.body,
         provider: result.provider,
@@ -174,11 +191,11 @@ export async function generateAIResponse(message, context = {}) {
       markProviderFailure(error);
       logProviderFailure(provider, error);
       const nextProvider = providerOrder(selectedProvider).find((candidate) => candidate !== provider && hasProviderConfig(candidate) && !attempted.includes(candidate));
-      if (nextProvider) console.info(`[ai] Falling back to ${providerLabel(nextProvider)}`);
+      if (nextProvider) console.info(`[ai] falling back to ${providerLabel(nextProvider)}`);
     }
   }
 
-  console.warn("[ai] All configured providers failed", {
+  console.warn("[ai] all providers failed", {
     attempted,
     configured: { gemini: hasGemini, openai: hasOpenAI }
   });

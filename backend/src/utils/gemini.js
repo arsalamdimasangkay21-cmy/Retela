@@ -11,7 +11,7 @@ function safeProviderErrorText(value) {
 }
 
 function getGeminiApiKey() {
-  return process.env.GEMINI_API_KEY?.trim() || "";
+  return process.env.GEMINI_API_KEY?.trim() || process.env.GOOGLE_API_KEY?.trim() || "";
 }
 
 function providerTimeoutSignal() {
@@ -112,8 +112,17 @@ export async function generateGeminiResult({ prompt, products, history, orders =
 
   const data = await response.json();
   const text = data?.candidates?.[0]?.content?.parts?.map((part) => part.text).filter(Boolean).join("\n").trim();
+  if (!text) {
+    const finishReason = data?.candidates?.[0]?.finishReason || "none";
+    const blockReason = data?.promptFeedback?.blockReason || "none";
+    const error = new HttpError(502, `Gemini returned empty response: finishReason=${safeProviderErrorText(finishReason)}, blockReason=${safeProviderErrorText(blockReason)}`);
+    error.provider = "gemini";
+    error.providerStatus = 200;
+    error.code = "EMPTY_PROVIDER_RESPONSE";
+    throw error;
+  }
   return {
-    text: text || null,
+    text,
     tokenUsage: data?.usageMetadata?.totalTokenCount ?? data?.usageMetadata?.totalTokens ?? null
   };
 }

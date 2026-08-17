@@ -112,8 +112,17 @@ export async function generateOpenAiResult({ prompt, products, history, orders =
   }
 
   const data = await response.json();
+  const text = data?.choices?.[0]?.message?.content?.trim();
+  if (!text) {
+    const finishReason = data?.choices?.[0]?.finish_reason || "none";
+    const error = new HttpError(502, `OpenAI returned empty response: finishReason=${safeProviderErrorText(finishReason)}`);
+    error.provider = "openai";
+    error.providerStatus = 200;
+    error.code = "EMPTY_PROVIDER_RESPONSE";
+    throw error;
+  }
   return {
-    text: data?.choices?.[0]?.message?.content?.trim() || "I can assist you with available apparel items, prices, sizes, stock, delivery, payment, returns, and order updates.",
+    text,
     tokenUsage: data?.usage?.total_tokens ?? null
   };
 }
