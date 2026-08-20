@@ -5,16 +5,18 @@ const endpoints = {
   categories: "/categories",
   types: "/types",
   sizes: "/sizes",
-  conditions: "/conditions"
+  conditions: "/conditions",
+  colors: "/colors"
 };
 
 export async function fetchApparelOptions() {
-  const [brands, categories, types, sizes, conditions] = await Promise.all([
+  const [brands, categories, types, sizes, conditions, colors] = await Promise.all([
     cachedGet(endpoints.brands, {}, { cacheMs: 10000, retries: 1 }),
     cachedGet(endpoints.categories, {}, { cacheMs: 10000, retries: 1 }),
     cachedGet(endpoints.types, {}, { cacheMs: 10000, retries: 1 }),
     cachedGet(endpoints.sizes, {}, { cacheMs: 10000, retries: 1 }),
-    cachedGet(endpoints.conditions, {}, { cacheMs: 10000, retries: 1 })
+    cachedGet(endpoints.conditions, {}, { cacheMs: 10000, retries: 1 }),
+    cachedGet(endpoints.colors, {}, { cacheMs: 10000, retries: 1 })
   ]);
 
   return {
@@ -22,13 +24,21 @@ export async function fetchApparelOptions() {
     categories: categories.data || [],
     types: types.data || [],
     sizes: sizes.data || [],
-    conditions: conditions.data || []
+    conditions: conditions.data || [],
+    colors: colors.data || []
   };
 }
 
 export async function createApparelOption(kind, name) {
   if (!endpoints[kind]) throw new Error("Invalid apparel option type.");
   const response = await api.post(endpoints[kind], { name });
+  clearGetCache(endpoints[kind]);
+  return response.data;
+}
+
+export async function deleteApparelOption(kind, id) {
+  if (!endpoints[kind]) throw new Error("Invalid apparel option type.");
+  const response = await api.delete(`${endpoints[kind]}/${id}`);
   clearGetCache(endpoints[kind]);
   return response.data;
 }

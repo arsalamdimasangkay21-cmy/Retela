@@ -6,7 +6,7 @@ import { Chart as ChartJS, ArcElement, BarElement, CategoryScale, Filler, Linear
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip as RechartsTooltip, XAxis, YAxis } from "recharts";
 import { Activity, Archive, Barcode, Bot, Check, ChevronLeft, ChevronRight, Download, Edit3, Eye, FileSpreadsheet, Loader2, MapPin, Megaphone, MessageSquare, MoreHorizontal, PackageCheck, PackagePlus, Plus, Printer, ReceiptText, RotateCcw, Save, Search, Send, Shirt, ShoppingBag, SlidersHorizontal, Sparkles, Star, Tags, Trash2, TrendingUp, Upload, WalletCards, X, Zap } from "lucide-react";
 import { api, API_URL, cachedGet, clearGetCache, getApiErrorMessage } from "../api/client";
-import { createApparelOption, fetchApparelOptions } from "../api/apparelOptions";
+import { createApparelOption, deleteApparelOption, fetchApparelOptions } from "../api/apparelOptions";
 import { ChangePasswordForm } from "../components/ChangePasswordForm";
 import ConfirmDialog from "../components/ConfirmDialog";
 import CustomerDocumentsModal from "../components/CustomerDocumentsModal";
@@ -55,10 +55,10 @@ const fallbackApparelOptions = {
   categories: ["T-Shirts", "Jackets", "Caps", "Other"],
   types: ["Men", "Women", "Kids", "Vintage", "Oversized", "Streetwear", "Sportswear", "Formal", "Casual", "Unisex", "Other"],
   sizes: ["XS", "S", "M", "L", "XL", "XXL", "Free Size", "Other"],
-  conditions: ["Like New", "Excellent", "Very Good", "Good", "Fair", "Other"]
+  conditions: ["Like New", "Excellent", "Very Good", "Good", "Fair", "Other"],
+  colors: ["Black", "White", "Gray", "Red", "Blue", "Green", "Yellow", "Brown", "Pink", "Purple", "Orange", "Other"]
 };
-const productColors = ["Black", "White", "Gray", "Red", "Blue", "Green", "Yellow", "Brown", "Pink", "Purple", "Orange", "Other"];
-const blankProduct = { name: "", brand: "Other", category: "T-Shirts", gender: "Other", size: "Free Size", color: "Other", price: "", stock: "1", condition: "Good", description: "", image_url: "" };
+const blankProduct = { name: "", brand: "", category: "", gender: "", size: "", color: "", price: "", stock: "1", condition: "", description: "", image_url: "" };
 const defaultCustomerFilters = { search: "", status: "all", approval: "all", sort: "newest" };
 const SHOP_LOCATION = "Tela to Pera Thrift Shop, Midsayap, Cotabato, Philippines";
 const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || "";
@@ -100,9 +100,34 @@ function optionNames(rows = [], fallback = []) {
   return names.filter((value, index, array) => array.findIndex((item) => item.toLowerCase() === value.toLowerCase()) === index);
 }
 
+function optionItems(rows = [], fallback = []) {
+  const map = new Map();
+  fallback.forEach((name) => {
+    const value = String(name || "").trim();
+    if (value) map.set(value.toLowerCase(), { id: null, name: value, is_system: true });
+  });
+  rows.forEach((row) => {
+    const value = String(row?.name || row || "").trim();
+    if (!value) return;
+    map.set(value.toLowerCase(), {
+      id: row?.id ?? null,
+      name: value,
+      is_system: Boolean(row?.is_system)
+    });
+  });
+  const items = [...map.values()].sort((left, right) => {
+    if (left.name.toLowerCase() === "other") return 1;
+    if (right.name.toLowerCase() === "other") return -1;
+    if (left.is_system !== right.is_system) return left.is_system ? -1 : 1;
+    return left.name.localeCompare(right.name);
+  });
+  return items;
+}
+
 function optionExists(options = [], name) {
   const normalized = String(name || "").trim().toLowerCase();
-  return options.find((value) => String(value || "").trim().toLowerCase() === normalized) || "";
+  const found = options.find((value) => String(value?.name || value || "").trim().toLowerCase() === normalized);
+  return found?.name || found || "";
 }
 
 function resolveProductId(productOrId) {
@@ -197,7 +222,7 @@ export default function AdminDashboard({ active, onChange }) {
   const [selectedRegistration, setSelectedRegistration] = useState(null);
   const [selectedDocumentCustomerId, setSelectedDocumentCustomerId] = useState(null);
   const [productToast, setProductToast] = useState(null);
-  const [apparelOptions, setApparelOptions] = useState({ brands: [], categories: [], types: [], sizes: [], conditions: [] });
+  const [apparelOptions, setApparelOptions] = useState({ brands: [], categories: [], types: [], sizes: [], conditions: [], colors: [] });
   const [deletingProductIds, setDeletingProductIds] = useState([]);
   const [productSaving, setProductSaving] = useState(false);
   const [busyAction, setBusyAction] = useState("");
@@ -211,7 +236,17 @@ export default function AdminDashboard({ active, onChange }) {
     categories: optionNames(apparelOptions.categories, fallbackApparelOptions.categories),
     types: optionNames(apparelOptions.types, fallbackApparelOptions.types),
     sizes: optionNames(apparelOptions.sizes, fallbackApparelOptions.sizes),
-    conditions: optionNames(apparelOptions.conditions, fallbackApparelOptions.conditions)
+    conditions: optionNames(apparelOptions.conditions, fallbackApparelOptions.conditions),
+    colors: optionNames(apparelOptions.colors, fallbackApparelOptions.colors)
+  }), [apparelOptions]);
+
+  const optionMeta = useMemo(() => ({
+    brands: optionItems(apparelOptions.brands, fallbackApparelOptions.brands),
+    categories: optionItems(apparelOptions.categories, fallbackApparelOptions.categories),
+    types: optionItems(apparelOptions.types, fallbackApparelOptions.types),
+    sizes: optionItems(apparelOptions.sizes, fallbackApparelOptions.sizes),
+    conditions: optionItems(apparelOptions.conditions, fallbackApparelOptions.conditions),
+    colors: optionItems(apparelOptions.colors, fallbackApparelOptions.colors)
   }), [apparelOptions]);
 
   const filteredProducts = useMemo(() => products.filter((product) => {
@@ -1518,6 +1553,7 @@ function PremiumInventoryPage({
           saveProduct={saveProduct}
           productSaving={productSaving}
           optionValues={optionValues}
+          optionMeta={optionMeta}
           refreshApparelOptions={refreshApparelOptions}
           showProductToast={showProductToast}
           onClose={onCloseModal}
@@ -1688,22 +1724,28 @@ function AdminToast({ toast, onClose }) {
   );
 }
 
-function ProductEditorModal({ editingProductId, form, setForm, productImage, setProductImage, saveProduct, productSaving = false, optionValues, refreshApparelOptions, showProductToast, onClose }) {
+function ProductEditorModal({ editingProductId, form, setForm, productImage, setProductImage, saveProduct, productSaving = false, optionValues, optionMeta, refreshApparelOptions, showProductToast, onClose }) {
   const inputClass = "h-12 min-h-12 w-full rounded-xl border border-[#cfded4] bg-white px-3 py-2 text-sm font-semibold text-[#17211b] outline-none transition placeholder:text-[#8b9a91] focus:border-[#20b66a] focus:ring-4 focus:ring-[rgba(32,182,106,0.18)]";
   const secondaryButtonClass = "inline-flex min-h-12 items-center justify-center rounded-xl border border-[#cfded4] bg-white px-5 py-2.5 text-sm font-bold text-[#17211b] shadow-sm transition hover:border-[#20b66a] hover:text-[#15884f] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#20b66a] active:scale-95";
   const primaryButtonClass = "inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-[#20b66a] px-5 py-2.5 text-sm font-bold text-white shadow-lg shadow-emerald-700/18 transition hover:bg-[#15884f] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#20b66a] active:scale-95";
-  const [optionModal, setOptionModal] = useState(null);
-  const [otherValues, setOtherValues] = useState({ category: "", gender: "", size: "", condition: "" });
+  const [otherValues, setOtherValues] = useState({ brand: "", category: "", gender: "", size: "", color: "", condition: "" });
   const [otherErrors, setOtherErrors] = useState({});
-  const [brandName, setBrandName] = useState("");
-  const [brandError, setBrandError] = useState("");
+  const [pendingOptionDelete, setPendingOptionDelete] = useState(null);
+  const [deletingOption, setDeletingOption] = useState(false);
   const [existingImageUrl, setExistingImageUrl] = useState(null);
   const [selectedImageFile, setSelectedImageFile] = useState(null);
   const [previewImageUrl, setPreviewImageUrl] = useState(null);
   const [imageLoadFailed, setImageLoadFailed] = useState(false);
   const previewObjectUrlRef = useRef("");
-  const brandOptions = optionNames([form.brand], optionValues.brands);
   const displayedImageUrl = previewImageUrl || existingImageUrl;
+  const optionConfigs = [
+    { kind: "brands", formKey: "brand", label: "brand", inputLabel: "Brand Name", placeholder: "Enter new brand name", message: "Brand added successfully." },
+    { kind: "categories", formKey: "category", label: "category", inputLabel: "Category", placeholder: "Enter new category", message: "Category added successfully." },
+    { kind: "types", formKey: "gender", label: "type", inputLabel: "Type", placeholder: "Enter new type", message: "Type added successfully." },
+    { kind: "sizes", formKey: "size", label: "size", inputLabel: "Size", placeholder: "Enter custom size", message: "Size added successfully." },
+    { kind: "colors", formKey: "color", label: "color", inputLabel: "Color", placeholder: "Enter new color", message: "Color added successfully." },
+    { kind: "conditions", formKey: "condition", label: "condition", inputLabel: "Condition", placeholder: "Enter new condition", message: "Condition added successfully." }
+  ];
 
   function revokePreviewObjectUrl() {
     if (previewObjectUrlRef.current) {
@@ -1749,16 +1791,10 @@ function ProductEditorModal({ editingProductId, form, setForm, productImage, set
   }
 
   async function resolveOtherOptions(baseForm = form) {
-    const configs = [
-      { kind: "categories", formKey: "category", label: "category", message: "Category added successfully." },
-      { kind: "types", formKey: "gender", label: "type", message: "Type added successfully." },
-      { kind: "sizes", formKey: "size", label: "size", message: "Size added successfully." },
-      { kind: "conditions", formKey: "condition", label: "condition", message: "Condition added successfully." }
-    ];
     const nextForm = { ...baseForm };
     const nextErrors = {};
 
-    for (const config of configs) {
+    for (const config of optionConfigs) {
       if (nextForm[config.formKey] !== "Other") continue;
       const typedValue = String(otherValues[config.formKey] || "").trim();
       if (!typedValue) {
@@ -1778,43 +1814,30 @@ function ProductEditorModal({ editingProductId, form, setForm, productImage, set
     return nextForm;
   }
 
-  async function resolveBrand() {
-    if (form.brand !== "Other") return { ...form };
-    const trimmedName = brandName.trim();
-    if (!trimmedName) {
-      setBrandError("Please enter a brand name.");
-      return null;
-    }
-    const existing = optionExists(optionValues.brands, trimmedName);
-    if (existing) {
-      const nextForm = { ...form, brand: existing };
-      setForm(nextForm);
-      return nextForm;
-    }
-    let selectedBrand = "";
+  async function confirmRemoveOption() {
+    if (!pendingOptionDelete?.kind || !pendingOptionDelete?.id) return;
     try {
-      const created = await createApparelOption("brands", trimmedName);
-      selectedBrand = created.name;
-      showProductToast("Brand added successfully.");
+      setDeletingOption(true);
+      await deleteApparelOption(pendingOptionDelete.kind, pendingOptionDelete.id);
+      if (form[pendingOptionDelete.formKey] === pendingOptionDelete.name) {
+        setForm((current) => ({ ...current, [pendingOptionDelete.formKey]: "" }));
+      }
+      await refreshApparelOptions();
+      setPendingOptionDelete(null);
+      showProductToast(`${pendingOptionDelete.name} removed from reusable options.`);
     } catch (error) {
-      if (error?.response?.status !== 409) throw error;
+      showProductToast(getApiErrorMessage(error, "Could not remove this option."), "error");
+    } finally {
+      setDeletingOption(false);
     }
-    const refreshed = await refreshApparelOptions();
-    selectedBrand = selectedBrand || optionExists(optionNames(refreshed.brands, fallbackApparelOptions.brands), trimmedName) || trimmedName;
-    const nextForm = { ...form, brand: selectedBrand };
-    setForm(nextForm);
-    return nextForm;
   }
 
   async function handleSubmit(event) {
     event.preventDefault();
-    const brandResolvedForm = await resolveBrand();
-    if (!brandResolvedForm) return;
-    const resolvedForm = await resolveOtherOptions(brandResolvedForm);
+    const resolvedForm = await resolveOtherOptions(form);
     if (!resolvedForm) return;
-    const finalForm = { ...brandResolvedForm, ...resolvedForm };
-    setForm(finalForm);
-    await saveProduct(event, finalForm, selectedImageFile);
+    setForm(resolvedForm);
+    await saveProduct(event, resolvedForm, selectedImageFile);
   }
 
   return (
@@ -1847,129 +1870,52 @@ function ProductEditorModal({ editingProductId, form, setForm, productImage, set
         <form onSubmit={handleSubmit} className="retela-modal-body">
           <div className="grid gap-x-4 gap-y-3 md:grid-cols-2">
           <input className={inputClass} placeholder="Apparel Name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-            <div className="grid gap-1">
-              <select className={inputClass} value={form.brand} onChange={(e) => {
-                const value = e.target.value;
-                setForm({ ...form, brand: value });
-                setBrandError("");
-                if (value !== "Other") setBrandName("");
-              }}>
-                {brandOptions.map((brand) => <option key={brand} value={brand}>{brand}</option>)}
-              </select>
-              {form.brand === "Other" ? (
-                <label className="grid gap-1">
-                  <span className="text-xs font-bold text-slate-700">Brand Name</span>
-                  <input
-                    className={inputClass}
-                    placeholder="Enter new brand name"
-                    value={brandName}
-                    onChange={(event) => {
-                      setBrandName(event.target.value);
-                      setBrandError("");
-                    }}
-                    required
-                  />
-                  {brandError ? <span className="text-xs font-bold text-rose-600">{brandError}</span> : null}
-                </label>
-              ) : null}
-            </div>
-            <OptionSelectWithAdd
-              label="Category"
-              value={form.category}
-              options={optionValues.categories}
-              inputClass={inputClass}
+          {optionConfigs.slice(0, 5).map((config) => (
+            <ApparelOptionSelect
+              key={config.formKey}
+              label={config.inputLabel}
+              value={form[config.formKey] || ""}
+              options={optionMeta[config.kind] || []}
+              placeholder={`Select ${config.label}`}
+              customPlaceholder={config.placeholder}
+              customValue={otherValues[config.formKey] || ""}
+              customError={otherErrors[config.formKey]}
               onChange={(value) => {
-                setForm({ ...form, category: value });
-                setOtherErrors((errors) => ({ ...errors, category: "" }));
+                setForm({ ...form, [config.formKey]: value });
+                setOtherErrors((errors) => ({ ...errors, [config.formKey]: "" }));
+                if (value !== "Other") setOtherValues((current) => ({ ...current, [config.formKey]: "" }));
               }}
-              onAdd={() => setOptionModal({ kind: "categories", formKey: "category", title: "Add New Category", label: "Category Name", saveLabel: "Save Category", duplicateMessage: "This category already exists.", successMessage: "Category added successfully.", examples: ["Hoodies", "Pants", "Shoes", "Sweaters"] })}
-            />
-            <OptionSelectWithAdd
-              label="Type"
-              value={form.gender}
-              options={optionValues.types}
-              inputClass={inputClass}
-              onChange={(value) => {
-                setForm({ ...form, gender: value });
-                setOtherErrors((errors) => ({ ...errors, gender: "" }));
+              onCustomChange={(value) => {
+                setOtherValues((current) => ({ ...current, [config.formKey]: value }));
+                setOtherErrors((errors) => ({ ...errors, [config.formKey]: "" }));
               }}
-              onAdd={() => setOptionModal({ kind: "types", formKey: "gender", title: "Add Apparel Type", label: "Type Name", saveLabel: "Save Type", duplicateMessage: "This type already exists.", successMessage: "Type added successfully.", examples: ["Men", "Women", "Kids", "Vintage", "Oversized", "Streetwear", "Sportswear", "Formal", "Casual"] })}
+              onDeleteOption={(option) => setPendingOptionDelete({ ...option, kind: config.kind, formKey: config.formKey })}
             />
-            {form.category === "Other" ? (
-              <OtherOptionInput
-                label="Specify Category"
-                placeholder="Enter new category"
-                value={otherValues.category}
-                error={otherErrors.category}
-                inputClass={inputClass}
-                onChange={(value) => {
-                  setOtherValues((current) => ({ ...current, category: value }));
-                  setOtherErrors((errors) => ({ ...errors, category: "" }));
-                }}
-              />
-            ) : null}
-            {form.gender === "Other" ? (
-              <OtherOptionInput
-                label="Specify Type"
-                placeholder="Enter new type"
-                value={otherValues.gender}
-                error={otherErrors.gender}
-                inputClass={inputClass}
-                onChange={(value) => {
-                  setOtherValues((current) => ({ ...current, gender: value }));
-                  setOtherErrors((errors) => ({ ...errors, gender: "" }));
-                }}
-              />
-            ) : null}
-            <OptionSelect
-              value={form.size}
-              options={optionValues.sizes}
-              inputClass={inputClass}
-              onChange={(value) => {
-                setForm({ ...form, size: value });
-                setOtherErrors((errors) => ({ ...errors, size: "" }));
-              }}
-            />
-            <select className={inputClass} value={form.color || "Other"} onChange={(e) => setForm({ ...form, color: e.target.value })}>
-              {productColors.map((value) => <option key={value} value={value}>{value}</option>)}
-            </select>
-            {form.size === "Other" ? (
-              <OtherOptionInput
-                label="Specify Size"
-                placeholder="3XL, 4XL, Petite, Tall, Custom"
-                value={otherValues.size}
-                error={otherErrors.size}
-                inputClass={inputClass}
-                onChange={(value) => {
-                  setOtherValues((current) => ({ ...current, size: value }));
-                  setOtherErrors((errors) => ({ ...errors, size: "" }));
-                }}
-              />
-            ) : null}
+          ))}
             <input className={inputClass} placeholder="Price" type="number" min="1" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} />
           <input className={inputClass} placeholder="Stock" type="number" min="0" value={form.stock} onChange={(e) => setForm({ ...form, stock: e.target.value })} />
-          <OptionSelect
-            value={form.condition}
-            options={optionValues.conditions}
-            inputClass={inputClass}
-            onChange={(value) => {
-              setForm({ ...form, condition: value });
-              setOtherErrors((errors) => ({ ...errors, condition: "" }));
-            }}
-          />
-          {form.condition === "Other" ? (
-            <OtherOptionInput
-              label="Specify Condition"
-              placeholder="Like New, Brand New, Vintage, Collector's Item"
-              value={otherValues.condition}
-              error={otherErrors.condition}
-              inputClass={inputClass}
+          {optionConfigs.slice(5).map((config) => (
+            <ApparelOptionSelect
+              key={config.formKey}
+              label={config.inputLabel}
+              value={form[config.formKey] || ""}
+              options={optionMeta[config.kind] || []}
+              placeholder={`Select ${config.label}`}
+              customPlaceholder={config.placeholder}
+              customValue={otherValues[config.formKey] || ""}
+              customError={otherErrors[config.formKey]}
               onChange={(value) => {
-                setOtherValues((current) => ({ ...current, condition: value }));
-                setOtherErrors((errors) => ({ ...errors, condition: "" }));
+                setForm({ ...form, [config.formKey]: value });
+                setOtherErrors((errors) => ({ ...errors, [config.formKey]: "" }));
+                if (value !== "Other") setOtherValues((current) => ({ ...current, [config.formKey]: "" }));
               }}
+              onCustomChange={(value) => {
+                setOtherValues((current) => ({ ...current, [config.formKey]: value }));
+                setOtherErrors((errors) => ({ ...errors, [config.formKey]: "" }));
+              }}
+              onDeleteOption={(option) => setPendingOptionDelete({ ...option, kind: config.kind, formKey: config.formKey })}
             />
-          ) : null}
+          ))}
           <div className="grid gap-2">
             <span className="text-xs font-bold text-slate-700">{editingProductId ? "Current image" : "Apparel image"}</span>
             <div className="grid gap-3 sm:grid-cols-[190px_minmax(0,1fr)] sm:items-stretch md:grid-cols-1">
@@ -2002,107 +1948,134 @@ function ProductEditorModal({ editingProductId, form, setForm, productImage, set
           </div>
           </div>
         </form>
-        {optionModal ? (
-          <ApparelOptionModal
-            config={optionModal}
-            inputClass={inputClass}
-            secondaryButtonClass={secondaryButtonClass}
-            primaryButtonClass={primaryButtonClass}
-            options={optionValues[optionModal.kind]}
-            onClose={() => setOptionModal(null)}
-            onSave={async (name) => {
-              const createdName = await createAndSelectOption(optionModal.kind, optionModal.formKey, name, optionModal.successMessage);
-              setOptionModal(null);
-              return createdName;
-            }}
-          />
+        {pendingOptionDelete ? (
+          <div className="fixed inset-0 z-[130] grid place-items-center bg-black/25 p-4 backdrop-blur-[6px]">
+            <div className="w-full max-w-sm rounded-[22px] border border-white/50 bg-white p-5 text-slate-950 shadow-[0_24px_80px_rgba(15,23,42,0.22)]">
+              <h3 className="font-display text-lg font-bold">Remove this option?</h3>
+              <p className="mt-2 text-sm leading-6 text-slate-600">{pendingOptionDelete.name} will be removed from reusable dropdown options only. Existing apparel records will not be changed.</p>
+              <div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                <button type="button" className={secondaryButtonClass} disabled={deletingOption} onClick={() => setPendingOptionDelete(null)}>Cancel</button>
+                <button type="button" className="inline-flex min-h-12 items-center justify-center rounded-xl bg-rose-600 px-5 py-2.5 text-sm font-bold text-white shadow-lg shadow-rose-700/18 transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-60" disabled={deletingOption} onClick={confirmRemoveOption}>
+                  {deletingOption ? "Removing..." : "Remove"}
+                </button>
+              </div>
+            </div>
+          </div>
         ) : null}
       </motion.section>
     </motion.div>
   );
 }
 
-function OptionSelect({ value, options, inputClass, onChange }) {
-  return (
-    <select className={inputClass} value={value} onChange={(e) => onChange(e.target.value)}>
-      {options.map((option) => <option key={option} value={option}>{option}</option>)}
-    </select>
-  );
-}
+function ApparelOptionSelect({ label, value, options = [], placeholder, customPlaceholder, customValue, customError, onChange, onCustomChange, onDeleteOption }) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef(null);
+  const selected = options.find((option) => option.name === value);
 
-function OptionSelectWithAdd({ label, value, options, inputClass, onChange, onAdd }) {
+  useEffect(() => {
+    if (!open) return undefined;
+    function handlePointerDown(event) {
+      if (!rootRef.current?.contains(event.target)) setOpen(false);
+    }
+    function handleKeyDown(event) {
+      if (event.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("touchstart", handlePointerDown, { passive: true });
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("touchstart", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [open]);
+
   return (
-    <div className="flex gap-2">
-      <select className={`${inputClass} min-w-0 flex-1`} value={value} onChange={(e) => onChange(e.target.value)} aria-label={label}>
-        {options.map((option) => <option key={option} value={option}>{option}</option>)}
-      </select>
-      <button type="button" onClick={onAdd} className="inline-flex shrink-0 items-center justify-center rounded-2xl border border-emerald-500 bg-white/80 px-3 py-2 text-xs font-bold text-emerald-700 shadow-sm transition hover:bg-emerald-50 active:scale-95">
-        + Add {label}
+    <div ref={rootRef} className="relative grid gap-1">
+      <button
+        type="button"
+        className="flex h-12 min-h-12 w-full items-center justify-between gap-3 rounded-xl border border-[#cfded4] bg-white px-3 py-2 text-left text-sm font-semibold text-[#17211b] outline-none transition focus:border-[#20b66a] focus:ring-4 focus:ring-[rgba(32,182,106,0.18)]"
+        onClick={() => setOpen((current) => !current)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+      >
+        <span className={selected || value ? "truncate" : "truncate text-[#8b9a91]"}>{selected?.name || value || placeholder}</span>
+        <ChevronRight size={16} className={`shrink-0 text-emerald-700 transition ${open ? "rotate-90" : ""}`} />
       </button>
+      {open ? (
+        <div className="absolute left-0 right-0 top-[calc(100%+0.35rem)] z-[145] max-h-60 overflow-y-auto rounded-xl border border-[#cfded4] bg-white p-1 shadow-[0_18px_45px_rgba(15,23,42,0.18)]" role="listbox">
+          <button type="button" className="flex min-h-10 w-full items-center rounded-lg px-3 text-left text-sm font-semibold text-slate-400 transition hover:bg-emerald-50" onClick={() => { onChange(""); setOpen(false); }}>
+            {placeholder}
+          </button>
+          {options.map((option) => {
+            const custom = option.id && !option.is_system && option.name !== "Other";
+            return (
+              <div
+                key={`${option.id || "system"}-${option.name}`}
+                tabIndex={0}
+                className={`flex min-h-10 w-full items-center gap-2 rounded-lg px-3 text-left text-sm font-semibold transition ${value === option.name ? "bg-emerald-50 text-emerald-800" : "text-slate-700 hover:bg-emerald-50"}`}
+                onClick={() => {
+                  onChange(option.name);
+                  setOpen(false);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key !== "Enter" && event.key !== " ") return;
+                  event.preventDefault();
+                  onChange(option.name);
+                  setOpen(false);
+                }}
+                role="option"
+                aria-selected={value === option.name}
+              >
+                <span className="min-w-0 flex-1 truncate">{option.name}</span>
+                {custom ? (
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    aria-label={`Remove ${option.name}`}
+                    className="grid h-7 w-7 shrink-0 place-items-center rounded-full text-slate-400 transition hover:bg-rose-50 hover:text-rose-600"
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      setOpen(false);
+                      onDeleteOption(option);
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key !== "Enter" && event.key !== " ") return;
+                      event.preventDefault();
+                      event.stopPropagation();
+                      setOpen(false);
+                      onDeleteOption(option);
+                    }}
+                  >
+                    <X size={14} />
+                  </span>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
+      {value === "Other" ? (
+        <OtherOptionInput
+          label={customPlaceholder}
+          placeholder={customPlaceholder}
+          value={customValue}
+          error={customError}
+          onChange={onCustomChange}
+        />
+      ) : null}
     </div>
   );
 }
 
-function OtherOptionInput({ label, placeholder, value, error, inputClass, onChange }) {
+function OtherOptionInput({ label, placeholder, value, error, onChange }) {
   return (
     <label className="grid gap-1">
       <span className="text-xs font-bold text-slate-700">{label}</span>
-      <input className={inputClass} placeholder={placeholder} value={value} onChange={(event) => onChange(event.target.value)} required />
+      <input className="h-11 min-h-11 w-full rounded-xl border border-[#cfded4] bg-white px-3 py-2 text-sm font-semibold text-[#17211b] outline-none transition placeholder:text-[#8b9a91] focus:border-[#20b66a] focus:ring-4 focus:ring-[rgba(32,182,106,0.18)]" placeholder={placeholder} value={value} onChange={(event) => onChange(event.target.value)} required />
       {error ? <span className="text-xs font-bold text-rose-600">{error}</span> : null}
     </label>
-  );
-}
-
-function ApparelOptionModal({ config, inputClass, secondaryButtonClass, primaryButtonClass, options, onClose, onSave }) {
-  const [name, setName] = useState("");
-  const [error, setError] = useState("");
-  const [saving, setSaving] = useState(false);
-
-  async function handleSubmit(event) {
-    event.preventDefault();
-    const trimmedName = name.trim();
-    if (!trimmedName) {
-      setError(`${config.label} is required.`);
-      return;
-    }
-    if (optionExists(options, trimmedName)) {
-      setError(config.duplicateMessage);
-      return;
-    }
-
-    try {
-      setSaving(true);
-      await onSave(trimmedName);
-    } catch (error) {
-      if (error?.response?.status === 409) {
-        setError(config.duplicateMessage);
-      } else {
-        setError(error?.response?.data?.message || "Unable to save. Please try again.");
-      }
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <div className="fixed inset-0 z-[120] grid place-items-center bg-black/25 p-4 backdrop-blur-[6px]">
-      <form onSubmit={handleSubmit} className="w-full max-w-md rounded-[24px] border border-white/40 bg-white/[0.96] p-5 text-slate-950 shadow-[0_24px_80px_rgba(15,23,42,0.22)]">
-        <div className="flex items-start justify-between gap-3 border-b border-slate-200/80 pb-4">
-          <h3 className="font-display text-xl font-bold text-slate-950">{config.title}</h3>
-          <button type="button" onClick={onClose} className="rounded-xl border border-slate-300 bg-white/80 px-3 py-2 text-sm font-bold text-slate-700 transition hover:bg-[#F3F4F6] hover:text-slate-950">Close</button>
-        </div>
-        <label className="mt-5 grid gap-2">
-          <span className="text-sm font-bold text-slate-700">{config.label} *</span>
-          <input className={inputClass} value={name} onChange={(event) => { setName(event.target.value); setError(""); }} placeholder={config.examples?.[0] || "Enter name"} autoFocus />
-        </label>
-        {config.examples?.length ? <p className="mt-2 text-xs font-semibold text-slate-500">Examples: {config.examples.join(", ")}</p> : null}
-        {error ? <p className="mt-2 text-sm font-bold text-rose-600">{error}</p> : null}
-        <div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-          <button type="button" className={secondaryButtonClass} onClick={onClose} disabled={saving}>Cancel</button>
-          <button type="submit" className={primaryButtonClass} disabled={saving}>{saving ? "Saving..." : config.saveLabel}</button>
-        </div>
-      </form>
-    </div>
   );
 }
 

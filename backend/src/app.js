@@ -29,6 +29,7 @@ import { PRODUCT_UPLOAD_DIR, UPLOAD_ROOT, logUploadConfig } from "./config/uploa
 import {
   brandsRoutes,
   categoriesRoutes,
+  colorsRoutes,
   conditionsRoutes,
   sizesRoutes,
   typesRoutes,
@@ -148,6 +149,7 @@ export function createApp(io) {
   app.use("/api/types", typesRoutes);
   app.use("/api/sizes", sizesRoutes);
   app.use("/api/conditions", conditionsRoutes);
+  app.use("/api/colors", colorsRoutes);
   app.use("/api/users", usersRoutes);
   app.use("/api/customer", customerRoutes);
   app.use("/api/identity-verifications", identityVerificationsRoutes);

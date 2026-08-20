@@ -646,16 +646,18 @@ async function ensureCoreTables() {
   `);
   await ensureAutoIncrementId("shipping_settings");
 
-  for (const tableName of ["categories", "types", "sizes", "conditions", "brands"]) {
+  for (const tableName of ["categories", "types", "sizes", "conditions", "brands", "colors"]) {
     await ensureTable(tableName, `
       CREATE TABLE IF NOT EXISTS \`${tableName}\` (
         id INT AUTO_INCREMENT PRIMARY KEY,
         name VARCHAR(120) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+        is_system BOOLEAN NOT NULL DEFAULT FALSE,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         UNIQUE KEY uq_${tableName}_name (name)
       )
     `);
     await ensureAutoIncrementId(tableName);
+    await ensureColumn(tableName, "is_system", "is_system BOOLEAN NOT NULL DEFAULT FALSE AFTER name");
     await ensureIndex(tableName, `uq_${tableName}_name`, `CREATE UNIQUE INDEX uq_${tableName}_name ON \`${tableName}\` (name)`, ["name"]);
   }
 
@@ -1046,18 +1048,25 @@ async function seedMissingOptionData() {
     types: ["Men", "Women", "Kids", "Vintage", "Oversized", "Streetwear", "Sportswear", "Formal", "Casual", "Unisex", "Other"],
     sizes: ["XS", "S", "M", "L", "XL", "XXL", "Free Size", "Other"],
     conditions: ["Like New", "Excellent", "Very Good", "Good", "Fair", "Other"],
-    brands: ["Adidas", "Nike", "Lacoste", "Essentials", "Uniqlo", "H&M", "Zara", "Bench", "Penshoppe", "Champion", "Puma", "Reebok", "Under Armour", "Jordan", "Levi's", "Ralph Lauren", "Tommy Hilfiger", "GAP", "Old Navy", "Dickies", "Carhartt", "Stussy", "Converse", "Vans", "New Balance", "Gildan", "Hanes", "Fruit of the Loom", "Blue Corner", "Regatta", "Other"]
+    brands: ["Adidas", "Nike", "Lacoste", "Essentials", "Uniqlo", "H&M", "Zara", "Bench", "Penshoppe", "Champion", "Puma", "Reebok", "Under Armour", "Jordan", "Levi's", "Ralph Lauren", "Tommy Hilfiger", "GAP", "Old Navy", "Dickies", "Carhartt", "Stussy", "Converse", "Vans", "New Balance", "Gildan", "Hanes", "Fruit of the Loom", "Blue Corner", "Regatta", "Other"],
+    colors: ["Black", "White", "Gray", "Red", "Blue", "Green", "Yellow", "Brown", "Pink", "Purple", "Orange", "Other"]
   };
   for (const [tableName, names] of Object.entries(defaults)) {
     for (const name of names) {
       await safeDataMigration(
         tableName,
         `default option seed "${name}"`,
-        `INSERT INTO \`${tableName}\` (name)
-         SELECT :name
+        `INSERT INTO \`${tableName}\` (name, is_system)
+         SELECT :name, TRUE
          WHERE NOT EXISTS (
            SELECT 1 FROM \`${tableName}\` WHERE LOWER(name) = LOWER(:name)
          )`,
+        { name }
+      );
+      await safeDataMigration(
+        tableName,
+        `default option protect "${name}"`,
+        `UPDATE \`${tableName}\` SET is_system = TRUE WHERE LOWER(name) = LOWER(:name)`,
         { name }
       );
     }

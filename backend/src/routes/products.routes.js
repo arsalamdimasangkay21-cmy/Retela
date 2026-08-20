@@ -19,7 +19,6 @@ import {
 
 const router = Router();
 const allowedBrands = ["Adidas", "Nike", "Lacoste", "Essentials", "Uniqlo", "H&M", "Zara", "Bench", "Penshoppe", "Champion", "Puma", "Reebok", "Under Armour", "Jordan", "Levi's", "Ralph Lauren", "Tommy Hilfiger", "GAP", "Old Navy", "Dickies", "Carhartt", "Stussy", "Converse", "Vans", "New Balance", "Gildan", "Hanes", "Fruit of the Loom", "Blue Corner", "Regatta", "Other"];
-const allowedColors = ["Black", "White", "Gray", "Red", "Blue", "Green", "Yellow", "Brown", "Pink", "Purple", "Orange", "Other"];
 
 async function notifyApprovedCustomersAboutNewProduct(app, product) {
   const customers = await query("SELECT id FROM users WHERE role = 'customer' AND status = 'approved'");
@@ -65,10 +64,7 @@ function normalizeSize(size) {
 }
 
 function normalizeColor(color) {
-  const value = String(color || "").trim();
-  if (!value) return "Other";
-  const match = allowedColors.find((item) => item.toLowerCase() === value.toLowerCase());
-  return match || "Other";
+  return String(color || "").trim().replace(/\s+/g, " ") || "Other";
 }
 
 function normalizeProductInput(input) {
@@ -213,7 +209,8 @@ async function ensureProductOptionValues(input) {
     ["categories", input.category],
     ["types", input.gender],
     ["sizes", input.size],
-    ["conditions", input.condition]
+    ["conditions", input.condition],
+    ["colors", input.color]
   ];
   for (const [table, rawName] of optionValues) {
     const name = String(rawName || "").trim();
