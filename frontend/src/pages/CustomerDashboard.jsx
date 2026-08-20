@@ -596,7 +596,7 @@ export default function CustomerDashboard({ active, onChange }) {
             onAddToCart={(item) => addToCart(item, "Added to cart successfully.")}
             onBuyNow={buyNow}
           />
-          <FloatingNotificationsWidget onViewAll={() => onChange("Notifications")} />
+          <FloatingNotificationsWidget rows={notifications} onViewAll={() => onChange("Notifications")} />
         </div>
         <Shop products={filteredProducts.slice(0, 6)} addToCart={addToCart} buyNow={buyNow} filters={filters} setFilters={updateFilters} filterOptions={filterOptions} />
       </div>
@@ -779,34 +779,8 @@ export default function CustomerDashboard({ active, onChange }) {
   );
 }
 
-function FloatingNotificationsWidget({ onViewAll }) {
-  const items = [
-    {
-      icon: ShoppingCart,
-      title: "New Sale",
-      body: "5 DIOR Essential T-Shirts sold in the last hour.",
-      badge: "+5 Sales",
-      time: "2m ago",
-      tone: "emerald"
-    },
-    {
-      icon: Megaphone,
-      title: "Promo",
-      body: "Weekend Sale starts tomorrow. 20% OFF selected apparel.",
-      badge: "Promo",
-      time: "10m ago",
-      tone: "sky"
-    },
-    {
-      icon: PackageCheck,
-      title: "Order Update",
-      body: "Your latest order is being prepared.",
-      badge: "Order",
-      time: "Today",
-      tone: "amber"
-    }
-  ];
-  return <NotificationPreviewPanel notifications={items} onViewAll={onViewAll} maxItems={3} />;
+function FloatingNotificationsWidget({ rows = [], onViewAll }) {
+  return <NotificationPreviewPanel notifications={customerNotificationRows(rows)} onViewAll={onViewAll} maxItems={3} />;
 }
 
 function CartPage({

@@ -308,7 +308,7 @@ export default function AppLayout({ children, active, onChange }) {
   }
 
   return (
-    <div className={`premium-shell min-h-screen overflow-x-hidden text-slate-900 transition-colors duration-300 ${darkMode ? "retela-dark-shell" : ""}`}>
+    <div className={`premium-shell ${user?.role === "customer" ? "customer-layout-shell" : ""} min-h-screen overflow-x-hidden text-slate-900 transition-colors duration-300 ${darkMode ? "retela-dark-shell" : ""}`}>
       <Sidebar active={active} collapsed={sidebarCollapsed} onChange={onChange} onToggleCollapsed={() => setSidebarCollapsed((value) => !value)} logoUrl={logoUrl} />
       <main className={`retela-app-main min-w-0 transition-[margin] duration-500 ${sidebarCollapsed ? "lg:ml-28" : "lg:ml-80"}`}>
         <header className="retela-app-header sticky top-0 z-20 px-3 py-3 pl-20 sm:px-5 lg:px-8 lg:pl-0 lg:pr-8">

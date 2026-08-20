@@ -39,6 +39,7 @@ export default function Sidebar({ active, collapsed, onChange, onToggleCollapsed
   const items = user?.role === "admin" ? adminItems : user?.role === "staff" ? staffItems : customerItems;
   const bottomItems = user?.role === "customer" ? customerBottomItems : [];
   const isAdmin = isAdminRole;
+  const isCustomer = user?.role === "customer";
   const desktopCollapsed = collapsed;
 
   const closeSidebar = useCallback(() => {
@@ -111,13 +112,13 @@ export default function Sidebar({ active, collapsed, onChange, onToggleCollapsed
       </button>
       <aside
         id="retela-sidebar"
-        className={`premium-sidebar retela-sidebar-panel flex flex-col border shadow-xl ${desktopCollapsed ? "retela-sidebar-desktop-collapsed lg:p-3" : "retela-sidebar-desktop-expanded"} ${sidebarOpen ? "retela-sidebar-mobile-open" : "retela-sidebar-mobile-closed"}`}
+        className={`premium-sidebar retela-sidebar-panel ${isCustomer ? "customer-sidebar-panel" : ""} flex flex-col border shadow-xl ${desktopCollapsed ? "retela-sidebar-desktop-collapsed lg:p-3" : "retela-sidebar-desktop-expanded"} ${sidebarOpen ? "retela-sidebar-mobile-open" : "retela-sidebar-mobile-closed"}`}
         role={sidebarOpen ? "dialog" : "navigation"}
         aria-modal={sidebarOpen ? "true" : undefined}
         onClick={(event) => event.stopPropagation()}
         onPointerDown={(event) => event.stopPropagation()}
       >
-        <div className={`retela-sidebar-brand-card ${isAdmin ? "admin-sidebar-brand" : ""} flex items-center gap-3 overflow-hidden rounded-[20px] border border-[#14532D]/30 bg-[#14532D] text-white shadow-md shadow-emerald-950/20 ${desktopCollapsed ? "p-2 lg:flex-col lg:justify-center" : "p-4"}`}>
+        <div className={`retela-sidebar-brand-card ${isAdmin ? "admin-sidebar-brand" : ""} ${isCustomer ? "customer-sidebar-brand" : ""} flex items-center gap-3 overflow-hidden rounded-[20px] border border-[#14532D]/30 bg-[#14532D] text-white shadow-md shadow-emerald-950/20 ${desktopCollapsed ? "p-2 lg:flex-col lg:justify-center" : "p-4"}`}>
           <div className={`retela-sidebar-brand-main flex min-w-0 flex-1 items-center gap-3 ${desktopCollapsed ? "lg:flex-none lg:justify-center" : ""}`}>
             <img src={logoUrl} className="retela-sidebar-logo h-12 w-12 rounded-2xl border border-white/25 bg-white object-cover shadow-sm" alt="RETELA SYSTEM logo" />
             <div className={`retela-sidebar-brand-copy min-w-0 ${desktopCollapsed ? "lg:hidden" : ""}`}>

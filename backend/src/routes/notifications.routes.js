@@ -4,52 +4,28 @@ import { asyncHandler } from "../utils/errors.js";
 import { requireAuth } from "../middleware/auth.js";
 import { productImageSelect, productImageUrlForRow } from "../utils/productImages.js";
 import { ADMIN_NOTIFICATION_TYPES, NOTIFICATION_TYPE_ENUM_SQL } from "../utils/adminNotifications.js";
+import {
+  CUSTOMER_BLOCKED_NOTIFICATION_TEXT_PATTERNS,
+  CUSTOMER_BLOCKED_NOTIFICATION_TITLES,
+  CUSTOMER_PRIVATE_NOTIFICATION_TYPES,
+  CUSTOMER_PUBLIC_NOTIFICATION_TYPES,
+  CUSTOMER_SAFE_BROADCAST_TYPES
+} from "../utils/notificationVisibility.js";
 
 const router = Router();
 let notificationBroadcastSchemaReady;
 
 const ADMIN_TYPES_SQL = ADMIN_NOTIFICATION_TYPES.map((type) => `'${type}'`).join(", ");
 const REGISTRATION_TYPES_SQL = "'approval', 'customer_registration', 'registration'";
-const CUSTOMER_PRIVATE_TYPES = ["approval", "order", "order_cancelled", "payment", "message", "refund", "return", "new_product"];
-const CUSTOMER_PUBLIC_TYPES = ["new_product"];
-const CUSTOMER_PRIVATE_TYPES_SQL = CUSTOMER_PRIVATE_TYPES.map((type) => `'${type}'`).join(", ");
-const CUSTOMER_PUBLIC_TYPES_SQL = CUSTOMER_PUBLIC_TYPES.map((type) => `'${type}'`).join(", ");
-const CUSTOMER_BLOCKED_TITLE_SQL = [
-  "new sale",
-  "sale completed",
-  "pos sale completed",
-  "low stock alert",
-  "out of stock"
-].map((title) => `'${title}'`).join(", ");
-const CUSTOMER_BLOCKED_TEXT_PATTERNS = [
-  "% sold %",
-  "% sold in %",
-  "% items sold%",
-  "% item sold%",
-  "%+% sales%",
-  "%sales count%",
-  "%sales total%",
-  "%sales analytics%",
-  "%sales activity%",
-  "%revenue%",
-  "%low stock%",
-  "%out of stock%",
-  "%out-of-stock%",
-  "%inventory%",
-  "%stock adjustment%",
-  "%stock management%",
-  "%stock warning%",
-  "%admin activity%",
-  "%admin system%",
-  "%internal shop%",
-  "%dashboard analytics%",
-  "%orders received%"
-];
-const CUSTOMER_BLOCKED_TEXT_SQL = CUSTOMER_BLOCKED_TEXT_PATTERNS
+const CUSTOMER_PRIVATE_TYPES_SQL = CUSTOMER_PRIVATE_NOTIFICATION_TYPES.map((type) => `'${type}'`).join(", ");
+const CUSTOMER_PUBLIC_TYPES_SQL = CUSTOMER_PUBLIC_NOTIFICATION_TYPES.map((type) => `'${type}'`).join(", ");
+const CUSTOMER_SAFE_BROADCAST_TYPES_SQL = CUSTOMER_SAFE_BROADCAST_TYPES.map((type) => `'${type}'`).join(", ");
+const CUSTOMER_BLOCKED_TITLE_SQL = CUSTOMER_BLOCKED_NOTIFICATION_TITLES.map((title) => `'${title}'`).join(", ");
+const CUSTOMER_BLOCKED_TEXT_SQL = CUSTOMER_BLOCKED_NOTIFICATION_TEXT_PATTERNS
   .map((pattern, index) => `AND LOWER(CONCAT_WS(' ', COALESCE(n.title, ''), COALESCE(n.body, ''))) NOT LIKE :customerBlockedText${index}`)
   .join("\n  ");
 const CUSTOMER_BLOCKED_TEXT_PARAMS = Object.fromEntries(
-  CUSTOMER_BLOCKED_TEXT_PATTERNS.map((pattern, index) => [`customerBlockedText${index}`, pattern])
+  CUSTOMER_BLOCKED_NOTIFICATION_TEXT_PATTERNS.map((pattern, index) => [`customerBlockedText${index}`, pattern])
 );
 
 const CUSTOMER_ADMIN_ACTIVITY_FILTER_SQL = `
@@ -57,11 +33,32 @@ const CUSTOMER_ADMIN_ACTIVITY_FILTER_SQL = `
   ${CUSTOMER_BLOCKED_TEXT_SQL}
 `;
 
-const CUSTOMER_VISIBILITY_FILTER = `WHERE (
-       (n.user_id = :id AND n.type IN (${CUSTOMER_PRIVATE_TYPES_SQL}, 'broadcast'))
+const CUSTOMER_SAFE_BROADCAST_SQL = `(
+       n.user_id = :id
+       AND n.type = 'broadcast'
+       AND b.id IS NOT NULL
+       AND COALESCE(b.is_deleted, FALSE) = FALSE
+       AND (
+         b.broadcast_type IN (${CUSTOMER_SAFE_BROADCAST_TYPES_SQL})
+         OR COALESCE(b.sale_enabled, FALSE) = TRUE
+         OR COALESCE(b.promo_code, '') <> ''
+       )
+     )`;
+
+const CUSTOMER_VISIBILITY_PREDICATE = `(
+       (n.user_id = :id AND n.type IN (${CUSTOMER_PRIVATE_TYPES_SQL}))
+       OR ${CUSTOMER_SAFE_BROADCAST_SQL}
        OR (n.user_id IS NULL AND n.type IN (${CUSTOMER_PUBLIC_TYPES_SQL}))
      )
      ${CUSTOMER_ADMIN_ACTIVITY_FILTER_SQL}`;
+
+const CUSTOMER_OWNED_VISIBILITY_PREDICATE = `(
+       (n.user_id = :id AND n.type IN (${CUSTOMER_PRIVATE_TYPES_SQL}))
+       OR ${CUSTOMER_SAFE_BROADCAST_SQL}
+     )
+     ${CUSTOMER_ADMIN_ACTIVITY_FILTER_SQL}`;
+
+const CUSTOMER_VISIBILITY_FILTER = `WHERE ${CUSTOMER_VISIBILITY_PREDICATE}`;
 
 function setDynamicNotificationHeaders(res) {
   res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
@@ -301,20 +298,21 @@ router.patch("/read-all", asyncHandler(async (req, res) => {
   setDynamicNotificationHeaders(res);
   if (req.user.role === "customer") {
     await query(
-      `UPDATE notifications
-       SET is_read = true
-       WHERE user_id = :userId
-         AND type IN (${CUSTOMER_PRIVATE_TYPES_SQL}, 'broadcast')`,
-      { userId: req.user.id }
+      `UPDATE notifications n
+       LEFT JOIN broadcasts b ON b.id = n.broadcast_id
+       SET n.is_read = true
+       WHERE ${CUSTOMER_OWNED_VISIBILITY_PREDICATE.replaceAll(":id", ":userId")}`,
+      { userId: req.user.id, ...CUSTOMER_BLOCKED_TEXT_PARAMS }
     );
     await query(
       `UPDATE broadcast_deliveries bd
        JOIN notifications n ON n.id = bd.notification_id
+       LEFT JOIN broadcasts b ON b.id = n.broadcast_id
        SET bd.opened_at = COALESCE(bd.opened_at, NOW()),
            bd.clicked_at = COALESCE(bd.clicked_at, NOW())
        WHERE bd.channel = 'in_app'
          AND bd.user_id = :userId
-         AND n.type = 'broadcast'`,
+         AND ${CUSTOMER_SAFE_BROADCAST_SQL.replaceAll(":id", ":userId")}`,
       { userId: req.user.id }
     );
   } else {
@@ -336,22 +334,23 @@ router.patch("/read-type/:type", asyncHandler(async (req, res) => {
   setDynamicNotificationHeaders(res);
   if (req.user.role === "customer") {
     await query(
-      `UPDATE notifications
-       SET is_read = true
-       WHERE user_id = :userId
-         AND type = :type
-         AND type IN (${CUSTOMER_PRIVATE_TYPES_SQL}, 'broadcast')`,
-      { userId: req.user.id, type: req.params.type }
+      `UPDATE notifications n
+       LEFT JOIN broadcasts b ON b.id = n.broadcast_id
+       SET n.is_read = true
+       WHERE n.type = :type
+         AND ${CUSTOMER_OWNED_VISIBILITY_PREDICATE.replaceAll(":id", ":userId")}`,
+      { userId: req.user.id, type: req.params.type, ...CUSTOMER_BLOCKED_TEXT_PARAMS }
     );
     if (req.params.type === "broadcast") {
       await query(
         `UPDATE broadcast_deliveries bd
          JOIN notifications n ON n.id = bd.notification_id
+         LEFT JOIN broadcasts b ON b.id = n.broadcast_id
          SET bd.opened_at = COALESCE(bd.opened_at, NOW()),
              bd.clicked_at = COALESCE(bd.clicked_at, NOW())
          WHERE bd.channel = 'in_app'
            AND bd.user_id = :userId
-           AND n.type = 'broadcast'`,
+           AND ${CUSTOMER_SAFE_BROADCAST_SQL.replaceAll(":id", ":userId")}`,
         { userId: req.user.id }
       );
     }
@@ -388,28 +387,34 @@ router.patch("/:id/read", asyncHandler(async (req, res) => {
     );
   } else {
     await query(
-      `UPDATE notifications
-       SET is_read = true
-       WHERE id = :id
-         AND user_id = :userId
-         AND type IN (${CUSTOMER_PRIVATE_TYPES_SQL}, 'broadcast')`,
+      `UPDATE notifications n
+       LEFT JOIN broadcasts b ON b.id = n.broadcast_id
+       SET n.is_read = true
+       WHERE n.id = :notificationId
+         AND ${CUSTOMER_OWNED_VISIBILITY_PREDICATE.replaceAll(":id", ":userId")}`,
       {
-      id: req.params.id,
-      userId: req.user.id
+      notificationId: req.params.id,
+      userId: req.user.id,
+      ...CUSTOMER_BLOCKED_TEXT_PARAMS
     });
   }
-  await query(
-    `UPDATE broadcast_deliveries
-     SET opened_at = COALESCE(opened_at, NOW()),
-         clicked_at = COALESCE(clicked_at, NOW())
-     WHERE notification_id = :id
-       AND user_id = :userId
-       AND channel = 'in_app'`,
-    {
-      id: req.params.id,
-      userId: req.user.id
-    }
-  );
+  if (req.user.role === "customer") {
+    await query(
+      `UPDATE broadcast_deliveries bd
+       JOIN notifications n ON n.id = bd.notification_id
+       LEFT JOIN broadcasts b ON b.id = n.broadcast_id
+       SET bd.opened_at = COALESCE(bd.opened_at, NOW()),
+           bd.clicked_at = COALESCE(bd.clicked_at, NOW())
+       WHERE bd.notification_id = :notificationId
+         AND bd.user_id = :userId
+         AND bd.channel = 'in_app'
+         AND ${CUSTOMER_SAFE_BROADCAST_SQL.replaceAll(":id", ":userId")}`,
+      {
+        notificationId: req.params.id,
+        userId: req.user.id
+      }
+    );
+  }
   res.json({ message: "Notification marked as read" });
 }));
 
