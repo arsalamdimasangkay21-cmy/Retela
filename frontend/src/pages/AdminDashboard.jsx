@@ -4,7 +4,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { Bar, Doughnut, Line, Pie } from "react-chartjs-2";
 import { Chart as ChartJS, ArcElement, BarElement, CategoryScale, Filler, LinearScale, LineElement, PointElement, Tooltip, Legend } from "chart.js";
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip as RechartsTooltip, XAxis, YAxis } from "recharts";
-import { Activity, Archive, Barcode, Bot, Check, ChevronLeft, ChevronRight, Download, Edit3, Eye, FileSpreadsheet, Loader2, MapPin, Megaphone, MessageSquare, MoreHorizontal, PackageCheck, PackagePlus, Plus, Printer, ReceiptText, RotateCcw, Save, Search, Send, Shirt, ShoppingBag, SlidersHorizontal, Sparkles, Star, Tags, Trash2, TrendingUp, Upload, WalletCards, X, Zap } from "lucide-react";
+import { Activity, Archive, Barcode, Bot, Check, CheckCircle2, ChevronLeft, ChevronRight, Clock3, Download, Edit3, Eye, FileSpreadsheet, Loader2, MapPin, Megaphone, MessageSquare, MoreHorizontal, PackageCheck, PackagePlus, Plus, Printer, ReceiptText, RotateCcw, Save, Search, Send, Shirt, ShoppingBag, SlidersHorizontal, Sparkles, Star, Tags, Trash2, TrendingUp, Upload, UserRound, WalletCards, X, Zap } from "lucide-react";
 import { api, API_URL, cachedGet, clearGetCache, getApiErrorMessage } from "../api/client";
 import { createApparelOption, deleteApparelOption, fetchApparelOptions } from "../api/apparelOptions";
 import { ChangePasswordForm } from "../components/ChangePasswordForm";
@@ -875,23 +875,29 @@ export default function AdminDashboard({ active, onChange }) {
               <option value="name-az">Name A-Z</option>
               <option value="name-za">Name Z-A</option>
             </select>
-            <button type="button" className="admin-customer-filter-clear" onClick={clearCustomerFilters}>
-              Clear Filters
-            </button>
           </div>
 
           <div className="admin-customer-overview-grid" aria-label="Customer overview">
             <div className="admin-customer-overview-card">
-              <span>Active</span>
-              <strong>{customerOverview.active}</strong>
+              <span className="admin-customer-overview-icon"><UserRound size={16} /></span>
+              <div>
+                <span>Active</span>
+                <strong>{customerOverview.active}</strong>
+              </div>
             </div>
             <div className="admin-customer-overview-card">
-              <span>Offline</span>
-              <strong>{customerOverview.offline}</strong>
+              <span className="admin-customer-overview-icon"><Clock3 size={16} /></span>
+              <div>
+                <span>Offline</span>
+                <strong>{customerOverview.offline}</strong>
+              </div>
             </div>
             <div className="admin-customer-overview-card">
-              <span>Approved</span>
-              <strong>{customerOverview.approved}</strong>
+              <span className="admin-customer-overview-icon"><CheckCircle2 size={16} /></span>
+              <div>
+                <span>Approved</span>
+                <strong>{customerOverview.approved}</strong>
+              </div>
             </div>
           </div>
         </Card>
@@ -3476,8 +3482,6 @@ function CustomersResponsiveView({ rows, rejectingUserIds = [], onApprove, onVie
         <div className="customers-table-wrapper" role="region" aria-label="Customers table" tabIndex={0}>
           <table className="customers-table">
             <colgroup>
-              <col className="customer-col-id" />
-              <col className="customer-col-username" />
               <col className="customer-col-display" />
               <col className="customer-col-email" />
               <col className="customer-col-phone" />
@@ -3489,8 +3493,6 @@ function CustomersResponsiveView({ rows, rejectingUserIds = [], onApprove, onVie
             </colgroup>
             <thead>
               <tr>
-                <th>ID</th>
-                <th>Username</th>
                 <th>Display Name</th>
                 <th>Email</th>
                 <th>Phone</th>
@@ -3504,9 +3506,12 @@ function CustomersResponsiveView({ rows, rejectingUserIds = [], onApprove, onVie
             <tbody>
               {rows.map((customer) => (
                 <tr key={customer.id} className={rejectingUserIds.includes(customer.id) ? "trash-vanish" : ""}>
-                  <td className="customer-cell-id">{customer.id}</td>
-                  <td className="customer-nowrap">@{customer.username || "customer"}</td>
-                  <td className="customer-wrap">{customer.display_name || customer.username || "-"}</td>
+                  <td className="customer-wrap">
+                    <div className="customer-name-cell">
+                      <span className="customer-table-avatar" aria-hidden="true">{customerInitials(customer)}</span>
+                      <span className="customer-table-name-text">{customerDisplayName(customer)}</span>
+                    </div>
+                  </td>
                   <td className="customer-email">{customer.email || "-"}</td>
                   <td className="customer-nowrap">{customer.phone_number || "-"}</td>
                   <td className="customer-wrap">{customer.location || "-"}</td>
