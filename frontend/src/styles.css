@@ -7104,3 +7104,563 @@ button {
   background: #111827;
   color: #f8fafc;
 }
+
+/* Unified RETELA dark mode compatibility layer. Keep this near the end so it
+   can normalize utility-heavy page markup without changing page behavior. */
+.retela-dark {
+  --retela-bg: #0d1411;
+  --retela-bg-2: #101c17;
+  --retela-surface-dark: #15231d;
+  --retela-surface-dark-2: #1b2b24;
+  --retela-surface-dark-3: #22362c;
+  --retela-border-dark: rgba(142, 211, 171, 0.2);
+  --retela-border-dark-strong: rgba(142, 211, 171, 0.34);
+  --retela-text-dark: #f4fbf6;
+  --retela-text-muted-dark: #b8c8bf;
+  --retela-text-soft-dark: #8fa49a;
+  --retela-primary-dark: #35d878;
+  --retela-primary-dark-2: #20b865;
+  --retela-primary-soft-dark: rgba(53, 216, 120, 0.12);
+  --retela-danger-dark: #fb7185;
+  --retela-warning-dark: #fbbf24;
+  --retela-shadow-dark: 0 18px 44px rgba(0, 0, 0, 0.34);
+  color-scheme: dark;
+}
+
+.retela-dark body,
+.retela-dark #root {
+  background:
+    radial-gradient(circle at 12% 0%, rgba(53, 216, 120, 0.08), transparent 30%),
+    radial-gradient(circle at 88% 16%, rgba(34, 197, 94, 0.055), transparent 34%),
+    linear-gradient(180deg, var(--retela-bg) 0%, #0a100d 100%) !important;
+  color: var(--retela-text-dark) !important;
+}
+
+.retela-dark .premium-shell,
+.premium-shell.retela-dark-shell {
+  background:
+    radial-gradient(circle at 8% 0%, rgba(53, 216, 120, 0.075), transparent 28%),
+    linear-gradient(180deg, var(--retela-bg) 0%, #0b120f 100%) !important;
+  color: var(--retela-text-dark) !important;
+}
+
+.retela-dark .retela-page-content {
+  background: transparent !important;
+}
+
+.retela-dark .premium-card,
+.retela-dark .floating-card,
+.retela-dark .premium-shell .premium-card,
+.retela-dark .retela-page-content :where(article, section, .rounded-\[24px\], .rounded-3xl),
+.premium-shell.retela-dark-shell .premium-card,
+.premium-shell.retela-dark-shell .floating-card {
+  border-color: var(--retela-border-dark) !important;
+  background: linear-gradient(180deg, rgba(27, 43, 36, 0.96), rgba(21, 35, 29, 0.96)) !important;
+  color: var(--retela-text-dark) !important;
+  box-shadow: var(--retela-shadow-dark) !important;
+}
+
+.retela-dark .premium-card::before {
+  background: linear-gradient(90deg, transparent, rgba(53, 216, 120, 0.22), transparent) !important;
+}
+
+.retela-dark .premium-topbar,
+.premium-shell.retela-dark-shell .premium-topbar {
+  border-color: var(--retela-border-dark) !important;
+  background: rgba(21, 35, 29, 0.92) !important;
+  color: var(--retela-text-dark) !important;
+  box-shadow: 0 16px 34px rgba(0, 0, 0, 0.28) !important;
+  backdrop-filter: blur(18px);
+}
+
+.retela-dark .retela-topbar-title h2,
+.retela-dark .premium-shell :where(h1, h2, h3, h4, strong),
+.premium-shell.retela-dark-shell :where(h1, h2, h3, h4, strong) {
+  color: var(--retela-text-dark) !important;
+}
+
+.retela-dark .retela-topbar-title p,
+.retela-dark .premium-shell :where(p, span, label),
+.premium-shell.retela-dark-shell :where(p, span, label) {
+  color: var(--retela-text-muted-dark);
+}
+
+.retela-dark .premium-shell :where(.text-slate-950, .text-slate-900, .text-slate-800, .text-slate-700, .text-white, [class*="text-white/"]),
+.premium-shell.retela-dark-shell :where(.text-slate-950, .text-slate-900, .text-slate-800, .text-slate-700, .text-white, [class*="text-white/"]) {
+  color: var(--retela-text-dark) !important;
+}
+
+.retela-dark .premium-shell :where(.text-slate-600, .text-slate-500, .text-slate-400),
+.premium-shell.retela-dark-shell :where(.text-slate-600, .text-slate-500, .text-slate-400) {
+  color: var(--retela-text-muted-dark) !important;
+}
+
+.retela-dark .premium-shell :where(.text-emerald-700, .text-emerald-800, .text-bluebrand, .text-neonbrand, [class*="text-neonbrand/"]),
+.premium-shell.retela-dark-shell :where(.text-emerald-700, .text-emerald-800, .text-bluebrand, .text-neonbrand, [class*="text-neonbrand/"]) {
+  color: var(--retela-primary-dark) !important;
+}
+
+.retela-dark .premium-shell :where(.bg-white, [class*="bg-white/"], .bg-slate-50, .bg-slate-100, [class*="bg-slate-50"], [class*="bg-slate-100"]),
+.premium-shell.retela-dark-shell :where(.bg-white, [class*="bg-white/"], .bg-slate-50, .bg-slate-100, [class*="bg-slate-50"], [class*="bg-slate-100"]) {
+  background: var(--retela-surface-dark-2) !important;
+}
+
+.retela-dark .premium-shell :where(.bg-emerald-50, .bg-blue-50, .bg-green-50, [class*="bg-emerald-50"], [class*="bg-blue-50"], [class*="bg-neonbrand/"]),
+.premium-shell.retela-dark-shell :where(.bg-emerald-50, .bg-blue-50, .bg-green-50, [class*="bg-emerald-50"], [class*="bg-blue-50"], [class*="bg-neonbrand/"]) {
+  background: var(--retela-primary-soft-dark) !important;
+  color: var(--retela-text-dark) !important;
+}
+
+.retela-dark .premium-shell :where(.bg-rose-50, .bg-red-50),
+.premium-shell.retela-dark-shell :where(.bg-rose-50, .bg-red-50) {
+  background: rgba(251, 113, 133, 0.12) !important;
+  color: #fecdd3 !important;
+}
+
+.retela-dark .premium-shell :where(.text-rose-600, .text-rose-700, .text-red-600, .text-red-700),
+.premium-shell.retela-dark-shell :where(.text-rose-600, .text-rose-700, .text-red-600, .text-red-700) {
+  color: #fda4af !important;
+}
+
+.retela-dark .premium-shell :where(.border-slate-50, .border-slate-100, .border-slate-200, [class*="border-slate-"], [class*="border-white/"], .border-emerald-100, .border-emerald-200),
+.premium-shell.retela-dark-shell :where(.border-slate-50, .border-slate-100, .border-slate-200, [class*="border-slate-"], [class*="border-white/"], .border-emerald-100, .border-emerald-200) {
+  border-color: var(--retela-border-dark) !important;
+}
+
+.retela-dark .premium-shell :where(input, select, textarea),
+.premium-shell.retela-dark-shell :where(input, select, textarea),
+.retela-dark .auth-card :where(input, select, textarea) {
+  border-color: var(--retela-border-dark) !important;
+  background: #0f1a15 !important;
+  color: var(--retela-text-dark) !important;
+  box-shadow: none !important;
+}
+
+.retela-dark .premium-shell :where(input, select, textarea)::placeholder,
+.premium-shell.retela-dark-shell :where(input, select, textarea)::placeholder,
+.retela-dark .auth-card :where(input, textarea)::placeholder {
+  color: var(--retela-text-soft-dark) !important;
+}
+
+.retela-dark .premium-shell :where(input, select, textarea):focus,
+.premium-shell.retela-dark-shell :where(input, select, textarea):focus,
+.retela-dark .premium-shell label:focus-within,
+.premium-shell.retela-dark-shell label:focus-within {
+  border-color: rgba(53, 216, 120, 0.72) !important;
+  box-shadow: 0 0 0 4px rgba(53, 216, 120, 0.13) !important;
+}
+
+.retela-dark .premium-shell option,
+.premium-shell.retela-dark-shell option {
+  background: #122019 !important;
+  color: var(--retela-text-dark) !important;
+}
+
+.retela-dark .premium-shell :where(button),
+.premium-shell.retela-dark-shell :where(button) {
+  border-color: var(--retela-border-dark);
+}
+
+.retela-dark .premium-shell :where(.bg-neonbrand, .gradient-btn),
+.premium-shell.retela-dark-shell :where(.bg-neonbrand, .gradient-btn) {
+  background: linear-gradient(180deg, var(--retela-primary-dark), var(--retela-primary-dark-2)) !important;
+  color: #062413 !important;
+  box-shadow: 0 14px 28px rgba(32, 184, 101, 0.22) !important;
+}
+
+.retela-dark .premium-shell :where(button:disabled, [aria-disabled="true"]),
+.premium-shell.retela-dark-shell :where(button:disabled, [aria-disabled="true"]) {
+  opacity: 0.56;
+}
+
+.retela-dark .premium-shell table,
+.premium-shell.retela-dark-shell table {
+  color: var(--retela-text-dark) !important;
+}
+
+.retela-dark .premium-shell :where(th),
+.premium-shell.retela-dark-shell :where(th) {
+  border-color: var(--retela-border-dark) !important;
+  background: rgba(15, 26, 21, 0.74) !important;
+  color: #a9cbbb !important;
+}
+
+.retela-dark .premium-shell :where(td),
+.premium-shell.retela-dark-shell :where(td) {
+  border-color: rgba(142, 211, 171, 0.14) !important;
+  color: var(--retela-text-muted-dark) !important;
+}
+
+.retela-dark .premium-shell tbody tr:hover,
+.premium-shell.retela-dark-shell tbody tr:hover {
+  background: rgba(53, 216, 120, 0.07) !important;
+}
+
+.retela-dark .skeleton {
+  background: linear-gradient(90deg, #13211a, #1d3027, #13211a) !important;
+}
+
+.retela-dark .skeleton::after {
+  background: linear-gradient(90deg, transparent, rgba(53, 216, 120, 0.15), transparent) !important;
+}
+
+.retela-dark .premium-sidebar,
+.premium-shell.retela-dark-shell .premium-sidebar,
+.retela-dark .customer-sidebar-panel,
+.premium-shell.retela-dark-shell .customer-sidebar-panel {
+  border-color: rgba(142, 211, 171, 0.18) !important;
+  background: linear-gradient(180deg, #101916 0%, #121f19 48%, #0a100d 100%) !important;
+  color: var(--retela-text-dark) !important;
+  box-shadow: 18px 0 48px rgba(0, 0, 0, 0.34) !important;
+}
+
+.retela-dark .admin-sidebar-brand,
+.retela-dark .customer-sidebar-panel .customer-sidebar-brand,
+.premium-shell.retela-dark-shell .admin-sidebar-brand,
+.premium-shell.retela-dark-shell .customer-sidebar-panel .customer-sidebar-brand {
+  border-color: rgba(142, 211, 171, 0.22) !important;
+  background: rgba(27, 43, 36, 0.94) !important;
+  color: var(--retela-text-dark) !important;
+}
+
+.retela-dark .retela-sidebar-logo,
+.premium-shell.retela-dark-shell .retela-sidebar-logo {
+  border-color: rgba(142, 211, 171, 0.24) !important;
+  background: #f7fff9 !important;
+}
+
+.retela-dark .retela-sidebar-title,
+.premium-shell.retela-dark-shell .retela-sidebar-title {
+  color: var(--retela-text-dark) !important;
+}
+
+.retela-dark .retela-sidebar-subtitle,
+.premium-shell.retela-dark-shell .retela-sidebar-subtitle {
+  color: #94e7b5 !important;
+}
+
+.retela-dark .premium-sidebar .sidebar-nav-item,
+.retela-dark .customer-sidebar-panel .sidebar-nav-item,
+.premium-shell.retela-dark-shell .premium-sidebar .sidebar-nav-item,
+.premium-shell.retela-dark-shell .customer-sidebar-panel .sidebar-nav-item {
+  border-color: transparent !important;
+  background: transparent !important;
+  color: #d7e7df !important;
+}
+
+.retela-dark .premium-sidebar .sidebar-nav-icon,
+.retela-dark .customer-sidebar-panel .sidebar-nav-icon,
+.premium-shell.retela-dark-shell .premium-sidebar .sidebar-nav-icon,
+.premium-shell.retela-dark-shell .customer-sidebar-panel .sidebar-nav-icon {
+  color: #b8c8bf !important;
+}
+
+.retela-dark .premium-sidebar .sidebar-nav-item:hover,
+.retela-dark .customer-sidebar-panel .sidebar-nav-item:hover,
+.premium-shell.retela-dark-shell .premium-sidebar .sidebar-nav-item:hover,
+.premium-shell.retela-dark-shell .customer-sidebar-panel .sidebar-nav-item:hover {
+  border-color: rgba(53, 216, 120, 0.2) !important;
+  background: rgba(255, 255, 255, 0.055) !important;
+  color: var(--retela-text-dark) !important;
+}
+
+.retela-dark .premium-sidebar .sidebar-nav-item-active,
+.retela-dark .premium-sidebar .sidebar-nav-item-active:hover,
+.retela-dark .customer-sidebar-panel .sidebar-nav-item-active,
+.retela-dark .customer-sidebar-panel .sidebar-nav-item-active:hover,
+.premium-shell.retela-dark-shell .premium-sidebar .sidebar-nav-item-active,
+.premium-shell.retela-dark-shell .premium-sidebar .sidebar-nav-item-active:hover,
+.premium-shell.retela-dark-shell .customer-sidebar-panel .sidebar-nav-item-active,
+.premium-shell.retela-dark-shell .customer-sidebar-panel .sidebar-nav-item-active:hover {
+  border-color: rgba(53, 216, 120, 0.38) !important;
+  background: linear-gradient(180deg, rgba(53, 216, 120, 0.2), rgba(32, 184, 101, 0.13)) !important;
+  color: #dfffe9 !important;
+  box-shadow: inset 3px 0 0 var(--retela-primary-dark), 0 12px 28px rgba(0, 0, 0, 0.18) !important;
+}
+
+.retela-dark .premium-sidebar .sidebar-nav-item-active .sidebar-nav-icon,
+.retela-dark .customer-sidebar-panel .sidebar-nav-item-active .sidebar-nav-icon,
+.premium-shell.retela-dark-shell .premium-sidebar .sidebar-nav-item-active .sidebar-nav-icon,
+.premium-shell.retela-dark-shell .customer-sidebar-panel .sidebar-nav-item-active .sidebar-nav-icon {
+  color: var(--retela-primary-dark) !important;
+}
+
+.retela-dark .premium-sidebar .sidebar-logout,
+.retela-dark .customer-sidebar-panel .sidebar-logout,
+.premium-shell.retela-dark-shell .premium-sidebar .sidebar-logout,
+.premium-shell.retela-dark-shell .customer-sidebar-panel .sidebar-logout {
+  border-color: rgba(251, 113, 133, 0.24) !important;
+  background: rgba(251, 113, 133, 0.08) !important;
+  color: #fecdd3 !important;
+}
+
+.retela-dark .retela-topbar-actions > button,
+.retela-dark .retela-profile-button,
+.premium-shell.retela-dark-shell .retela-topbar-actions > button,
+.premium-shell.retela-dark-shell .retela-profile-button,
+.retela-dark .retela-mobile-menu-button,
+.premium-shell.retela-dark-shell .retela-mobile-menu-button {
+  border-color: var(--retela-border-dark) !important;
+  background: rgba(27, 43, 36, 0.92) !important;
+  color: var(--retela-text-muted-dark) !important;
+}
+
+.retela-dark .retela-topbar-actions > button:hover,
+.retela-dark .retela-profile-button:hover,
+.premium-shell.retela-dark-shell .retela-topbar-actions > button:hover,
+.premium-shell.retela-dark-shell .retela-profile-button:hover {
+  border-color: var(--retela-border-dark-strong) !important;
+  background: var(--retela-primary-soft-dark) !important;
+  color: var(--retela-text-dark) !important;
+}
+
+.retela-dark .retela-topbar-actions svg,
+.retela-dark .retela-profile-button svg,
+.premium-shell.retela-dark-shell .retela-topbar-actions svg,
+.premium-shell.retela-dark-shell .retela-profile-button svg {
+  color: var(--retela-primary-dark) !important;
+}
+
+.retela-dark .customer-toast,
+.premium-shell.retela-dark-shell .customer-toast,
+.retela-dark .fixed.inset-x-4.bottom-5 {
+  border-color: var(--retela-border-dark) !important;
+  background: rgba(21, 35, 29, 0.96) !important;
+  color: var(--retela-text-dark) !important;
+  box-shadow: var(--retela-shadow-dark) !important;
+}
+
+.retela-dark .customer-toast-content p,
+.retela-dark .customer-toast-content strong,
+.premium-shell.retela-dark-shell .customer-toast-content p,
+.premium-shell.retela-dark-shell .customer-toast-content strong {
+  color: var(--retela-text-dark) !important;
+}
+
+.retela-dark .admin-dashboard-notifications,
+.retela-dark .admin-dashboard-notifications button,
+.retela-dark .admin-dashboard-notifications article,
+.premium-shell.retela-dark-shell .admin-dashboard-notifications,
+.premium-shell.retela-dark-shell .admin-dashboard-notifications button,
+.premium-shell.retela-dark-shell .admin-dashboard-notifications article {
+  border-color: var(--retela-border-dark) !important;
+  background: var(--retela-surface-dark-2) !important;
+  color: var(--retela-text-dark) !important;
+}
+
+.retela-dark .admin-dashboard-notifications p,
+.premium-shell.retela-dark-shell .admin-dashboard-notifications p {
+  color: var(--retela-text-muted-dark) !important;
+}
+
+.retela-dark .ai-chat-window {
+  border-color: var(--retela-border-dark) !important;
+  background: rgba(17, 29, 23, 0.98) !important;
+  color: var(--retela-text-dark) !important;
+  box-shadow: 0 22px 64px rgba(0, 0, 0, 0.46) !important;
+}
+
+.retela-dark .ai-chat-header,
+.retela-dark .ai-chat-input-container {
+  border-color: var(--retela-border-dark) !important;
+  background: rgba(21, 35, 29, 0.98) !important;
+}
+
+.retela-dark .ai-chat-header h3 {
+  color: var(--retela-text-dark) !important;
+}
+
+.retela-dark .ai-chat-header p,
+.retela-dark .ai-chat-window .text-slate-500 {
+  color: var(--retela-text-muted-dark) !important;
+}
+
+.retela-dark .ai-chat-messages {
+  background: #0f1a15 !important;
+}
+
+.retela-dark .ai-chat-messages .bg-\[\#F3FAF6\],
+.retela-dark .ai-chat-messages .bg-emerald-50 {
+  border: 1px solid var(--retela-border-dark) !important;
+  background: var(--retela-surface-dark-2) !important;
+  color: var(--retela-text-dark) !important;
+}
+
+.retela-dark .ai-chat-messages .bg-emerald-700 {
+  background: linear-gradient(180deg, #24b866, #15864e) !important;
+  color: #ffffff !important;
+}
+
+.retela-dark .ai-chat-message-text {
+  color: inherit !important;
+}
+
+.retela-dark .ai-chat-product-action-button {
+  border-color: rgba(53, 216, 120, 0.38) !important;
+  background: rgba(53, 216, 120, 0.16) !important;
+  color: #dfffe9 !important;
+}
+
+.retela-dark .ai-chat-suggestions {
+  border-color: var(--retela-border-dark) !important;
+  background: rgba(17, 29, 23, 0.98) !important;
+}
+
+.retela-dark .quick-suggestion {
+  border-color: var(--retela-border-dark) !important;
+  background: rgba(27, 43, 36, 0.94) !important;
+  color: var(--retela-text-muted-dark) !important;
+}
+
+.retela-dark .quick-suggestion:hover {
+  border-color: var(--retela-border-dark-strong) !important;
+  background: var(--retela-primary-soft-dark) !important;
+  color: var(--retela-text-dark) !important;
+}
+
+.retela-dark .ai-chat-button {
+  border-color: rgba(53, 216, 120, 0.48) !important;
+  background: linear-gradient(180deg, #1b2b24, #101c17) !important;
+  color: var(--retela-primary-dark) !important;
+  box-shadow: 0 18px 46px rgba(0, 0, 0, 0.38) !important;
+}
+
+.retela-dark .ai-chat-button > span:first-child {
+  background: rgba(53, 216, 120, 0.12) !important;
+}
+
+.retela-dark .support-chat-shell,
+.retela-dark .support-message-scroll,
+.retela-dark .support-sidebar,
+.retela-dark .support-sidebar-list,
+.premium-shell.retela-dark-shell .support-chat-shell,
+.premium-shell.retela-dark-shell .support-message-scroll {
+  border-color: var(--retela-border-dark) !important;
+  background: var(--retela-surface-dark) !important;
+  color: var(--retela-text-dark) !important;
+}
+
+.retela-dark .support-message-scroll {
+  background: #0f1a15 !important;
+}
+
+.retela-dark .support-chat-shell .sticky,
+.premium-shell.retela-dark-shell .support-chat-shell .sticky {
+  border-color: var(--retela-border-dark) !important;
+  background: rgba(21, 35, 29, 0.98) !important;
+}
+
+.retela-dark .conversation-list-card,
+.retela-dark .support-chat-shell button,
+.premium-shell.retela-dark-shell .conversation-list-card {
+  border-color: var(--retela-border-dark) !important;
+}
+
+.retela-dark .admin-customers-card,
+.retela-dark .admin-customers-filter-card,
+.retela-dark .admin-customer-overview-card,
+.retela-dark .customer-mobile-card,
+.retela-dark .customers-table-wrapper,
+.retela-dark .admin-profile-hero,
+.retela-dark .admin-profile-card,
+.retela-dark .admin-password-card,
+.premium-shell.retela-dark-shell .admin-customers-card,
+.premium-shell.retela-dark-shell .admin-customers-filter-card,
+.premium-shell.retela-dark-shell .admin-customer-overview-card,
+.premium-shell.retela-dark-shell .customer-mobile-card,
+.premium-shell.retela-dark-shell .customers-table-wrapper,
+.premium-shell.retela-dark-shell .admin-profile-hero,
+.premium-shell.retela-dark-shell .admin-profile-card,
+.premium-shell.retela-dark-shell .admin-password-card {
+  border-color: var(--retela-border-dark) !important;
+  background: var(--retela-surface-dark-2) !important;
+  color: var(--retela-text-dark) !important;
+  box-shadow: var(--retela-shadow-dark) !important;
+}
+
+.retela-dark .admin-profile-field,
+.retela-dark .mobile-customer-row,
+.premium-shell.retela-dark-shell .admin-profile-field,
+.premium-shell.retela-dark-shell .mobile-customer-row {
+  border-color: rgba(142, 211, 171, 0.16) !important;
+  background: rgba(15, 26, 21, 0.72) !important;
+}
+
+.retela-dark .admin-profile-field span,
+.retela-dark .mobile-customer-label,
+.premium-shell.retela-dark-shell .admin-profile-field span,
+.premium-shell.retela-dark-shell .mobile-customer-label {
+  color: #94e7b5 !important;
+}
+
+.retela-dark .admin-profile-field strong,
+.retela-dark .mobile-customer-value,
+.premium-shell.retela-dark-shell .admin-profile-field strong,
+.premium-shell.retela-dark-shell .mobile-customer-value {
+  color: var(--retela-text-dark) !important;
+}
+
+.retela-dark .admin-profile-input,
+.retela-dark .admin-password-field,
+.premium-shell.retela-dark-shell .admin-profile-input,
+.premium-shell.retela-dark-shell .admin-password-field {
+  border-color: var(--retela-border-dark) !important;
+  background: #0f1a15 !important;
+  color: var(--retela-text-dark) !important;
+}
+
+.retela-dark .admin-password-field input,
+.premium-shell.retela-dark-shell .admin-password-field input {
+  color: var(--retela-text-dark) !important;
+}
+
+.retela-dark .password-blueprint,
+.premium-shell.retela-dark-shell .password-blueprint {
+  border-color: var(--retela-border-dark) !important;
+  background: rgba(15, 26, 21, 0.72) !important;
+  color: var(--retela-text-dark) !important;
+  box-shadow: none !important;
+}
+
+.retela-dark .product-quick-view-sheet,
+.retela-dark .retela-modal-card,
+.retela-dark .retela-product-details-modal,
+.retela-dark .retela-checkout-summary-modal,
+.retela-dark .customer-docs-modal {
+  border-color: var(--retela-border-dark) !important;
+  background: var(--retela-surface-dark-2) !important;
+  color: var(--retela-text-dark) !important;
+}
+
+.retela-dark .retela-modal-header,
+.retela-dark .retela-modal-footer,
+.retela-dark .product-quick-view-header,
+.retela-dark .product-quick-view-actions,
+.retela-dark .retela-product-action-row {
+  border-color: var(--retela-border-dark) !important;
+  background: rgba(21, 35, 29, 0.96) !important;
+}
+
+.retela-dark .product-quick-view-image-stage,
+.retela-dark .customer-docs-image-frame,
+.retela-dark .customer-docs-missing {
+  border-color: rgba(142, 211, 171, 0.16) !important;
+  background: #0f1a15 !important;
+}
+
+.retela-dark .recharts-cartesian-grid line {
+  stroke: rgba(184, 200, 191, 0.16) !important;
+}
+
+.retela-dark .recharts-text,
+.retela-dark .recharts-legend-item-text,
+.retela-dark .recharts-tooltip-label {
+  fill: var(--retela-text-muted-dark) !important;
+  color: var(--retela-text-muted-dark) !important;
+}
+
+.retela-dark .recharts-default-tooltip {
+  border-color: var(--retela-border-dark) !important;
+  background: var(--retela-surface-dark-2) !important;
+  color: var(--retela-text-dark) !important;
+}
