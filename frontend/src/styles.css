@@ -5538,6 +5538,400 @@ button {
   font-weight: 750;
 }
 
+.customer-profile-page {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  gap: 16px;
+  overflow-x: hidden;
+}
+
+.customer-profile-intro,
+.customer-profile-identity-card,
+.customer-profile-info-card,
+.customer-account-management-card {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid #d9eee2;
+  border-radius: 22px;
+  background: #ffffff;
+  color: #123526;
+  box-shadow: 0 16px 34px rgba(18, 92, 55, 0.08);
+}
+
+.customer-profile-intro {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px;
+}
+
+.customer-profile-eyebrow {
+  margin: 0;
+  color: #16864e;
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.customer-profile-intro h1 {
+  margin: 4px 0 0;
+  color: #123526;
+  font-size: clamp(1.7rem, 2.4vw, 2rem);
+  font-weight: 900;
+  line-height: 1.1;
+}
+
+.customer-profile-intro p:not(.customer-profile-eyebrow) {
+  margin: 6px 0 0;
+  color: #557166;
+  font-size: 0.9rem;
+  font-weight: 700;
+  line-height: 1.5;
+}
+
+.customer-profile-status-grid {
+  display: grid;
+  min-width: min(100%, 360px);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.customer-profile-status-card {
+  display: grid;
+  gap: 4px;
+  border: 1px solid #d9eee2;
+  border-radius: 16px;
+  background: #f7fff9;
+  padding: 12px;
+}
+
+.customer-profile-status-card.is-success {
+  border-color: #b7e4cf;
+  background: #ecfff3;
+  color: #08764d;
+}
+
+.customer-profile-status-card.is-warning {
+  border-color: #fde68a;
+  background: #fffbeb;
+  color: #92400e;
+}
+
+.customer-profile-status-card span {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: inherit;
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.customer-profile-status-card strong {
+  color: #173329;
+  font-size: 1.02rem;
+  font-weight: 900;
+  line-height: 1.15;
+}
+
+.customer-profile-layout {
+  display: grid;
+  grid-template-columns: minmax(250px, 0.38fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.customer-profile-identity-card {
+  display: grid;
+  justify-items: center;
+  gap: 14px;
+  padding: 18px;
+  text-align: center;
+}
+
+.customer-profile-avatar-wrap {
+  position: relative;
+  display: inline-grid;
+}
+
+.customer-profile-avatar {
+  display: grid;
+  width: 118px;
+  height: 118px;
+  place-items: center;
+  border: 3px solid #bbf7d0;
+  border-radius: 999px;
+  background: #ecfdf3;
+  color: #15803d;
+  font-size: 1.5rem;
+  font-weight: 900;
+  object-fit: cover;
+  box-shadow: 0 14px 30px rgba(18, 92, 55, 0.14);
+}
+
+.customer-profile-avatar-fallback {
+  text-transform: uppercase;
+}
+
+.customer-profile-status-badge {
+  position: absolute;
+  right: -8px;
+  bottom: 8px;
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  border: 1px solid #b7e4cf;
+  border-radius: 999px;
+  background: #ecfff3;
+  padding: 5px 10px;
+  color: #08764d;
+  font-size: 0.7rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  box-shadow: 0 8px 20px rgba(18, 92, 55, 0.12);
+}
+
+.customer-profile-status-badge.is-pending {
+  border-color: #fde68a;
+  background: #fffbeb;
+  color: #92400e;
+}
+
+.customer-profile-identity-copy {
+  min-width: 0;
+}
+
+.customer-profile-identity-copy h2 {
+  margin: 0;
+  color: #123526;
+  font-size: 1.35rem;
+  font-weight: 900;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+
+.customer-profile-identity-copy p {
+  margin: 6px 0 0;
+  color: #16864e;
+  font-size: 0.92rem;
+  font-weight: 900;
+  overflow-wrap: anywhere;
+}
+
+.customer-profile-identity-copy span,
+.customer-account-management-card span {
+  display: block;
+  margin-top: 5px;
+  color: #557166;
+  font-size: 0.86rem;
+  font-weight: 750;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.customer-profile-photo-button,
+.customer-profile-edit-button,
+.customer-profile-cancel-button,
+.customer-profile-save-button,
+.customer-profile-danger-button {
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: 12px;
+  padding: 9px 13px;
+  font-size: 0.84rem;
+  font-weight: 900;
+  transition: border-color 0.18s ease, background 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+}
+
+.customer-profile-photo-button,
+.customer-profile-edit-button {
+  border: 1px solid #b7e4cf;
+  background: #f3faf6;
+  color: #08764d;
+  cursor: pointer;
+}
+
+.customer-profile-photo-button:hover,
+.customer-profile-edit-button:hover {
+  border-color: #16a36a;
+  background: #ecfff3;
+  transform: translateY(-1px);
+}
+
+.customer-profile-photo-name {
+  max-width: 100%;
+  margin: -4px 0 0;
+  color: #557166;
+  font-size: 0.78rem;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.customer-profile-main {
+  display: grid;
+  min-width: 0;
+  gap: 16px;
+}
+
+.customer-profile-info-card,
+.customer-account-management-card {
+  padding: 16px;
+}
+
+.customer-profile-section-heading,
+.customer-account-management-card {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.customer-profile-section-heading {
+  margin-bottom: 14px;
+}
+
+.customer-profile-section-heading h3,
+.customer-account-management-card h3 {
+  margin: 2px 0 0;
+  color: #123526;
+  font-size: 1.12rem;
+  font-weight: 900;
+}
+
+.customer-profile-section-heading p {
+  margin: 4px 0 0;
+  color: #557166;
+  font-size: 0.86rem;
+  font-weight: 750;
+  line-height: 1.45;
+}
+
+.customer-profile-actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.customer-profile-cancel-button {
+  border: 1px solid #d8e3dc;
+  background: #ffffff;
+  color: #465b51;
+}
+
+.customer-profile-cancel-button:hover {
+  border-color: #b9c8c0;
+  background: #f8fbf9;
+}
+
+.customer-profile-save-button {
+  border: 1px solid #16a36a;
+  background: linear-gradient(180deg, #25c76a 0%, #159a5b 100%);
+  color: #ffffff;
+  box-shadow: 0 10px 24px rgba(22, 163, 106, 0.22);
+}
+
+.customer-profile-save-button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 14px 28px rgba(22, 163, 106, 0.26);
+}
+
+.customer-profile-info-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.customer-profile-field {
+  display: grid;
+  min-width: 0;
+  gap: 7px;
+  border: 1px solid #e1eee7;
+  border-radius: 14px;
+  background: #f8fbf9;
+  padding: 12px;
+}
+
+.customer-profile-field.is-wide {
+  grid-column: 1 / -1;
+}
+
+.customer-profile-field span {
+  color: #16864e;
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.customer-profile-field strong {
+  min-height: 24px;
+  color: #173329;
+  font-size: 0.94rem;
+  font-weight: 800;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.customer-profile-field strong.is-empty {
+  color: #8aa095;
+  font-weight: 750;
+}
+
+.customer-profile-input {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid #cfe8d8;
+  border-radius: 12px;
+  background: #ffffff;
+  padding: 10px 12px;
+  color: #173329;
+  font-size: 0.94rem;
+  font-weight: 750;
+  outline: 0;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.customer-profile-input::placeholder {
+  color: #93a69c;
+}
+
+.customer-profile-input:focus {
+  border-color: #16a36a;
+  box-shadow: 0 0 0 4px rgba(22, 163, 106, 0.12);
+}
+
+.customer-profile-danger-button {
+  flex: 0 0 auto;
+  border: 1px solid #fecaca;
+  background: #fff7f7;
+  color: #b91c1c;
+}
+
+.customer-profile-danger-button:hover:not(:disabled) {
+  border-color: #f87171;
+  background: #fee2e2;
+  transform: translateY(-1px);
+}
+
+.customer-profile-danger-button:disabled,
+.customer-profile-cancel-button:disabled,
+.customer-profile-save-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+  transform: none;
+}
+
 .admin-customers-page {
   width: 100%;
   min-width: 0;
@@ -6199,6 +6593,58 @@ button {
   }
 
   .admin-password-grid .admin-password-field:first-child {
+    grid-column: auto;
+  }
+
+  .customer-profile-intro {
+    align-items: flex-start;
+    flex-direction: column;
+    padding: 14px;
+  }
+
+  .customer-profile-status-grid {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .customer-profile-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .customer-profile-identity-card,
+  .customer-profile-info-card,
+  .customer-account-management-card {
+    border-radius: 18px;
+    padding: 14px;
+  }
+
+  .customer-profile-avatar {
+    width: 96px;
+    height: 96px;
+    font-size: 1.25rem;
+  }
+
+  .customer-profile-section-heading,
+  .customer-account-management-card {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .customer-profile-actions {
+    width: 100%;
+    justify-content: stretch;
+  }
+
+  .customer-profile-actions > button,
+  .customer-profile-danger-button {
+    flex: 1 1 150px;
+  }
+
+  .customer-profile-info-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .customer-profile-field.is-wide {
     grid-column: auto;
   }
 
@@ -7703,6 +8149,10 @@ button {
 .retela-dark .admin-profile-hero,
 .retela-dark .admin-profile-card,
 .retela-dark .admin-password-card,
+.retela-dark .customer-profile-intro,
+.retela-dark .customer-profile-identity-card,
+.retela-dark .customer-profile-info-card,
+.retela-dark .customer-account-management-card,
 .premium-shell.retela-dark-shell .admin-customers-card,
 .premium-shell.retela-dark-shell .admin-customers-filter-card,
 .premium-shell.retela-dark-shell .admin-customer-overview-card,
@@ -7710,7 +8160,11 @@ button {
 .premium-shell.retela-dark-shell .customers-table-wrapper,
 .premium-shell.retela-dark-shell .admin-profile-hero,
 .premium-shell.retela-dark-shell .admin-profile-card,
-.premium-shell.retela-dark-shell .admin-password-card {
+.premium-shell.retela-dark-shell .admin-password-card,
+.premium-shell.retela-dark-shell .customer-profile-intro,
+.premium-shell.retela-dark-shell .customer-profile-identity-card,
+.premium-shell.retela-dark-shell .customer-profile-info-card,
+.premium-shell.retela-dark-shell .customer-account-management-card {
   border-color: var(--retela-border-dark) !important;
   background: var(--retela-surface-dark-2) !important;
   color: var(--retela-text-dark) !important;
@@ -7718,34 +8172,134 @@ button {
 }
 
 .retela-dark .admin-profile-field,
+.retela-dark .customer-profile-field,
 .retela-dark .mobile-customer-row,
 .premium-shell.retela-dark-shell .admin-profile-field,
+.premium-shell.retela-dark-shell .customer-profile-field,
 .premium-shell.retela-dark-shell .mobile-customer-row {
   border-color: rgba(142, 211, 171, 0.16) !important;
   background: rgba(15, 26, 21, 0.72) !important;
 }
 
 .retela-dark .admin-profile-field span,
+.retela-dark .customer-profile-field span,
+.retela-dark .customer-profile-eyebrow,
 .retela-dark .mobile-customer-label,
 .premium-shell.retela-dark-shell .admin-profile-field span,
+.premium-shell.retela-dark-shell .customer-profile-field span,
+.premium-shell.retela-dark-shell .customer-profile-eyebrow,
 .premium-shell.retela-dark-shell .mobile-customer-label {
   color: #94e7b5 !important;
 }
 
 .retela-dark .admin-profile-field strong,
+.retela-dark .customer-profile-field strong,
 .retela-dark .mobile-customer-value,
 .premium-shell.retela-dark-shell .admin-profile-field strong,
+.premium-shell.retela-dark-shell .customer-profile-field strong,
 .premium-shell.retela-dark-shell .mobile-customer-value {
   color: var(--retela-text-dark) !important;
 }
 
+.retela-dark .customer-profile-intro h1,
+.retela-dark .customer-profile-identity-copy h2,
+.retela-dark .customer-profile-section-heading h3,
+.retela-dark .customer-account-management-card h3,
+.retela-dark .customer-profile-status-card strong,
+.premium-shell.retela-dark-shell .customer-profile-intro h1,
+.premium-shell.retela-dark-shell .customer-profile-identity-copy h2,
+.premium-shell.retela-dark-shell .customer-profile-section-heading h3,
+.premium-shell.retela-dark-shell .customer-account-management-card h3,
+.premium-shell.retela-dark-shell .customer-profile-status-card strong {
+  color: var(--retela-text-dark) !important;
+}
+
+.retela-dark .customer-profile-intro p:not(.customer-profile-eyebrow),
+.retela-dark .customer-profile-section-heading p,
+.retela-dark .customer-profile-identity-copy span,
+.retela-dark .customer-account-management-card span,
+.retela-dark .customer-profile-photo-name,
+.premium-shell.retela-dark-shell .customer-profile-intro p:not(.customer-profile-eyebrow),
+.premium-shell.retela-dark-shell .customer-profile-section-heading p,
+.premium-shell.retela-dark-shell .customer-profile-identity-copy span,
+.premium-shell.retela-dark-shell .customer-account-management-card span,
+.premium-shell.retela-dark-shell .customer-profile-photo-name {
+  color: var(--retela-text-muted-dark) !important;
+}
+
+.retela-dark .customer-profile-identity-copy p,
+.premium-shell.retela-dark-shell .customer-profile-identity-copy p {
+  color: #94e7b5 !important;
+}
+
+.retela-dark .customer-profile-status-card,
+.premium-shell.retela-dark-shell .customer-profile-status-card {
+  border-color: rgba(142, 211, 171, 0.16) !important;
+  background: rgba(15, 26, 21, 0.72) !important;
+  color: var(--retela-text-dark) !important;
+}
+
+.retela-dark .customer-profile-status-card.is-success,
+.premium-shell.retela-dark-shell .customer-profile-status-card.is-success {
+  border-color: rgba(52, 211, 153, 0.32) !important;
+  background: rgba(22, 163, 106, 0.16) !important;
+  color: #b8ffd0 !important;
+}
+
+.retela-dark .customer-profile-status-card.is-warning,
+.premium-shell.retela-dark-shell .customer-profile-status-card.is-warning {
+  border-color: rgba(251, 191, 36, 0.34) !important;
+  background: rgba(146, 64, 14, 0.2) !important;
+  color: #fde68a !important;
+}
+
 .retela-dark .admin-profile-input,
+.retela-dark .customer-profile-input,
 .retela-dark .admin-password-field,
 .premium-shell.retela-dark-shell .admin-profile-input,
+.premium-shell.retela-dark-shell .customer-profile-input,
 .premium-shell.retela-dark-shell .admin-password-field {
   border-color: var(--retela-border-dark) !important;
   background: #0f1a15 !important;
   color: var(--retela-text-dark) !important;
+}
+
+.retela-dark .customer-profile-avatar,
+.premium-shell.retela-dark-shell .customer-profile-avatar {
+  border-color: rgba(148, 231, 181, 0.45) !important;
+  background: rgba(22, 163, 106, 0.16) !important;
+  color: #b8ffd0 !important;
+  box-shadow: 0 18px 34px rgba(0, 0, 0, 0.28) !important;
+}
+
+.retela-dark .customer-profile-status-badge,
+.premium-shell.retela-dark-shell .customer-profile-status-badge {
+  border-color: rgba(52, 211, 153, 0.32) !important;
+  background: #0f2d1f !important;
+  color: #b8ffd0 !important;
+}
+
+.retela-dark .customer-profile-edit-button,
+.retela-dark .customer-profile-photo-button,
+.premium-shell.retela-dark-shell .customer-profile-edit-button,
+.premium-shell.retela-dark-shell .customer-profile-photo-button {
+  border-color: rgba(52, 211, 153, 0.32) !important;
+  background: rgba(22, 163, 106, 0.14) !important;
+  color: #b8ffd0 !important;
+}
+
+.retela-dark .customer-profile-cancel-button,
+.premium-shell.retela-dark-shell .customer-profile-cancel-button {
+  border-color: var(--retela-border-dark) !important;
+  background: rgba(15, 26, 21, 0.72) !important;
+  color: var(--retela-text-dark) !important;
+}
+
+.retela-dark .customer-profile-danger-button,
+.premium-shell.retela-dark-shell .customer-profile-danger-button {
+  border-color: rgba(248, 113, 113, 0.35) !important;
+  background: rgba(127, 29, 29, 0.2) !important;
+  color: #fecaca !important;
 }
 
 .retela-dark .admin-password-field input,

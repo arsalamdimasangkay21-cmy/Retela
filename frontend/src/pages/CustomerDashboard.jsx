@@ -560,11 +560,11 @@ export default function CustomerDashboard({ active, onChange }) {
     setCheckoutSummaryOpen(true);
   }
 
-  async function saveProfile(event) {
+  async function saveProfile(event, profileInput = profile, photoInput = profilePhoto) {
     event.preventDefault();
     const payload = new FormData();
-    Object.entries(profile).forEach(([key, value]) => payload.append(key, value ?? ""));
-    if (profilePhoto) payload.append("profilePhoto", profilePhoto);
+    Object.entries(profileInput || {}).forEach(([key, value]) => payload.append(key, value ?? ""));
+    if (photoInput) payload.append("profilePhoto", photoInput);
     try {
       const { data } = await api.patch("/users/me", payload, { headers: { "Content-Type": "multipart/form-data" } });
       clearGetCache("/users/me");
@@ -573,9 +573,11 @@ export default function CustomerDashboard({ active, onChange }) {
       setProfile(data);
       setProfileInitial(data);
       setProfilePhoto(null);
-      dispatchCustomerToast({ type: "success", message: "Profile saved successfully." });
+      dispatchCustomerToast({ type: "success", message: "Profile updated successfully." });
+      return data;
     } catch (error) {
       dispatchCustomerToast({ type: "error", message: error?.response?.data?.message || "Could not save profile changes." });
+      throw error;
     }
   }
 
@@ -777,7 +779,7 @@ export default function CustomerDashboard({ active, onChange }) {
   if (active === "Returns") return <ReturnForm orders={orders} returnRequests={returnRequests} onSaved={() => load(filtersRef.current, { force: true })} />;
   return (
     <>
-      <Profile profile={profile} setProfile={setProfile} profilePhoto={profilePhoto} setProfilePhoto={setProfilePhoto} saveProfile={saveProfile} onReset={resetProfile} onDeactivate={deactivateAccount} deactivating={deactivating} />
+      <Profile profile={profile} profilePhoto={profilePhoto} setProfilePhoto={setProfilePhoto} saveProfile={saveProfile} onDeactivate={deactivateAccount} deactivating={deactivating} />
       <ConfirmDialog
         open={deactivateConfirmOpen}
         title="Deactivate your account?"
@@ -3089,7 +3091,10 @@ function CustomerThemeSwitch({ theme, onChange }) {
   );
 }
 
-function Profile({ profile, setProfile, profilePhoto, setProfilePhoto, saveProfile, onReset, onDeactivate, deactivating }) {
+function Profile({ profile, profilePhoto, setProfilePhoto, saveProfile, onDeactivate, deactivating }) {
+  const [editing, setEditing] = useState(false);
+  const [draftProfile, setDraftProfile] = useState(profile || {});
+  const [savingProfile, setSavingProfile] = useState(false);
   const [photoPreview, setPhotoPreview] = useState("");
   const [verificationRecovery, setVerificationRecovery] = useState({ loading: true, verification: null, error: "", message: "" });
   const [governmentIdUploading, setGovernmentIdUploading] = useState(false);
@@ -3099,6 +3104,10 @@ function Profile({ profile, setProfile, profilePhoto, setProfilePhoto, saveProfi
   const [selfiePreview, setSelfiePreview] = useState("");
   const governmentIdInputRef = useRef(null);
   const age = calculateAge(profile?.birthday);
+
+  useEffect(() => {
+    if (!editing) setDraftProfile(profile || {});
+  }, [editing, profile]);
 
   const loadVerificationRecovery = useCallback(async () => {
     if (!profile?.id) return;
@@ -3134,11 +3143,55 @@ function Profile({ profile, setProfile, profilePhoto, setProfilePhoto, saveProfi
   }, [selfiePreview]);
 
   if (!profile) return <Card><p className="text-sm text-slate-500">Loading profile...</p></Card>;
+  const current = editing ? draftProfile : profile;
   const photoUrl = photoPreview || assetUrl(profile.profile_photo_url);
   const accountStatus = profileStatusLabel(profile.status);
   const verification = verificationRecovery.verification;
   const governmentIdMissing = verification?.government_id_image?.reason === "FILE_MISSING";
   const selfieMissing = verification?.selfie_verification_image?.reason === "FILE_MISSING";
+  const displayName = current.display_name || current.username || "RETELA Customer";
+  const username = current.username || "customer";
+  const email = current.email || "Email not set";
+
+  function updateDraft(key, value) {
+    setDraftProfile((draft) => ({ ...draft, [key]: value }));
+  }
+
+  function startEditing() {
+    setDraftProfile(profile || {});
+    setProfilePhoto(null);
+    setEditing(true);
+  }
+
+  function cancelEditing() {
+    if (savingProfile) return;
+    setDraftProfile(profile || {});
+    setProfilePhoto(null);
+    setEditing(false);
+  }
+
+  async function submitProfile(event) {
+    event.preventDefault();
+    if (savingProfile) return;
+    const nextUsername = String(draftProfile.username || "").trim();
+    if (!nextUsername) {
+      dispatchCustomerToast({ type: "error", message: "Username is required." });
+      return;
+    }
+    if (nextUsername.length < 3 || nextUsername.length > 80) {
+      dispatchCustomerToast({ type: "error", message: "Username must be 3 to 80 characters." });
+      return;
+    }
+    setSavingProfile(true);
+    try {
+      const saved = await saveProfile(event, { ...draftProfile, username: nextUsername }, profilePhoto);
+      if (saved) setEditing(false);
+    } catch {
+      // saveProfile owns the error toast; keep edit mode open for correction.
+    } finally {
+      setSavingProfile(false);
+    }
+  }
 
   async function uploadGovernmentId(event) {
     const file = event.target.files?.[0];
@@ -3186,48 +3239,82 @@ function Profile({ profile, setProfile, profilePhoto, setProfilePhoto, saveProfi
   }
 
   return (
-    <motion.div className="grid gap-5" initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }}>
-      <section className="relative overflow-hidden rounded-[32px] border border-white/10 bg-black/35 p-5 shadow-2xl shadow-black/30 backdrop-blur-2xl sm:p-7">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_14%_10%,rgba(56,255,136,0.18),transparent_32%),radial-gradient(circle_at_85%_20%,rgba(59,130,246,0.12),transparent_30%)]" />
-        <div className="relative flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-            <p className="text-xs font-bold uppercase tracking-[0.22em] text-neonbrand/75">Customer Account</p>
-            <h1 className="mt-3 font-display text-3xl font-bold text-white sm:text-4xl">Profile</h1>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-white/58">Keep your contact details, delivery address, and account security up to date.</p>
-          </div>
-          <div className="grid gap-3 sm:grid-cols-3">
-            <ProfileStatusCard icon={ShieldCheck} label="Account" value={accountStatus} tone={profile.status === "approved" ? "success" : "warning"} />
-            <ProfileStatusCard icon={CheckCircle2} label="Session" value="Active" tone="success" />
-            <ProfileStatusCard icon={CalendarDays} label="Age" value={age === null ? "Not set" : `${age}`} tone="neutral" />
-          </div>
+    <motion.div className="customer-profile-page" initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }}>
+      <section className="customer-profile-intro">
+        <div>
+          <p className="customer-profile-eyebrow">Customer Account</p>
+          <h1>Profile</h1>
+          <p>Keep your contact details, delivery address, and account security up to date.</p>
+        </div>
+        <div className="customer-profile-status-grid">
+          <ProfileStatusCard icon={ShieldCheck} label="Account" value={accountStatus} tone={profile.status === "approved" ? "success" : "warning"} />
+          <ProfileStatusCard icon={CheckCircle2} label="Session" value="Active" tone="success" />
+          <ProfileStatusCard icon={CalendarDays} label="Age" value={age === null ? "Not set" : `${age}`} tone="neutral" />
         </div>
       </section>
 
-      <div className="grid gap-5 xl:grid-cols-[minmax(280px,0.42fr)_minmax(0,1fr)]">
-        <Card className="h-fit">
-          <div className="grid place-items-center gap-4 text-center">
-            <div className="relative">
-              {photoUrl ? (
-                <img src={photoUrl} className="h-32 w-32 rounded-[32px] border border-neonbrand/25 object-cover shadow-[0_0_45px_rgba(56,255,136,0.16)]" alt={profile.display_name || profile.username || "Profile"} />
-              ) : (
-                <div className="grid h-32 w-32 place-items-center rounded-[32px] border border-white/10 bg-white/[0.06] text-sm font-bold text-white/35">Photo</div>
-              )}
-              <span className="absolute -bottom-2 -right-2 rounded-2xl border border-neonbrand/25 bg-black px-3 py-1 text-xs font-black text-neonbrand">{accountStatus}</span>
-            </div>
-            <div className="min-w-0">
-              <h2 className="break-words font-display text-2xl font-bold text-white">{profile.display_name || profile.username}</h2>
-              <p className="mt-1 break-words text-sm text-white/50">{profile.email || "Email not set"}</p>
-            </div>
-            <label className="inline-flex w-full cursor-pointer items-center justify-center gap-2 rounded-2xl border border-dashed border-neonbrand/35 bg-neonbrand/10 px-4 py-3 text-sm font-bold text-neonbrand transition hover:bg-neonbrand hover:text-black">
-              <Upload size={17} />
-              {profilePhoto ? "Change selected photo" : "Upload profile photo"}
-              <input className="hidden" type="file" accept="image/*" onChange={(e) => setProfilePhoto(e.target.files?.[0] || null)} />
-            </label>
-            {profilePhoto ? <p className="max-w-full truncate text-xs text-white/45">{profilePhoto.name}</p> : null}
+      <div className="customer-profile-layout">
+        <aside className="customer-profile-identity-card">
+          <div className="customer-profile-avatar-wrap">
+            {photoUrl ? (
+              <img src={photoUrl} className="customer-profile-avatar" alt={displayName} />
+            ) : (
+              <div className="customer-profile-avatar customer-profile-avatar-fallback">{customerProfileInitials(current)}</div>
+            )}
+            <span className={`customer-profile-status-badge is-${profile.status || "pending"}`}>{accountStatus}</span>
           </div>
-        </Card>
+          <div className="customer-profile-identity-copy">
+            <h2>{displayName}</h2>
+            <p>@{username}</p>
+            <span>{email}</span>
+          </div>
+          {editing ? (
+            <label className="customer-profile-photo-button">
+              <Upload size={16} />
+              {profilePhoto ? "Change selected photo" : "Change Photo"}
+              <input className="hidden" type="file" accept="image/*" onChange={(event) => setProfilePhoto(event.target.files?.[0] || null)} />
+            </label>
+          ) : null}
+          {editing && profilePhoto ? <p className="customer-profile-photo-name">{profilePhoto.name}</p> : null}
+        </aside>
 
-        <div className="grid gap-5">
+        <div className="customer-profile-main">
+          <form id="retela-customer-profile-form" onSubmit={submitProfile} className="customer-profile-info-card">
+            <div className="customer-profile-section-heading">
+              <div>
+                <h3>Personal Information</h3>
+                <p>These details are used for your account, orders, and delivery updates.</p>
+              </div>
+              <div className="customer-profile-actions">
+                {!editing ? (
+                  <button type="button" className="customer-profile-edit-button" onClick={startEditing}>
+                    <Edit3 size={16} /> Edit Profile
+                  </button>
+                ) : (
+                  <>
+                    <button type="button" className="customer-profile-cancel-button" onClick={cancelEditing} disabled={savingProfile}>
+                      <X size={16} /> Cancel
+                    </button>
+                    <button type="submit" className="customer-profile-save-button" disabled={savingProfile}>
+                      {savingProfile ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
+                      {savingProfile ? "Saving..." : "Save Profile"}
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+
+            <div className="customer-profile-info-grid">
+              <CustomerProfileField label="Full Name" value={current.display_name || ""} editing={editing} onChange={(value) => updateDraft("display_name", value)} placeholder="Full name" empty="Not set" />
+              <CustomerProfileField label="Username" value={current.username || ""} editing={editing} onChange={(value) => updateDraft("username", value)} placeholder="Username" prefix={!editing ? "@" : ""} required />
+              <CustomerProfileField label="Email" value={current.email || ""} editing={editing} onChange={(value) => updateDraft("email", value)} placeholder="Email address" type="email" empty="Not set" />
+              <CustomerProfileField label="Phone Number" value={current.phone_number || ""} editing={editing} onChange={(value) => updateDraft("phone_number", value)} placeholder="Phone number" empty="Not set" />
+              <CustomerProfileField label="Birthday" value={editing ? formatDateInput(current.birthday) : (current.birthday ? formatDate(current.birthday) : "")} editing={editing} onChange={(value) => updateDraft("birthday", value)} type="date" empty="Not set" />
+              <CustomerProfileField label="Gender" value={current.gender || ""} editing={editing} onChange={(value) => updateDraft("gender", value)} select options={["Female", "Male", "Non-binary", "Prefer not to say"]} placeholder="Select gender" empty="Not set" />
+              <CustomerProfileField label="Complete Address / Location" value={current.location || ""} editing={editing} onChange={(value) => updateDraft("location", value)} placeholder="House/Street, Barangay, City, Province" empty="Not set" wide />
+            </div>
+          </form>
+
           {(governmentIdMissing || selfieMissing || verificationRecovery.error || verificationRecovery.message) ? (
             <Card>
               <div className="grid gap-4">
@@ -3258,46 +3345,19 @@ function Profile({ profile, setProfile, profilePhoto, setProfilePhoto, saveProfi
             </Card>
           ) : null}
 
-          <Card>
-            <form onSubmit={saveProfile} className="grid gap-4">
-              <div>
-                <h3 className="font-display text-xl font-bold text-white">Personal Details</h3>
-                <p className="mt-1 text-sm text-white/45">These changes are saved to your customer record and visible to the admin dashboard.</p>
-              </div>
-              <div className="grid gap-3 md:grid-cols-2">
-                <ProfileField label="Full name"><Field icon={User} placeholder="Full name" value={profile.display_name || ""} onChange={(e) => setProfile({ ...profile, display_name: e.target.value })} /></ProfileField>
-                <ProfileField label="Username"><Field icon={User} placeholder="Username" value={profile.username || ""} onChange={(e) => setProfile({ ...profile, username: e.target.value })} /></ProfileField>
-                <ProfileField label="Email"><Field icon={Mail} placeholder="Email" type="email" value={profile.email || ""} onChange={(e) => setProfile({ ...profile, email: e.target.value })} /></ProfileField>
-                <ProfileField label="Phone number"><Field icon={Phone} placeholder="Phone number" value={profile.phone_number || ""} onChange={(e) => setProfile({ ...profile, phone_number: e.target.value })} /></ProfileField>
-                <ProfileField label="Birthday">
-                  <Field icon={CalendarDays} type="date" value={formatDateInput(profile.birthday)} onChange={(e) => setProfile({ ...profile, birthday: e.target.value })} />
-                </ProfileField>
-                <ProfileField label="Gender">
-                  <select className="h-12 rounded-2xl border border-white/10 bg-white/[0.06] px-3 text-sm font-semibold text-white outline-none transition focus:border-neonbrand/60" value={profile.gender || ""} onChange={(e) => setProfile({ ...profile, gender: e.target.value })}>
-                    <option className="bg-slate-950 text-white" value="">Select gender</option>
-                    <option className="bg-slate-950 text-white" value="Female">Female</option>
-                    <option className="bg-slate-950 text-white" value="Male">Male</option>
-                    <option className="bg-slate-950 text-white" value="Non-binary">Non-binary</option>
-                    <option className="bg-slate-950 text-white" value="Prefer not to say">Prefer not to say</option>
-                  </select>
-                </ProfileField>
-                <ProfileField label="Complete address / location" className="md:col-span-2">
-                  <Field icon={MapPin} placeholder="House/Street, Barangay, City, Province" value={profile.location || ""} onChange={(e) => setProfile({ ...profile, location: e.target.value })} />
-                </ProfileField>
-              </div>
-              <div className="flex flex-col gap-2 border-t border-white/10 pt-4 sm:flex-row sm:items-center sm:justify-between">
-                <div className="flex flex-wrap gap-2">
-                  <Button type="submit"><Save size={17} /> Save Profile</Button>
-                  <Button type="button" variant="secondary" onClick={onReset}><RotateCcw size={17} /> Cancel / Reset</Button>
-                </div>
-                <Button type="button" variant="secondary" onClick={onDeactivate} disabled={deactivating} className="border-rose-300/25 bg-rose-300/10 text-rose-100 hover:border-rose-300/50 hover:text-white">
-                  {deactivating ? <Loader2 size={17} className="animate-spin" /> : <Trash2 size={17} />}
-                  Deactivate Account
-                </Button>
-              </div>
-            </form>
-            <ChangePasswordForm />
-          </Card>
+          <ChangePasswordForm onSuccess={(message) => dispatchCustomerToast({ type: "success", message: message || "Password changed successfully." })} onError={(message) => dispatchCustomerToast({ type: "error", message: message || "Could not change password." })} />
+
+          <section className="customer-account-management-card">
+            <div>
+              <p className="customer-profile-eyebrow">Account Management</p>
+              <h3>Deactivate your account</h3>
+              <span>You will be signed out and will need admin help to restore access.</span>
+            </div>
+            <button type="button" onClick={onDeactivate} disabled={deactivating} className="customer-profile-danger-button">
+              {deactivating ? <Loader2 size={17} className="animate-spin" /> : <Trash2 size={17} />}
+              Deactivate Account
+            </button>
+          </section>
         </div>
       </div>
       {selfieCaptureOpen ? createPortal(
@@ -3331,25 +3391,48 @@ function CameraIcon() {
   return <FileImage size={17} />;
 }
 
-function ProfileField({ label, children, className = "" }) {
+function customerProfileInitials(profile) {
+  const source = String(profile?.display_name || profile?.username || "RC").trim();
+  const parts = source.split(/\s+/).filter(Boolean);
+  const initials = parts.length > 1 ? `${parts[0][0]}${parts[parts.length - 1][0]}` : source.slice(0, 2);
+  return initials.toUpperCase();
+}
+
+function CustomerProfileField({ label, value, editing, onChange, placeholder, empty = "Not set", prefix = "", type = "text", select = false, options = [], wide = false, required = false }) {
+  const readValue = String(value || "").trim();
   return (
-    <div className={`grid gap-2 ${className}`}>
-      <span className="text-xs font-bold uppercase tracking-[0.16em] text-white/45">{label}</span>
-      {children}
-    </div>
+    <label className={`customer-profile-field ${wide ? "is-wide" : ""}`}>
+      <span>{label}</span>
+      {editing ? (
+        select ? (
+          <select className="customer-profile-input" value={value || ""} onChange={(event) => onChange(event.target.value)}>
+            <option value="">{placeholder || `Select ${label.toLowerCase()}`}</option>
+            {options.map((option) => <option key={option} value={option}>{option}</option>)}
+          </select>
+        ) : (
+          <input
+            className="customer-profile-input"
+            type={type}
+            required={required}
+            minLength={required ? 3 : undefined}
+            maxLength={label === "Username" ? 80 : undefined}
+            value={value || ""}
+            onChange={(event) => onChange(event.target.value)}
+            placeholder={placeholder}
+          />
+        )
+      ) : (
+        <strong className={readValue ? "" : "is-empty"}>{readValue ? `${prefix}${readValue}` : empty}</strong>
+      )}
+    </label>
   );
 }
 
 function ProfileStatusCard({ icon: Icon, label, value, tone = "neutral" }) {
-  const tones = {
-    success: "border-neonbrand/20 bg-neonbrand/10 text-neonbrand",
-    warning: "border-amber-300/25 bg-amber-300/10 text-amber-100",
-    neutral: "border-white/10 bg-white/[0.06] text-white/75"
-  };
   return (
-    <div className={`rounded-2xl border px-4 py-3 ${tones[tone] || tones.neutral}`}>
-      <span className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.14em] opacity-80"><Icon size={15} /> {label}</span>
-      <strong className="mt-1 block text-lg text-white">{value}</strong>
+    <div className={`customer-profile-status-card is-${tone}`}>
+      <span><Icon size={15} /> {label}</span>
+      <strong>{value}</strong>
     </div>
   );
 }
