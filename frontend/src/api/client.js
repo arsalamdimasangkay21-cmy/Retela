@@ -113,9 +113,10 @@ export function cachedGet(url, config = {}, options = {}) {
 export function getApiErrorMessage(error, fallback = "Something went wrong. Please try again.") {
   if (error?.response?.data?.message) return error.response.data.message;
   if (error?.response?.status === 400) return "Invalid details. Please check your input and try again.";
-  if (error?.response?.status === 401) return "Invalid credentials or email OTP is not verified yet.";
+  if (error?.response?.status === 401) return "Invalid username or password.";
   if (error?.response?.status === 404) return "Record not found.";
   if (error?.code === "ERR_NETWORK") return "Cannot connect to the server. Make sure the API is running.";
+  if (error?.code === "ECONNABORTED" || error?.code === "ETIMEDOUT") return fallback;
   if (error instanceof SyntaxError) return "Invalid syntax. Please check the input and try again.";
   return fallback;
 }

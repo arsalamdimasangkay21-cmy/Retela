@@ -14,6 +14,7 @@ const adminPassword = "Retela2026";
 let phoneColumnReady;
 let resetColumnsReady;
 let recaptchaConfigWarningLogged = false;
+const RECAPTCHA_TIMEOUT_MS = Math.min(Math.max(Number(process.env.RECAPTCHA_TIMEOUT_MS || 7000), 1000), 8000);
 
 function normalizeAdminCredential(value) {
   return String(value || "").replace(/\s+/g, "").toLowerCase();
@@ -56,16 +57,24 @@ async function verifyRecaptchaToken(token, remoteIp) {
   if (!token) throw new HttpError(400, "Please complete the CAPTCHA first.");
 
   let response;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), RECAPTCHA_TIMEOUT_MS);
   try {
     const body = new URLSearchParams({ secret, response: token });
     if (remoteIp) body.set("remoteip", remoteIp);
     response = await fetch("https://www.google.com/recaptcha/api/siteverify", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body
+      body,
+      signal: controller.signal
     });
-  } catch {
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      throw new HttpError(408, "CAPTCHA verification timed out. Please try again.");
+    }
     throw new HttpError(400, "CAPTCHA verification failed. Please try again.");
+  } finally {
+    clearTimeout(timeout);
   }
 
   if (!response.ok) throw new HttpError(400, "CAPTCHA verification failed. Please try again.");
@@ -259,7 +268,7 @@ async function findLoginUser(username) {
 }
 
 function hideLoginReason() {
-  throw new HttpError(401, "Invalid credentials or email OTP is not verified yet");
+  throw new HttpError(401, "Invalid username or password.");
 }
 
 router.post("/register", asyncHandler(async (req, res) => {
@@ -520,7 +529,7 @@ router.post("/login", asyncHandler(async (req, res) => {
   const valid = await comparePassword(password, user.password_hash);
   if (!valid) hideLoginReason();
   if (!["admin", "staff"].includes(user.role) && (user.status === "pending_otp" || !user.is_verified)) {
-    throw new HttpError(403, "Verify your email OTP before logging in");
+    throw new HttpError(403, "Please verify your email before logging in.");
   }
   if (user.role !== "admin" && user.status !== "approved") hideLoginReason();
 

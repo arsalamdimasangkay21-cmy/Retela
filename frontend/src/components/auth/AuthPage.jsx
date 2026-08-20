@@ -131,6 +131,7 @@ export default function AuthPage() {
 
   async function submitLogin(event) {
     event.preventDefault();
+    if (loading === "login") return;
     setMessage("");
     if (!captchaConfigured) {
       setMessage("CAPTCHA is not configured. Please contact support.");
@@ -144,7 +145,7 @@ export default function AuthPage() {
     try {
       await login({ ...loginForm, captchaToken });
     } catch (error) {
-      setMessage(getApiErrorMessage(error, "Invalid credentials or email OTP is not verified yet"));
+      setMessage(getApiErrorMessage(error, "Login is taking longer than expected. Please try again."));
       setCaptchaToken("");
       setCaptchaResetKey((value) => value + 1);
     } finally {

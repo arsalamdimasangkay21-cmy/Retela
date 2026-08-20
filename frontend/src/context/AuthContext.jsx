@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { api, clearGetCache } from "../api/client";
 import { disconnectSocket } from "../api/socket";
 
@@ -25,6 +25,7 @@ export function AuthProvider({ children }) {
   const [token, setToken] = useState(localStorage.getItem("retela_token"));
   const [user, setUser] = useState(readStoredUser);
   const [authReady, setAuthReady] = useState(!localStorage.getItem("retela_token"));
+  const skipNextBlockingRefresh = useRef(false);
 
   async function loadCurrentUser() {
     clearGetCache("/users/me");
@@ -34,6 +35,30 @@ export function AuthProvider({ children }) {
     return data;
   }
 
+  function mergeGuestCartInBackground() {
+    const guestCart = localStorage.getItem("retela_guest_cart");
+    if (!guestCart) return;
+
+    let items = [];
+    try {
+      items = JSON.parse(guestCart);
+    } catch {
+      localStorage.removeItem("retela_guest_cart");
+      return;
+    }
+
+    if (!Array.isArray(items) || !items.length) {
+      localStorage.removeItem("retela_guest_cart");
+      return;
+    }
+
+    api.post("/cart/merge", { items })
+      .catch(() => {})
+      .finally(() => {
+        localStorage.removeItem("retela_guest_cart");
+      });
+  }
+
   useEffect(() => {
     if (!token) {
       setAuthReady(true);
@@ -41,6 +66,25 @@ export function AuthProvider({ children }) {
       return;
     }
     let cancelled = false;
+    if (skipNextBlockingRefresh.current) {
+      skipNextBlockingRefresh.current = false;
+      loadCurrentUser()
+        .then((data) => {
+          if (!cancelled) setUser(data);
+        })
+        .catch(() => {
+          if (cancelled) return;
+          disconnectSocket("auth verification failed");
+          localStorage.removeItem("retela_token");
+          localStorage.removeItem("retela_user");
+          setToken(null);
+          setUser(null);
+          setAuthReady(true);
+        });
+      return () => {
+        cancelled = true;
+      };
+    }
     setAuthReady(false);
     loadCurrentUser()
       .then((data) => {
@@ -76,24 +120,15 @@ export function AuthProvider({ children }) {
   }, []);
 
   async function login(credentials) {
-    const { data } = await api.post("/auth/login", credentials);
+    const { data } = await api.post("/auth/login", credentials, { timeout: 12000 });
     localStorage.setItem("retela_token", data.token);
-    const guestCart = localStorage.getItem("retela_guest_cart");
-    if (guestCart && data.user?.role === "customer") {
-      try {
-        const items = JSON.parse(guestCart);
-        if (Array.isArray(items) && items.length) {
-          await api.post("/cart/merge", { items });
-        }
-        localStorage.removeItem("retela_guest_cart");
-      } catch {
-        localStorage.removeItem("retela_guest_cart");
-      }
-    }
-    setToken(data.token);
-    const freshUser = await loadCurrentUser();
-    setUser(freshUser);
+    localStorage.setItem("retela_user", JSON.stringify(data.user));
+    setUser(data.user);
     setAuthReady(true);
+    skipNextBlockingRefresh.current = true;
+    setToken(data.token);
+
+    if (data.user?.role === "customer") mergeGuestCartInBackground();
   }
 
   function logout() {
