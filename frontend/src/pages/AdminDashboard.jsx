@@ -11,6 +11,7 @@ import { ChangePasswordForm } from "../components/ChangePasswordForm";
 import ConfirmDialog from "../components/ConfirmDialog";
 import CustomerDocumentsModal from "../components/CustomerDocumentsModal";
 import NotificationPreviewPanel from "../components/NotificationPreviewPanel";
+import OrderDeliveryInfo from "../components/OrderDeliveryInfo";
 import ProductImage from "../components/ProductImage";
 import ProductQuickView from "../components/ProductQuickView";
 import { Button, Card, Field, StatCard } from "../components/ui";
@@ -3415,6 +3416,7 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
                   <button type="button" onClick={saveTracking} className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-emerald-700">Save</button>
                 </div>
               </div>
+              {source.fulfillment_method === "delivery" ? <OrderDeliveryInfo order={source} title="Delivery Location" mapLabel="View on Map" /> : null}
               <div className="grid gap-3">
                 {selectedOrder.items.map((item) => (
                   <div key={`${item.product_id}-${item.quantity}`} className="flex items-center gap-3 rounded-2xl border border-[#dfe9e3] bg-white p-3 shadow-sm transition hover:border-emerald-200">

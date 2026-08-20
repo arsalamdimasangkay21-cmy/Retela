@@ -5538,6 +5538,478 @@ button {
   font-weight: 750;
 }
 
+.retela-delivery-location-card {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid #d9eee2;
+  border-radius: 18px;
+  background: #f7fff9;
+  padding: 12px;
+}
+
+.retela-delivery-location-card.has-location {
+  border-color: #b7e4cf;
+  background: #ecfff3;
+}
+
+.retela-delivery-location-icon {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  flex: 0 0 42px;
+  place-items: center;
+  border: 1px solid #b7e4cf;
+  border-radius: 14px;
+  background: #ffffff;
+  color: #15803d;
+}
+
+.retela-delivery-location-eyebrow {
+  margin: 0;
+  color: #16864e;
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.retela-delivery-location-card strong {
+  display: block;
+  margin-top: 3px;
+  color: #123526;
+  font-size: 0.9rem;
+  font-weight: 900;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.retela-delivery-location-card span {
+  display: block;
+  margin-top: 2px;
+  color: #557166;
+  font-size: 0.78rem;
+  font-weight: 750;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.retela-delivery-location-action {
+  display: inline-flex;
+  min-height: 38px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border: 1px solid #b7e4cf;
+  border-radius: 12px;
+  background: #ffffff;
+  padding: 8px 10px;
+  color: #08764d;
+  font-size: 0.78rem;
+  font-weight: 900;
+  transition: border-color 0.18s ease, background 0.18s ease, transform 0.18s ease;
+}
+
+.retela-delivery-location-action:hover {
+  border-color: #16a36a;
+  background: #f3faf6;
+  transform: translateY(-1px);
+}
+
+.retela-location-selector-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1800;
+  display: grid;
+  place-items: center;
+  overflow-y: auto;
+  background: rgba(3, 7, 18, 0.58);
+  padding: 16px;
+  backdrop-filter: blur(16px);
+}
+
+.retela-location-selector {
+  width: min(96vw, 980px);
+  max-height: min(92vh, 860px);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  overflow: hidden;
+  border: 1px solid #d9eee2;
+  border-radius: 26px;
+  background: #ffffff;
+  color: #123526;
+  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.32);
+}
+
+.retela-location-selector-header,
+.retela-location-selector-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-color: #e1eee7;
+  background: rgba(255, 255, 255, 0.96);
+  padding: 16px;
+}
+
+.retela-location-selector-header {
+  border-bottom: 1px solid #e1eee7;
+}
+
+.retela-location-selector-footer {
+  border-top: 1px solid #e1eee7;
+}
+
+.retela-location-selector-header p {
+  margin: 0;
+  color: #16864e;
+  font-size: 0.7rem;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.retela-location-selector-header h3 {
+  margin: 3px 0 0;
+  color: #123526;
+  font-size: 1.35rem;
+  font-weight: 900;
+}
+
+.retela-location-selector-header button {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  border: 1px solid #d8e3dc;
+  border-radius: 14px;
+  background: #ffffff;
+  color: #465b51;
+}
+
+.retela-location-selector-body {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(260px, 0.9fr) minmax(0, 1.35fr);
+  gap: 14px;
+  overflow-y: auto;
+  padding: 16px;
+}
+
+.retela-location-search-panel,
+.retela-location-fields {
+  display: grid;
+  gap: 10px;
+}
+
+.retela-location-search-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.retela-location-search-input,
+.retela-location-fields label {
+  display: grid;
+  gap: 7px;
+}
+
+.retela-location-search-input {
+  min-height: 44px;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  border: 1px solid #cfe8d8;
+  border-radius: 14px;
+  background: #ffffff;
+  padding: 0 12px;
+  color: #16a36a;
+}
+
+.retela-location-search-input input,
+.retela-location-fields input,
+.retela-location-fields textarea {
+  width: 100%;
+  border: 1px solid #cfe8d8;
+  border-radius: 14px;
+  background: #ffffff;
+  padding: 11px 12px;
+  color: #173329;
+  font-size: 0.9rem;
+  font-weight: 750;
+  outline: 0;
+}
+
+.retela-location-search-input input {
+  border: 0;
+  padding: 0;
+}
+
+.retela-location-search-input input::placeholder,
+.retela-location-fields input::placeholder,
+.retela-location-fields textarea::placeholder {
+  color: #8aa095;
+}
+
+.retela-location-fields textarea {
+  resize: vertical;
+}
+
+.retela-location-search-row button,
+.retela-location-current-button,
+.retela-location-selector-footer button {
+  display: inline-flex;
+  min-height: 42px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: 14px;
+  padding: 9px 13px;
+  font-size: 0.84rem;
+  font-weight: 900;
+}
+
+.retela-location-search-row button,
+.retela-location-current-button {
+  border: 1px solid #b7e4cf;
+  background: #f3faf6;
+  color: #08764d;
+}
+
+.retela-location-search-results {
+  max-height: 180px;
+  display: grid;
+  gap: 7px;
+  overflow-y: auto;
+}
+
+.retela-location-search-results button {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  gap: 8px;
+  border: 1px solid #e1eee7;
+  border-radius: 14px;
+  background: #f8fbf9;
+  padding: 9px;
+  color: #173329;
+  text-align: left;
+}
+
+.retela-location-search-results span {
+  font-size: 0.82rem;
+  font-weight: 800;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.retela-delivery-map-card {
+  display: grid;
+  gap: 8px;
+  grid-row: span 2;
+}
+
+.retela-delivery-map {
+  position: relative;
+  min-height: 420px;
+  overflow: hidden;
+  border: 1px solid #d9eee2;
+  border-radius: 20px;
+  background: #d8e8dc;
+  cursor: crosshair;
+}
+
+.retela-delivery-map img {
+  position: absolute;
+  width: 256px;
+  height: 256px;
+  max-width: none;
+  user-select: none;
+}
+
+.retela-delivery-map-pin {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  display: grid;
+  transform: translate(-50%, -100%);
+  color: #dc2626;
+  filter: drop-shadow(0 8px 12px rgba(0, 0, 0, 0.28));
+  pointer-events: none;
+}
+
+.retela-delivery-map-tools {
+  position: absolute;
+  right: 12px;
+  top: 12px;
+  display: grid;
+  gap: 6px;
+}
+
+.retela-delivery-map-tools button {
+  width: 34px;
+  height: 34px;
+  border: 1px solid #cfe8d8;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #123526;
+  font-size: 1.05rem;
+  font-weight: 900;
+}
+
+.retela-delivery-map-status {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border-radius: 999px;
+  background: rgba(7, 17, 13, 0.84);
+  padding: 8px 10px;
+  color: #b8ffd0;
+  font-size: 0.76rem;
+  font-weight: 900;
+}
+
+.retela-delivery-map-card p {
+  margin: 0;
+  color: #557166;
+  font-size: 0.8rem;
+  font-weight: 750;
+}
+
+.retela-location-fields span,
+.retela-location-default-toggle span {
+  color: #16864e;
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.retela-location-default-toggle {
+  display: flex !important;
+  align-items: center;
+  gap: 9px;
+  border: 1px solid #d9eee2;
+  border-radius: 14px;
+  background: #f7fff9;
+  padding: 10px;
+}
+
+.retela-location-default-toggle input {
+  width: 17px;
+  height: 17px;
+  accent-color: #16a36a;
+}
+
+.retela-location-selector-footer {
+  justify-content: flex-end;
+}
+
+.retela-location-selector-footer button:first-child {
+  border: 1px solid #d8e3dc;
+  background: #ffffff;
+  color: #465b51;
+}
+
+.retela-location-selector-footer button:last-child {
+  border: 1px solid #16a36a;
+  background: linear-gradient(180deg, #25c76a 0%, #159a5b 100%);
+  color: #ffffff;
+}
+
+.order-delivery-info-card {
+  display: grid;
+  gap: 12px;
+  border: 1px solid #d9eee2;
+  border-radius: 18px;
+  background: #f7fff9;
+  padding: 14px;
+}
+
+.order-delivery-info-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.order-delivery-info-heading > span {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border: 1px solid #b7e4cf;
+  border-radius: 13px;
+  background: #ffffff;
+  color: #15803d;
+}
+
+.order-delivery-info-heading p {
+  margin: 0;
+  color: #16864e;
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.order-delivery-info-heading h4 {
+  margin: 2px 0 0;
+  color: #123526;
+  font-size: 1rem;
+  font-weight: 900;
+}
+
+.order-delivery-info-body {
+  display: grid;
+  gap: 9px;
+}
+
+.order-delivery-info-row {
+  display: grid;
+  gap: 4px;
+}
+
+.order-delivery-info-row span {
+  color: #557166;
+  font-size: 0.7rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.order-delivery-info-row strong {
+  color: #173329;
+  font-size: 0.92rem;
+  font-weight: 850;
+  line-height: 1.42;
+  overflow-wrap: anywhere;
+}
+
+.order-delivery-info-row.is-address strong {
+  font-size: 0.98rem;
+}
+
+.order-delivery-map-button {
+  display: inline-flex;
+  width: fit-content;
+  min-height: 38px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid #b7e4cf;
+  border-radius: 12px;
+  background: #ffffff;
+  padding: 8px 11px;
+  color: #08764d;
+  font-size: 0.8rem;
+  font-weight: 900;
+  text-decoration: none;
+}
+
 .customer-profile-page {
   display: grid;
   width: 100%;
@@ -6646,6 +7118,51 @@ button {
 
   .customer-profile-field.is-wide {
     grid-column: auto;
+  }
+
+  .retela-delivery-location-card {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .retela-delivery-location-action {
+    width: 100%;
+  }
+
+  .retela-location-selector-backdrop {
+    align-items: end;
+    padding: 0;
+  }
+
+  .retela-location-selector {
+    width: 100%;
+    max-height: calc(100dvh - env(safe-area-inset-top));
+    border-radius: 24px 24px 0 0;
+  }
+
+  .retela-location-selector-body {
+    grid-template-columns: 1fr;
+    padding: 12px;
+  }
+
+  .retela-delivery-map-card {
+    grid-row: auto;
+  }
+
+  .retela-delivery-map {
+    min-height: 330px;
+  }
+
+  .retela-location-search-row {
+    grid-template-columns: 1fr;
+  }
+
+  .retela-location-selector-footer {
+    padding-bottom: calc(12px + env(safe-area-inset-bottom));
+  }
+
+  .retela-location-selector-footer button {
+    flex: 1 1 140px;
   }
 
   .sales-analytics-page {
@@ -8339,6 +8856,131 @@ button {
 .retela-dark .customer-docs-missing {
   border-color: rgba(142, 211, 171, 0.16) !important;
   background: #0f1a15 !important;
+}
+
+.retela-dark .retela-delivery-location-card,
+.retela-dark .order-delivery-info-card,
+.premium-shell.retela-dark-shell .retela-delivery-location-card,
+.premium-shell.retela-dark-shell .order-delivery-info-card {
+  border-color: var(--retela-border-dark) !important;
+  background: rgba(15, 26, 21, 0.72) !important;
+  color: var(--retela-text-dark) !important;
+}
+
+.retela-dark .retela-delivery-location-card.has-location,
+.premium-shell.retela-dark-shell .retela-delivery-location-card.has-location {
+  border-color: rgba(52, 211, 153, 0.32) !important;
+  background: rgba(22, 163, 106, 0.14) !important;
+}
+
+.retela-dark .retela-delivery-location-icon,
+.retela-dark .order-delivery-info-heading > span,
+.premium-shell.retela-dark-shell .retela-delivery-location-icon,
+.premium-shell.retela-dark-shell .order-delivery-info-heading > span {
+  border-color: rgba(52, 211, 153, 0.28) !important;
+  background: rgba(22, 163, 106, 0.14) !important;
+  color: #b8ffd0 !important;
+}
+
+.retela-dark .retela-delivery-location-card strong,
+.retela-dark .order-delivery-info-heading h4,
+.retela-dark .order-delivery-info-row strong,
+.premium-shell.retela-dark-shell .retela-delivery-location-card strong,
+.premium-shell.retela-dark-shell .order-delivery-info-heading h4,
+.premium-shell.retela-dark-shell .order-delivery-info-row strong {
+  color: var(--retela-text-dark) !important;
+}
+
+.retela-dark .retela-delivery-location-card span,
+.retela-dark .order-delivery-info-row span,
+.premium-shell.retela-dark-shell .retela-delivery-location-card span,
+.premium-shell.retela-dark-shell .order-delivery-info-row span {
+  color: var(--retela-text-muted-dark) !important;
+}
+
+.retela-dark .retela-delivery-location-eyebrow,
+.retela-dark .order-delivery-info-heading p,
+.premium-shell.retela-dark-shell .retela-delivery-location-eyebrow,
+.premium-shell.retela-dark-shell .order-delivery-info-heading p {
+  color: #94e7b5 !important;
+}
+
+.retela-dark .retela-delivery-location-action,
+.retela-dark .order-delivery-map-button,
+.premium-shell.retela-dark-shell .retela-delivery-location-action,
+.premium-shell.retela-dark-shell .order-delivery-map-button {
+  border-color: rgba(52, 211, 153, 0.32) !important;
+  background: rgba(22, 163, 106, 0.14) !important;
+  color: #b8ffd0 !important;
+}
+
+.retela-dark .retela-location-selector,
+.premium-shell.retela-dark-shell .retela-location-selector {
+  border-color: var(--retela-border-dark) !important;
+  background: var(--retela-surface-dark-2) !important;
+  color: var(--retela-text-dark) !important;
+}
+
+.retela-dark .retela-location-selector-header,
+.retela-dark .retela-location-selector-footer,
+.premium-shell.retela-dark-shell .retela-location-selector-header,
+.premium-shell.retela-dark-shell .retela-location-selector-footer {
+  border-color: var(--retela-border-dark) !important;
+  background: rgba(21, 35, 29, 0.96) !important;
+}
+
+.retela-dark .retela-location-selector-header h3,
+.premium-shell.retela-dark-shell .retela-location-selector-header h3 {
+  color: var(--retela-text-dark) !important;
+}
+
+.retela-dark .retela-location-selector-header p,
+.retela-dark .retela-location-fields span,
+.retela-dark .retela-location-default-toggle span,
+.premium-shell.retela-dark-shell .retela-location-selector-header p,
+.premium-shell.retela-dark-shell .retela-location-fields span,
+.premium-shell.retela-dark-shell .retela-location-default-toggle span {
+  color: #94e7b5 !important;
+}
+
+.retela-dark .retela-location-search-input,
+.retela-dark .retela-location-fields input,
+.retela-dark .retela-location-fields textarea,
+.retela-dark .retela-location-default-toggle,
+.retela-dark .retela-location-search-results button,
+.premium-shell.retela-dark-shell .retela-location-search-input,
+.premium-shell.retela-dark-shell .retela-location-fields input,
+.premium-shell.retela-dark-shell .retela-location-fields textarea,
+.premium-shell.retela-dark-shell .retela-location-default-toggle,
+.premium-shell.retela-dark-shell .retela-location-search-results button {
+  border-color: var(--retela-border-dark) !important;
+  background: #0f1a15 !important;
+  color: var(--retela-text-dark) !important;
+}
+
+.retela-dark .retela-location-search-input input,
+.premium-shell.retela-dark-shell .retela-location-search-input input {
+  color: var(--retela-text-dark) !important;
+}
+
+.retela-dark .retela-location-search-row button,
+.retela-dark .retela-location-current-button,
+.premium-shell.retela-dark-shell .retela-location-search-row button,
+.premium-shell.retela-dark-shell .retela-location-current-button {
+  border-color: rgba(52, 211, 153, 0.32) !important;
+  background: rgba(22, 163, 106, 0.14) !important;
+  color: #b8ffd0 !important;
+}
+
+.retela-dark .retela-delivery-map,
+.premium-shell.retela-dark-shell .retela-delivery-map {
+  border-color: var(--retela-border-dark) !important;
+  background: #0f1a15 !important;
+}
+
+.retela-dark .retela-delivery-map-card p,
+.premium-shell.retela-dark-shell .retela-delivery-map-card p {
+  color: var(--retela-text-muted-dark) !important;
 }
 
 .retela-dark .recharts-cartesian-grid line {

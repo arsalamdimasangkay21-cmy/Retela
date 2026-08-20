@@ -532,6 +532,10 @@ async function ensureCoreTables() {
       email VARCHAR(160) NULL UNIQUE,
       phone_number VARCHAR(20) NULL UNIQUE,
       location VARCHAR(255) NULL,
+      delivery_latitude DECIMAL(10,7) NULL,
+      delivery_longitude DECIMAL(10,7) NULL,
+      delivery_landmark VARCHAR(255) NULL,
+      delivery_notes TEXT NULL,
       birthday DATE NULL,
       gender VARCHAR(40) NULL,
       shop_description TEXT NULL,
@@ -560,6 +564,10 @@ async function ensureCoreTables() {
   await ensureColumn("users", "display_name", "display_name VARCHAR(120) NULL AFTER username");
   await ensureColumn("users", "phone_number", "phone_number VARCHAR(20) NULL UNIQUE AFTER email");
   await ensureColumn("users", "location", "location VARCHAR(255) NULL AFTER phone_number");
+  await ensureColumn("users", "delivery_latitude", "delivery_latitude DECIMAL(10,7) NULL AFTER location");
+  await ensureColumn("users", "delivery_longitude", "delivery_longitude DECIMAL(10,7) NULL AFTER delivery_latitude");
+  await ensureColumn("users", "delivery_landmark", "delivery_landmark VARCHAR(255) NULL AFTER delivery_longitude");
+  await ensureColumn("users", "delivery_notes", "delivery_notes TEXT NULL AFTER delivery_landmark");
   await ensureColumn("users", "birthday", "birthday DATE NULL AFTER location");
   await ensureColumn("users", "gender", "gender VARCHAR(40) NULL AFTER birthday");
   await ensureColumn("users", "shop_description", "shop_description TEXT NULL AFTER gender");
@@ -677,6 +685,11 @@ async function ensureCoreTables() {
       checkout_url TEXT NULL,
       tracking_number VARCHAR(120) NULL,
       fulfillment_method ENUM('delivery','pickup') NOT NULL DEFAULT 'delivery',
+      delivery_address VARCHAR(500) NULL,
+      delivery_latitude DECIMAL(10,7) NULL,
+      delivery_longitude DECIMAL(10,7) NULL,
+      delivery_landmark VARCHAR(255) NULL,
+      delivery_notes TEXT NULL,
       subtotal_amount DECIMAL(10,2) NOT NULL DEFAULT 0,
       coupon_discount DECIMAL(10,2) NOT NULL DEFAULT 0,
       sale_discount DECIMAL(10,2) NOT NULL DEFAULT 0,
@@ -706,6 +719,11 @@ async function ensureCoreTables() {
   await ensureColumn("orders", "checkout_url", "checkout_url TEXT NULL AFTER checkout_session_id");
   await ensureColumn("orders", "tracking_number", "tracking_number VARCHAR(120) NULL AFTER checkout_url");
   await ensureColumn("orders", "fulfillment_method", "fulfillment_method ENUM('delivery','pickup') NOT NULL DEFAULT 'delivery' AFTER tracking_number");
+  await ensureColumn("orders", "delivery_address", "delivery_address VARCHAR(500) NULL AFTER fulfillment_method");
+  await ensureColumn("orders", "delivery_latitude", "delivery_latitude DECIMAL(10,7) NULL AFTER delivery_address");
+  await ensureColumn("orders", "delivery_longitude", "delivery_longitude DECIMAL(10,7) NULL AFTER delivery_latitude");
+  await ensureColumn("orders", "delivery_landmark", "delivery_landmark VARCHAR(255) NULL AFTER delivery_longitude");
+  await ensureColumn("orders", "delivery_notes", "delivery_notes TEXT NULL AFTER delivery_landmark");
   await ensureColumn("orders", "subtotal_amount", "subtotal_amount DECIMAL(10,2) NOT NULL DEFAULT 0 AFTER fulfillment_method");
   await ensureColumn("orders", "coupon_discount", "coupon_discount DECIMAL(10,2) NOT NULL DEFAULT 0 AFTER subtotal_amount");
   await ensureColumn("orders", "sale_discount", "sale_discount DECIMAL(10,2) NOT NULL DEFAULT 0 AFTER coupon_discount");

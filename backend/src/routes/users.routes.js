@@ -11,6 +11,7 @@ let userColumnsReady;
 
 const SAFE_USER_SELECT = `
   SELECT id, username, display_name, email, phone_number, location,
+    delivery_latitude, delivery_longitude, delivery_landmark, delivery_notes,
     DATE_FORMAT(birthday, '%Y-%m-%d') AS birthday,
     gender, shop_description, profile_photo_url, gcash_number, debit_account_name, debit_account_number,
     role, status, is_verified, is_verified AS isVerified
@@ -39,6 +40,13 @@ function normalizeBirthday(value) {
     throw new HttpError(400, "Birthday must be a valid date");
   }
   return birthday;
+}
+
+function nullableCoordinate(min, max) {
+  return z.preprocess(
+    (value) => (value === "" || value === null ? null : value),
+    z.coerce.number().min(min).max(max).nullable()
+  ).optional();
 }
 
 async function getSafeUser(userId) {
@@ -78,7 +86,7 @@ async function ensureUserColumns() {
        FROM INFORMATION_SCHEMA.COLUMNS
        WHERE TABLE_SCHEMA = DATABASE()
          AND TABLE_NAME = 'users'
-         AND COLUMN_NAME IN ('display_name', 'phone_number', 'location', 'birthday', 'gender', 'shop_description', 'profile_photo_url', 'gcash_number', 'debit_account_name', 'debit_account_number', 'preferences', 'last_active_at', 'is_verified')`
+         AND COLUMN_NAME IN ('display_name', 'phone_number', 'location', 'delivery_latitude', 'delivery_longitude', 'delivery_landmark', 'delivery_notes', 'birthday', 'gender', 'shop_description', 'profile_photo_url', 'gcash_number', 'debit_account_name', 'debit_account_number', 'preferences', 'last_active_at', 'is_verified')`
     );
     const columns = new Set(rows.map((row) => row.COLUMN_NAME));
     if (!columns.has("display_name")) {
@@ -89,6 +97,18 @@ async function ensureUserColumns() {
     }
     if (!columns.has("location")) {
       await query("ALTER TABLE users ADD COLUMN location VARCHAR(255) NULL AFTER phone_number");
+    }
+    if (!columns.has("delivery_latitude")) {
+      await query("ALTER TABLE users ADD COLUMN delivery_latitude DECIMAL(10,7) NULL AFTER location");
+    }
+    if (!columns.has("delivery_longitude")) {
+      await query("ALTER TABLE users ADD COLUMN delivery_longitude DECIMAL(10,7) NULL AFTER delivery_latitude");
+    }
+    if (!columns.has("delivery_landmark")) {
+      await query("ALTER TABLE users ADD COLUMN delivery_landmark VARCHAR(255) NULL AFTER delivery_longitude");
+    }
+    if (!columns.has("delivery_notes")) {
+      await query("ALTER TABLE users ADD COLUMN delivery_notes TEXT NULL AFTER delivery_landmark");
     }
     if (!columns.has("birthday")) {
       await query("ALTER TABLE users ADD COLUMN birthday DATE NULL AFTER location");
@@ -164,6 +184,10 @@ router.patch("/me", upload.single("profilePhoto"), asyncHandler(async (req, res)
     email: z.string().email().optional().or(z.literal("")),
     phone_number: z.string().trim().optional(),
     location: z.string().trim().optional(),
+    delivery_latitude: nullableCoordinate(-90, 90),
+    delivery_longitude: nullableCoordinate(-180, 180),
+    delivery_landmark: z.string().trim().max(255).optional(),
+    delivery_notes: z.string().trim().max(1000).optional(),
     birthday: z.string().trim().optional().or(z.literal("")),
     gender: z.string().trim().max(40).optional(),
     shop_description: z.string().trim().optional(),
@@ -206,6 +230,26 @@ router.patch("/me", upload.single("profilePhoto"), asyncHandler(async (req, res)
   if (hasOwn(input, "location")) {
     updates.push("location = :location");
     params.location = nullableTrim(input.location);
+  }
+
+  if (hasOwn(input, "delivery_latitude")) {
+    updates.push("delivery_latitude = :deliveryLatitude");
+    params.deliveryLatitude = input.delivery_latitude ?? null;
+  }
+
+  if (hasOwn(input, "delivery_longitude")) {
+    updates.push("delivery_longitude = :deliveryLongitude");
+    params.deliveryLongitude = input.delivery_longitude ?? null;
+  }
+
+  if (hasOwn(input, "delivery_landmark")) {
+    updates.push("delivery_landmark = :deliveryLandmark");
+    params.deliveryLandmark = nullableTrim(input.delivery_landmark);
+  }
+
+  if (hasOwn(input, "delivery_notes")) {
+    updates.push("delivery_notes = :deliveryNotes");
+    params.deliveryNotes = nullableTrim(input.delivery_notes);
   }
 
   if (hasOwn(input, "birthday")) {

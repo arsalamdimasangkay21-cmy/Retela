@@ -15,6 +15,7 @@ import ConfirmDialog from "../components/ConfirmDialog";
 import { dispatchCustomerToast } from "../components/CustomerToastStack";
 import FaceVerification from "../components/FaceVerification";
 import NotificationPreviewPanel from "../components/NotificationPreviewPanel";
+import OrderDeliveryInfo from "../components/OrderDeliveryInfo";
 import ProductImage from "../components/ProductImage";
 import ProductQuickView from "../components/ProductQuickView";
 import { Button, Card, Field } from "../components/ui";
@@ -34,6 +35,7 @@ const returnFlow = ["pending", "under_review", "approved", "rejected", "refunded
 const onlinePaymentMethods = ["gcash", "debit", "credit", "maya"];
 const defaultReturnShippingFee = 50;
 const defaultCustomerFilters = { search: "", brand: "all", category: "all", size: "all", stock: "all", minPrice: "", maxPrice: "", sortBy: "latest" };
+const defaultDeliveryCenter = { latitude: 7.1907, longitude: 124.5308 };
 const paymentNumberLabels = {
   gcash: "GCash mobile number",
   debit: "Billing mobile number",
@@ -70,6 +72,66 @@ function customerNotificationRows(rows = []) {
 
 function paymentCheckoutUrl(payload) {
   return payload?.checkoutUrl || payload?.checkout_url || payload?.url || "";
+}
+
+function finiteCoordinate(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function normalizeDeliveryLocation(value = {}) {
+  return {
+    address: String(value.address ?? value.delivery_address ?? value.location ?? "").trim(),
+    latitude: finiteCoordinate(value.latitude ?? value.delivery_latitude),
+    longitude: finiteCoordinate(value.longitude ?? value.delivery_longitude),
+    landmark: String(value.landmark ?? value.delivery_landmark ?? "").trim(),
+    notes: String(value.notes ?? value.delivery_notes ?? "").trim()
+  };
+}
+
+function hasDeliveryLocation(value) {
+  return Boolean(normalizeDeliveryLocation(value).address);
+}
+
+function hasDeliveryCoordinates(value) {
+  const location = normalizeDeliveryLocation(value);
+  return location.latitude !== null && location.longitude !== null;
+}
+
+function deliveryLocationFromProfile(profile) {
+  return normalizeDeliveryLocation({
+    address: profile?.location,
+    latitude: profile?.delivery_latitude,
+    longitude: profile?.delivery_longitude,
+    landmark: profile?.delivery_landmark,
+    notes: profile?.delivery_notes
+  });
+}
+
+function deliveryLocationFromOrder(order) {
+  const location = normalizeDeliveryLocation({
+    address: order?.delivery_address || order?.location,
+    latitude: order?.delivery_latitude,
+    longitude: order?.delivery_longitude,
+    landmark: order?.delivery_landmark,
+    notes: order?.delivery_notes
+  });
+  return location;
+}
+
+function deliveryMapUrl(location) {
+  const normalized = normalizeDeliveryLocation(location);
+  if (hasDeliveryCoordinates(normalized)) {
+    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${normalized.latitude},${normalized.longitude}`)}`;
+  }
+  if (normalized.address) {
+    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(normalized.address)}`;
+  }
+  return "";
+}
+
+function deliveryLocationStorageKey(userId) {
+  return `retela_delivery_location_${userId || "guest"}`;
 }
 
 function stockStatus(stock) {
@@ -134,6 +196,8 @@ export default function CustomerDashboard({ active, onChange }) {
   const [profile, setProfile] = useState(null);
   const [profileInitial, setProfileInitial] = useState(null);
   const [profilePhoto, setProfilePhoto] = useState(null);
+  const [deliveryLocation, setDeliveryLocation] = useState(null);
+  const [locationSelectorOpen, setLocationSelectorOpen] = useState(false);
   const [deactivating, setDeactivating] = useState(false);
   const [deactivateConfirmOpen, setDeactivateConfirmOpen] = useState(false);
   const filtersRef = useRef(filters);
@@ -282,6 +346,24 @@ export default function CustomerDashboard({ active, onChange }) {
       mayaNumber: details.mayaNumber || profile.phone_number
     }));
   }, [profile?.phone_number]);
+
+  useEffect(() => {
+    if (!profile?.id) return;
+    const profileLocation = deliveryLocationFromProfile(profile);
+    const stored = localStorage.getItem(deliveryLocationStorageKey(profile.id));
+    if (stored) {
+      try {
+        const parsed = normalizeDeliveryLocation(JSON.parse(stored));
+        if (hasDeliveryLocation(parsed)) {
+          setDeliveryLocation(parsed);
+          return;
+        }
+      } catch {
+        localStorage.removeItem(deliveryLocationStorageKey(profile.id));
+      }
+    }
+    setDeliveryLocation(hasDeliveryLocation(profileLocation) ? profileLocation : null);
+  }, [profile?.id, profile?.location, profile?.delivery_latitude, profile?.delivery_longitude, profile?.delivery_landmark, profile?.delivery_notes]);
 
   function notifyCart(message, type = "success") {
     dispatchCustomerToast({ type, message });
@@ -486,6 +568,11 @@ export default function CustomerDashboard({ active, onChange }) {
 
   async function checkout() {
     if (checkoutLoading) return;
+    const selectedDeliveryLocation = normalizeDeliveryLocation(deliveryLocation);
+    if (fulfillmentMethod === "delivery" && !hasDeliveryLocation(selectedDeliveryLocation)) {
+      notifyCart("Please set your delivery location before checkout.", "warning");
+      return;
+    }
     const stockOk = await recheckCartStock({ productIds: selectedCartIds });
     if (!stockOk) return;
     const billingPhone = paymentMethod === "cod" ? "" : (paymentDetails[paymentNumberKey(paymentMethod)] || "").trim();
@@ -507,6 +594,11 @@ export default function CustomerDashboard({ active, onChange }) {
         payment_method: paymentMethod,
         fulfillment_method: fulfillmentMethod,
         coupon_code: appliedCoupon?.code || "",
+        delivery_address: selectedDeliveryLocation.address,
+        delivery_latitude: selectedDeliveryLocation.latitude,
+        delivery_longitude: selectedDeliveryLocation.longitude,
+        delivery_landmark: selectedDeliveryLocation.landmark,
+        delivery_notes: selectedDeliveryLocation.notes,
         items: selectedCartItems.map(({ product_id, quantity }) => ({ product_id, quantity }))
       });
       clearGetCache("/orders");
@@ -557,7 +649,46 @@ export default function CustomerDashboard({ active, onChange }) {
       notifyCart("Please select at least one item.", "warning");
       return;
     }
+    if (fulfillmentMethod === "delivery" && !hasDeliveryLocation(deliveryLocation)) {
+      notifyCart("Please set your delivery location before checkout.", "warning");
+      setLocationSelectorOpen(true);
+      return;
+    }
     setCheckoutSummaryOpen(true);
+  }
+
+  async function saveCheckoutDeliveryLocation(nextLocation, { saveAsDefault = false } = {}) {
+    const normalized = normalizeDeliveryLocation(nextLocation);
+    if (!hasDeliveryLocation(normalized)) {
+      notifyCart("Please choose a delivery address first.", "warning");
+      return;
+    }
+    setDeliveryLocation(normalized);
+    if (profile?.id) {
+      localStorage.setItem(deliveryLocationStorageKey(profile.id), JSON.stringify(normalized));
+    }
+    setLocationSelectorOpen(false);
+    if (saveAsDefault) {
+      try {
+        const { data } = await api.patch("/users/me", {
+          location: normalized.address,
+          delivery_latitude: normalized.latitude,
+          delivery_longitude: normalized.longitude,
+          delivery_landmark: normalized.landmark,
+          delivery_notes: normalized.notes
+        });
+        clearGetCache("/users/me");
+        localStorage.setItem("retela_user", JSON.stringify(data));
+        setUser(data);
+        setProfile(data);
+        setProfileInitial(data);
+        notifyCart("Delivery location saved as default.");
+      } catch (error) {
+        notifyCart(error?.response?.data?.message || "Delivery location was selected, but could not be saved as default.", "error");
+      }
+    } else {
+      notifyCart("Delivery location selected.");
+    }
   }
 
   async function saveProfile(event, profileInput = profile, photoInput = profilePhoto) {
@@ -641,6 +772,8 @@ export default function CustomerDashboard({ active, onChange }) {
           couponError={couponError}
           applyCoupon={applyCoupon}
           promotions={promotions}
+          deliveryLocation={deliveryLocation}
+          onOpenLocationSelector={() => setLocationSelectorOpen(true)}
           paymentMethod={paymentMethod}
           selectPaymentMethod={selectPaymentMethod}
           paymentDetails={paymentDetails}
@@ -662,9 +795,17 @@ export default function CustomerDashboard({ active, onChange }) {
             paymentDetails={paymentDetails}
             paymentError={paymentError}
             updatePaymentNumber={updatePaymentNumber}
+            deliveryLocation={deliveryLocation}
             checkout={checkout}
             checkoutLoading={checkoutLoading}
             onClose={() => setCheckoutSummaryOpen(false)}
+          />
+        ) : null}
+        {locationSelectorOpen ? (
+          <DeliveryLocationSelector
+            initialLocation={deliveryLocation || deliveryLocationFromProfile(profile)}
+            onClose={() => setLocationSelectorOpen(false)}
+            onSave={saveCheckoutDeliveryLocation}
           />
         ) : null}
         {redirectingPayment ? <PaymentLoadingOverlay method={redirectingPayment} /> : null}
@@ -810,6 +951,8 @@ function CartPage({
   couponError,
   applyCoupon,
   promotions,
+  deliveryLocation,
+  onOpenLocationSelector,
   paymentMethod,
   selectPaymentMethod,
   updateCartQuantity,
@@ -822,6 +965,8 @@ function CartPage({
 }) {
   const allSelected = Boolean(cart.length) && selectedCartIds.length === cart.length;
   const selectedCount = selectedItems.length;
+  const normalizedDeliveryLocation = normalizeDeliveryLocation(deliveryLocation);
+  const hasLocation = hasDeliveryLocation(normalizedDeliveryLocation);
   return (
     <div className="retela-customer-checkout-layout grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
       <Card>
@@ -886,6 +1031,30 @@ function CartPage({
 
       <Card className="retela-checkout-card h-fit">
         <h3 className="font-display text-xl font-bold text-slate-950">Checkout</h3>
+        <div className={`retela-delivery-location-card mt-4 ${hasLocation ? "has-location" : ""}`}>
+          <div className="retela-delivery-location-icon">
+            <MapPin size={18} />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="retela-delivery-location-eyebrow">Delivery Location</p>
+            {hasLocation ? (
+              <>
+                <strong>{normalizedDeliveryLocation.address}</strong>
+                <span>{hasDeliveryCoordinates(normalizedDeliveryLocation) ? "Exact location saved" : "Address saved. Add an exact pin when available."}</span>
+                {normalizedDeliveryLocation.landmark ? <span>{normalizedDeliveryLocation.landmark}</span> : null}
+              </>
+            ) : (
+              <>
+                <strong>No delivery location selected.</strong>
+                <span>Set where this order should be delivered before checkout.</span>
+              </>
+            )}
+          </div>
+          <button type="button" onClick={onOpenLocationSelector} className="retela-delivery-location-action">
+            {hasLocation ? "Change" : "Set Location"}
+            <ChevronRight size={15} />
+          </button>
+        </div>
         <div className="mt-4 grid gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-3">
           <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">Payment Method</p>
           <div className="payment-methods grid grid-cols-2 gap-2">
@@ -1490,6 +1659,246 @@ function SelectionCircle({ selected }) {
   );
 }
 
+function DeliveryLocationSelector({ initialLocation, onClose, onSave }) {
+  const [draft, setDraft] = useState(() => normalizeDeliveryLocation(initialLocation));
+  const [query, setQuery] = useState(normalizeDeliveryLocation(initialLocation).address || "");
+  const [results, setResults] = useState([]);
+  const [searching, setSearching] = useState(false);
+  const [locating, setLocating] = useState(false);
+  const [resolving, setResolving] = useState(false);
+  const [saveAsDefault, setSaveAsDefault] = useState(false);
+
+  async function reverseGeocode(latitude, longitude) {
+    setResolving(true);
+    try {
+      const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(latitude)}&lon=${encodeURIComponent(longitude)}&zoom=18&addressdetails=1`);
+      if (!response.ok) throw new Error("Reverse geocoding failed");
+      const data = await response.json();
+      const address = String(data?.display_name || "").trim();
+      if (address) {
+        setDraft((current) => ({ ...current, address, latitude, longitude }));
+        setQuery(address);
+      } else {
+        setDraft((current) => ({ ...current, latitude, longitude }));
+      }
+    } catch {
+      setDraft((current) => ({ ...current, latitude, longitude }));
+      dispatchCustomerToast({ type: "warning", message: "Location pin updated, but the address could not be resolved." });
+    } finally {
+      setResolving(false);
+    }
+  }
+
+  async function searchLocation(event) {
+    event?.preventDefault();
+    const text = query.trim();
+    if (!text) return;
+    setSearching(true);
+    try {
+      const response = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=5&countrycodes=ph&q=${encodeURIComponent(text)}`);
+      if (!response.ok) throw new Error("Search failed");
+      const data = await response.json();
+      setResults((Array.isArray(data) ? data : []).map((item) => ({
+        id: item.place_id,
+        address: item.display_name,
+        latitude: Number(item.lat),
+        longitude: Number(item.lon)
+      })).filter((item) => item.address && Number.isFinite(item.latitude) && Number.isFinite(item.longitude)));
+    } catch {
+      dispatchCustomerToast({ type: "error", message: "Could not search that address right now." });
+    } finally {
+      setSearching(false);
+    }
+  }
+
+  function useCurrentLocation() {
+    if (!navigator.geolocation) {
+      dispatchCustomerToast({ type: "error", message: "Current location is not supported by this browser." });
+      return;
+    }
+    setLocating(true);
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const latitude = Number(position.coords.latitude);
+        const longitude = Number(position.coords.longitude);
+        setLocating(false);
+        void reverseGeocode(latitude, longitude);
+      },
+      () => {
+        setLocating(false);
+        dispatchCustomerToast({ type: "error", message: "Unable to access your current location. You can search for an address or select a location manually." });
+      },
+      { enableHighAccuracy: true, timeout: 12000, maximumAge: 60000 }
+    );
+  }
+
+  function selectSearchResult(result) {
+    setDraft((current) => ({ ...current, address: result.address, latitude: result.latitude, longitude: result.longitude }));
+    setQuery(result.address);
+    setResults([]);
+  }
+
+  function submitLocation(event) {
+    event.preventDefault();
+    const next = normalizeDeliveryLocation(draft);
+    if (!next.address) {
+      dispatchCustomerToast({ type: "warning", message: "Please choose a delivery address first." });
+      return;
+    }
+    onSave(next, { saveAsDefault });
+  }
+
+  return createPortal(
+    <motion.div className="retela-location-selector-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onMouseDown={onClose}>
+      <motion.form className="retela-location-selector" initial={{ opacity: 0, y: 18, scale: 0.96 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 18, scale: 0.96 }} onSubmit={submitLocation} onMouseDown={(event) => event.stopPropagation()}>
+        <div className="retela-location-selector-header">
+          <div>
+            <p>Checkout Delivery</p>
+            <h3>Set Delivery Location</h3>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close delivery location selector">
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="retela-location-selector-body">
+          <div className="retela-location-search-panel">
+            <div className="retela-location-search-row">
+              <label className="retela-location-search-input">
+                <Search size={17} />
+                <input
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      void searchLocation(event);
+                    }
+                  }}
+                  placeholder="Search for street, barangay, city, landmark..."
+                />
+              </label>
+              <button type="button" onClick={searchLocation} disabled={searching}>
+                {searching ? <Loader2 size={16} className="animate-spin" /> : <Search size={16} />}
+                Search
+              </button>
+            </div>
+            <button type="button" className="retela-location-current-button" onClick={useCurrentLocation} disabled={locating}>
+              {locating ? <Loader2 size={16} className="animate-spin" /> : <MapPin size={16} />}
+              Use My Current Location
+            </button>
+            {results.length ? (
+              <div className="retela-location-search-results">
+                {results.map((result) => (
+                  <button type="button" key={result.id} onClick={() => selectSearchResult(result)}>
+                    <MapPin size={15} />
+                    <span>{result.address}</span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+
+          <LightweightDeliveryMap location={draft} resolving={resolving} onSelect={(latitude, longitude) => reverseGeocode(latitude, longitude)} />
+
+          <div className="retela-location-fields">
+            <label>
+              <span>Selected Address</span>
+              <textarea value={draft.address} onChange={(event) => setDraft((current) => ({ ...current, address: event.target.value }))} placeholder="Selected delivery address" rows={2} />
+            </label>
+            <label>
+              <span>House / Building / Landmark</span>
+              <input value={draft.landmark} onChange={(event) => setDraft((current) => ({ ...current, landmark: event.target.value }))} placeholder="Green gate beside barangay hall" />
+            </label>
+            <label>
+              <span>Delivery Notes</span>
+              <input value={draft.notes} onChange={(event) => setDraft((current) => ({ ...current, notes: event.target.value }))} placeholder="Call when outside." />
+            </label>
+            <label className="retela-location-default-toggle">
+              <input type="checkbox" checked={saveAsDefault} onChange={(event) => setSaveAsDefault(event.target.checked)} />
+              <span>Save as my default delivery location</span>
+            </label>
+          </div>
+        </div>
+
+        <div className="retela-location-selector-footer">
+          <button type="button" onClick={onClose}>Cancel</button>
+          <button type="submit"><Save size={16} /> Save Location</button>
+        </div>
+      </motion.form>
+    </motion.div>,
+    document.body
+  );
+}
+
+function LightweightDeliveryMap({ location, resolving, onSelect }) {
+  const [zoom, setZoom] = useState(16);
+  const normalized = normalizeDeliveryLocation(location);
+  const latitude = normalized.latitude ?? defaultDeliveryCenter.latitude;
+  const longitude = normalized.longitude ?? defaultDeliveryCenter.longitude;
+  const center = projectToTile(latitude, longitude, zoom);
+  const tileX = Math.floor(center.x);
+  const tileY = Math.floor(center.y);
+  const offsetX = center.x - tileX;
+  const offsetY = center.y - tileY;
+  const tiles = [];
+  for (let y = -1; y <= 1; y += 1) {
+    for (let x = -1; x <= 1; x += 1) {
+      tiles.push({ x, y, tileX: tileX + x, tileY: tileY + y });
+    }
+  }
+
+  function handleMapClick(event) {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const dx = (event.clientX - rect.left - rect.width / 2) / 256;
+    const dy = (event.clientY - rect.top - rect.height / 2) / 256;
+    const next = unprojectFromTile(center.x + dx, center.y + dy, zoom);
+    onSelect(next.latitude, next.longitude);
+  }
+
+  return (
+    <div className="retela-delivery-map-card">
+      <div className="retela-delivery-map" onClick={handleMapClick} role="button" tabIndex={0} aria-label="Tap map to move delivery pin">
+        {tiles.map((tile) => (
+          <img
+            key={`${tile.tileX}-${tile.tileY}-${zoom}`}
+            src={`https://tile.openstreetmap.org/${zoom}/${tile.tileX}/${tile.tileY}.png`}
+            alt=""
+            loading="lazy"
+            style={{
+              left: `calc(50% + ${(tile.x - offsetX) * 256}px)`,
+              top: `calc(50% + ${(tile.y - offsetY) * 256}px)`
+            }}
+          />
+        ))}
+        <span className="retela-delivery-map-pin"><MapPin size={30} /></span>
+        <div className="retela-delivery-map-tools">
+          <button type="button" onClick={(event) => { event.stopPropagation(); setZoom((value) => Math.min(18, value + 1)); }}>+</button>
+          <button type="button" onClick={(event) => { event.stopPropagation(); setZoom((value) => Math.max(12, value - 1)); }}>-</button>
+        </div>
+        {resolving ? <span className="retela-delivery-map-status"><Loader2 size={14} className="animate-spin" /> Resolving address</span> : null}
+      </div>
+      <p>Tap the map to move the pin. Use search or current location for faster positioning.</p>
+    </div>
+  );
+}
+
+function projectToTile(latitude, longitude, zoom) {
+  const latRad = (latitude * Math.PI) / 180;
+  const scale = 2 ** zoom;
+  return {
+    x: ((longitude + 180) / 360) * scale,
+    y: ((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * scale
+  };
+}
+
+function unprojectFromTile(x, y, zoom) {
+  const scale = 2 ** zoom;
+  const longitude = (x / scale) * 360 - 180;
+  const latitude = (Math.atan(Math.sinh(Math.PI * (1 - (2 * y) / scale))) * 180) / Math.PI;
+  return { latitude, longitude };
+}
+
 function PaymentDetailsPanel({ method, value, error, onChange }) {
   const Icon = method === "debit" || method === "credit" ? CreditCard : WalletCards;
   return (
@@ -1516,7 +1925,8 @@ function PaymentDetailsPanel({ method, value, error, onChange }) {
   );
 }
 
-function CheckoutSummaryModal({ items, pricing, paymentMethod, paymentDetails, paymentError, updatePaymentNumber, checkout, checkoutLoading, onClose }) {
+function CheckoutSummaryModal({ items, pricing, paymentMethod, paymentDetails, paymentError, updatePaymentNumber, deliveryLocation, checkout, checkoutLoading, onClose }) {
+  const normalizedDeliveryLocation = normalizeDeliveryLocation(deliveryLocation);
   return createPortal(
     <motion.div
       className="retela-checkout-modal-backdrop fixed inset-0 z-[175] grid place-items-center overflow-y-auto bg-black/45 p-4 backdrop-blur-xl"
@@ -1558,6 +1968,14 @@ function CheckoutSummaryModal({ items, pricing, paymentMethod, paymentDetails, p
           <SummaryLine label="Sales Discount" value={`-${money(pricing.saleDiscount)}`} highlight />
           <SummaryLine label="Shipping Fee" value={money(pricing.shippingFee)} />
           <SummaryLine label="Final Total" value={money(pricing.total)} strong />
+        </div>
+
+        <div className="retela-checkout-summary-delivery mt-5 rounded-2xl border border-neonbrand/15 bg-neonbrand/5 p-4">
+          <p className="text-xs font-bold uppercase tracking-[0.16em] text-neonbrand/75">Delivery Location</p>
+          <h4 className="mt-2 break-words text-sm font-bold text-white">{normalizedDeliveryLocation.address || "No delivery location selected."}</h4>
+          {normalizedDeliveryLocation.landmark ? <p className="mt-2 break-words text-xs font-semibold text-white/58">Landmark: {normalizedDeliveryLocation.landmark}</p> : null}
+          {normalizedDeliveryLocation.notes ? <p className="mt-1 break-words text-xs font-semibold text-white/58">Notes: {normalizedDeliveryLocation.notes}</p> : null}
+          {hasDeliveryCoordinates(normalizedDeliveryLocation) ? <p className="mt-2 text-xs font-bold text-neonbrand">Exact map pin saved for this order.</p> : null}
         </div>
 
         <div className="mt-5 rounded-2xl border border-neonbrand/15 bg-neonbrand/5 p-4">
@@ -2016,6 +2434,7 @@ function Orders({ rows, profile, reviews = [], returnRequests = [], onNavigate, 
         const cancelled = isOrderCancelled(order);
         const canCancel = canCancelOrder(order);
         const canPay = canPayOrder(order);
+        const orderMapUrl = deliveryMapUrl(deliveryLocationFromOrder(order));
         return (
         <div key={order.id} role="button" tabIndex={0} onClick={() => setSelectedOrderId(order.id)} onKeyDown={(event) => event.key === "Enter" ? setSelectedOrderId(order.id) : null} className="text-left outline-none">
         <Card className="rounded-[20px] border-slate-100 bg-white p-4 shadow-[0_14px_34px_rgba(15,23,42,0.07)] transition hover:-translate-y-0.5 hover:border-emerald-200 hover:shadow-[0_20px_45px_rgba(15,23,42,0.1)]">
@@ -2057,8 +2476,8 @@ function Orders({ rows, profile, reviews = [], returnRequests = [], onNavigate, 
           </div>
           {!cancelled ? <div className="mt-3 grid grid-cols-5 gap-2">{flow.map((s) => <div key={s} className={`h-1.5 rounded-full ${flow.indexOf(s) <= flow.indexOf(normalizeOrderStatus(order.status)) ? "bg-emerald-500" : "bg-slate-200"}`} />)}</div> : null}
           <div className="mt-3 flex flex-wrap items-center gap-2">
-            {!cancelled && order.fulfillment_method === "delivery" ? (
-              <a onClick={(event) => event.stopPropagation()} className="inline-flex min-h-9 min-w-[150px] items-center justify-center gap-2 rounded-xl border border-emerald-100 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700 transition hover:bg-emerald-100 max-[600px]:w-full" href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(order.location || "delivery location")}`} target="_blank" rel="noreferrer">
+            {!cancelled && order.fulfillment_method === "delivery" && orderMapUrl ? (
+              <a onClick={(event) => event.stopPropagation()} className="inline-flex min-h-9 min-w-[150px] items-center justify-center gap-2 rounded-xl border border-emerald-100 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700 transition hover:bg-emerald-100 max-[600px]:w-full" href={orderMapUrl} target="_blank" rel="noreferrer">
                 <MapPin size={15} /> Open tracking map
               </a>
             ) : null}
@@ -2121,11 +2540,7 @@ function CustomerOrderModal({ loading, selectedOrder, displayNumber, onPay, payi
                   <ModalInfo label="Tracking Number" value={order.tracking_number || "Waiting for admin"} />
                   <ModalInfo label="Payment Status" value={customerOrderStatus(order.payment_status || "unpaid")} />
                 </div>
-                {!cancelled && order.fulfillment_method === "delivery" ? (
-                  <a className="inline-flex w-fit items-center gap-2 rounded-2xl border border-emerald-100 bg-emerald-50 px-3 py-2 text-sm font-bold text-emerald-700 transition hover:bg-emerald-100" href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(order.location || "delivery location")}`} target="_blank" rel="noreferrer">
-                    <MapPin size={16} /> Open tracking map
-                  </a>
-                ) : null}
+                {order.fulfillment_method === "delivery" ? <OrderDeliveryInfo order={order} title="Delivery Information" mapLabel="View Location" /> : null}
                 <div className="grid gap-2">
                   <p className="retela-modal-eyebrow">Items</p>
                   {selectedOrder.items.map((item) => (
