@@ -99,9 +99,14 @@ export default function AuthPage() {
   const resetPasswordBlueprint = useMemo(() => getPasswordBlueprint(resetForm.password), [resetForm.password]);
   const resetPasswordStrength = useMemo(() => getPasswordStrength(resetPasswordBlueprint), [resetPasswordBlueprint]);
   const resetPasswordStrong = resetPasswordBlueprint.every((item) => item.met);
-  const recaptchaSiteKey = import.meta.env.VITE_RECAPTCHA_SITE_KEY || "";
-  const captchaUnavailable = import.meta.env.PROD && !recaptchaSiteKey;
-  const captchaRequired = Boolean(recaptchaSiteKey);
+  const captchaSiteKey = import.meta.env.VITE_RECAPTCHA_SITE_KEY?.trim() || "";
+  const captchaConfigured = Boolean(captchaSiteKey);
+
+  useEffect(() => {
+    if (import.meta.env.DEV) {
+      console.log("reCAPTCHA configured:", captchaConfigured);
+    }
+  }, [captchaConfigured]);
 
   useEffect(() => {
     let cancelled = false;
@@ -127,11 +132,11 @@ export default function AuthPage() {
   async function submitLogin(event) {
     event.preventDefault();
     setMessage("");
-    if (captchaUnavailable) {
+    if (!captchaConfigured) {
       setMessage("CAPTCHA is not configured. Please contact support.");
       return;
     }
-    if (captchaRequired && !captchaToken) {
+    if (!captchaToken) {
       setMessage("Please complete the CAPTCHA first.");
       return;
     }
@@ -388,13 +393,13 @@ export default function AuthPage() {
               <Field id="login-username" name="username" autoComplete="username" icon={User} placeholder="Username" value={loginForm.username} onChange={(e) => setLoginForm({ ...loginForm, username: e.target.value })} wrapperClassName="auth-login-field" />
               <Field id="login-password" name="password" autoComplete="current-password" icon={KeyRound} type="password" placeholder="Password" value={loginForm.password} onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })} wrapperClassName="auth-login-field" />
               <RecaptchaCheckbox
-                siteKey={recaptchaSiteKey}
+                siteKey={captchaSiteKey}
                 resetKey={captchaResetKey}
                 onChange={handleCaptchaChange}
                 onExpired={handleCaptchaExpired}
                 onError={handleCaptchaError}
               />
-              <button type="submit" className="auth-login-button" disabled={loading === "login" || captchaUnavailable}>
+              <button type="submit" className="auth-login-button" disabled={loading === "login" || !captchaConfigured}>
                 <span>{loading === "login" ? <><Spinner /> Logging in...</> : "Login"}</span>
                 {loading === "login" ? null : <ArrowRight size={18} />}
               </button>
