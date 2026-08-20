@@ -16,6 +16,18 @@ function makeTransactionNumber() {
   return `POS-${stamp}-${suffix}`;
 }
 
+async function rollbackQuietly(connection, context) {
+  try {
+    await connection.rollback();
+  } catch (rollbackError) {
+    console.error("[pos-transaction] rollback failed", {
+      context,
+      message: rollbackError?.message,
+      code: rollbackError?.code
+    });
+  }
+}
+
 async function ensurePosSchema() {
   posSchemaReady ||= (async () => {
     await ensureProductInventoryColumns();
@@ -148,7 +160,8 @@ router.post("/checkout", asyncHandler(async (req, res) => {
   const compactItems = Array.from(input.items.reduce((map, item) => {
     map.set(item.product_id, (map.get(item.product_id) || 0) + item.quantity);
     return map;
-  }, new Map()), ([product_id, quantity]) => ({ product_id, quantity }));
+  }, new Map()), ([product_id, quantity]) => ({ product_id, quantity }))
+    .sort((left, right) => Number(left.product_id) - Number(right.product_id));
 
   const conn = await pool.getConnection();
   const inventoryUpdates = [];
@@ -284,7 +297,7 @@ router.post("/checkout", asyncHandler(async (req, res) => {
       items: receiptItems
     });
   } catch (error) {
-    await conn.rollback();
+    await rollbackQuietly(conn, "pos-checkout");
     throw error;
   } finally {
     conn.release();

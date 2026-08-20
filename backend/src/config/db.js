@@ -149,7 +149,14 @@ export async function transaction(callback) {
     await connection.commit();
     return result;
   } catch (error) {
-    await connection.rollback();
+    try {
+      await connection.rollback();
+    } catch (rollbackError) {
+      console.error("[db-transaction] rollback failed", {
+        message: rollbackError?.message,
+        code: rollbackError?.code
+      });
+    }
     throw error;
   } finally {
     connection.release();

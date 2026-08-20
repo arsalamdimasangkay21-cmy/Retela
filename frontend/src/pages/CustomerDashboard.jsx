@@ -203,6 +203,7 @@ export default function CustomerDashboard({ active, onChange }) {
   const filtersRef = useRef(filters);
   const cartRef = useRef(cart);
   const stockRefreshTimerRef = useRef(null);
+  const checkoutInFlightRef = useRef(false);
 
   useEffect(() => {
     filtersRef.current = filters;
@@ -567,7 +568,7 @@ export default function CustomerDashboard({ active, onChange }) {
   }
 
   async function checkout() {
-    if (checkoutLoading) return;
+    if (checkoutInFlightRef.current || checkoutLoading) return;
     const selectedDeliveryLocation = normalizeDeliveryLocation(deliveryLocation);
     if (fulfillmentMethod === "delivery" && !hasDeliveryLocation(selectedDeliveryLocation)) {
       notifyCart("Please set your delivery location before checkout.", "warning");
@@ -583,6 +584,7 @@ export default function CustomerDashboard({ active, onChange }) {
       return;
     }
 
+    checkoutInFlightRef.current = true;
     setCheckoutLoading(true);
     let didRedirect = false;
     try {
@@ -600,7 +602,7 @@ export default function CustomerDashboard({ active, onChange }) {
         delivery_landmark: selectedDeliveryLocation.landmark,
         delivery_notes: selectedDeliveryLocation.notes,
         items: selectedCartItems.map(({ product_id, quantity }) => ({ product_id, quantity }))
-      });
+      }, { timeout: 30000 });
       clearGetCache("/orders");
       clearGetCache("/cart");
       clearGetCache("/products");
@@ -633,10 +635,10 @@ export default function CustomerDashboard({ active, onChange }) {
       } else {
         console.error("Checkout failed:", error);
       }
-      const fallback = paymentMethod !== "cod" ? "Unable to continue to GCash payment." : "Checkout failed. Please try again.";
-      notifyCart(error?.response?.data?.message || error?.message || fallback, "error");
+      notifyCart(checkoutErrorMessage(error, paymentMethod), "error");
     } finally {
       if (!didRedirect) {
+        checkoutInFlightRef.current = false;
         setCheckoutLoading(false);
         setRedirectingPayment(null);
       }
@@ -1098,7 +1100,7 @@ function CartPage({
         </div>
         {!selectedCount ? <p className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm font-bold text-amber-700">Please select at least one item.</p> : null}
         <Button className="retela-checkout-button mt-4 w-full" disabled={!selectedCount || checkoutLoading} onClick={openCheckoutSummary}>
-          <ShoppingCart size={17} /> {checkoutLoading && paymentMethod !== "cod" ? `Redirecting to ${paymentLabel(paymentMethod)}...` : checkoutLoading ? "Preparing..." : paymentMethod === "cod" ? "Checkout" : `Checkout with ${paymentLabel(paymentMethod)}`}
+          <ShoppingCart size={17} /> {checkoutLoading && paymentMethod !== "cod" ? `Redirecting to ${paymentLabel(paymentMethod)}...` : checkoutLoading ? "Processing..." : paymentMethod === "cod" ? "Checkout" : `Checkout with ${paymentLabel(paymentMethod)}`}
         </Button>
       </Card>
     </div>
@@ -1997,7 +1999,7 @@ function CheckoutSummaryModal({ items, pricing, paymentMethod, paymentDetails, p
           <button type="button" onClick={onClose} disabled={checkoutLoading} className="rounded-2xl border border-white/10 bg-white/[0.06] px-5 py-3 text-sm font-bold text-white transition hover:text-neonbrand disabled:opacity-60">Cancel</button>
           <Button type="button" onClick={checkout} disabled={checkoutLoading}>
             {checkoutLoading ? <Loader2 size={17} className="animate-spin" /> : <ShoppingCart size={17} />}
-            {checkoutLoading && paymentMethod !== "cod" ? `Redirecting to ${paymentLabel(paymentMethod)}...` : "Confirm Checkout"}
+            {checkoutLoading && paymentMethod !== "cod" ? `Redirecting to ${paymentLabel(paymentMethod)}...` : checkoutLoading ? "Processing..." : "Confirm Checkout"}
           </Button>
         </div>
       </motion.section>
@@ -2608,6 +2610,20 @@ function paymentNumberKey(method) {
 
 function isValidPaymentNumber(value) {
   return /^[0-9+\-\s()]{7,30}$/.test(String(value || "").trim());
+}
+
+function checkoutErrorMessage(error, paymentMethod = "cod") {
+  const serverMessage = String(error?.response?.data?.message || "").trim();
+  if (serverMessage) return serverMessage;
+  const rawMessage = String(error?.message || "").toLowerCase();
+  const code = String(error?.code || "");
+  if (code === "ECONNABORTED" || code === "ETIMEDOUT" || rawMessage.includes("timeout")) {
+    return "Checkout is taking longer than expected. Please try again.";
+  }
+  if (rawMessage.includes("er_lock_wait_timeout") || rawMessage.includes("lock wait timeout") || rawMessage.includes("deadlock")) {
+    return "This item is currently being updated. Please try checkout again.";
+  }
+  return paymentMethod !== "cod" ? "Unable to continue to payment. Please try again." : "Checkout failed. Please try again.";
 }
 
 function OrderMeta({ label, value }) {

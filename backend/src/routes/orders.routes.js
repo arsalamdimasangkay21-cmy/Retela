@@ -12,6 +12,8 @@ import { ensureCartTable } from "./cart.routes.js";
 const router = Router();
 const statuses = ["pending", "awaiting_payment", "paid", "approved", "processing", "ready", "completed", "cancelled", "payment_failed"];
 const customerCancellableStatuses = new Set(["pending", "awaiting_payment"]);
+const transientOrderLockCodes = new Set(["ER_LOCK_WAIT_TIMEOUT", "ER_LOCK_DEADLOCK"]);
+const maxOrderCreateAttempts = 3;
 let orderColumnsReady;
 
 function normalizeOrderStatus(status) {
@@ -27,6 +29,38 @@ function nullableCoordinate(min, max) {
     (value) => (value === "" || value === null ? null : value),
     z.coerce.number().min(min).max(max).nullable()
   ).optional();
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function compactOrderItems(items = []) {
+  const map = new Map();
+  for (const item of items) {
+    const productId = Number(item.product_id);
+    const quantity = Number(item.quantity || 0);
+    map.set(productId, (map.get(productId) || 0) + quantity);
+  }
+  return [...map.entries()]
+    .map(([product_id, quantity]) => ({ product_id, quantity }))
+    .sort((left, right) => left.product_id - right.product_id);
+}
+
+function isTransientOrderLockError(error) {
+  return transientOrderLockCodes.has(error?.code) || [1205, 1213].includes(Number(error?.errno));
+}
+
+async function rollbackQuietly(connection, context) {
+  try {
+    await connection.rollback();
+  } catch (rollbackError) {
+    console.error("[order-transaction] rollback failed", {
+      context,
+      message: rollbackError?.message,
+      code: rollbackError?.code
+    });
+  }
 }
 
 async function ensureOrderColumns() {
@@ -300,12 +334,214 @@ router.patch("/:id/cancel", requireAuth, requireApproved, asyncHandler(async (re
       order: cancelledOrder
     });
   } catch (error) {
-    await conn.rollback();
+    await rollbackQuietly(conn, "order-cancel");
     throw error;
   } finally {
     conn.release();
   }
 }));
+
+async function createOrderTransactionAttempt(req, input, pricing, attempt) {
+  const conn = await pool.getConnection();
+  const startedAt = Date.now();
+  const userId = req.user.id;
+  console.log("[order-transaction] start", { userId, itemCount: pricing.items.length, attempt });
+
+  try {
+    await conn.beginTransaction();
+    const productIds = pricing.items.map((item) => Number(item.product_id)).sort((left, right) => left - right);
+    const placeholders = productIds.map(() => "?").join(",");
+    const [lockedProducts] = await conn.execute(
+      `SELECT id, name, price, stock
+       FROM products
+       WHERE id IN (${placeholders})
+         AND is_deleted = FALSE
+       ORDER BY id ASC
+       FOR UPDATE`,
+      productIds
+    );
+    if (lockedProducts.length !== productIds.length) throw new HttpError(404, "Apparel item not found");
+    const productById = new Map(lockedProducts.map((product) => [Number(product.id), product]));
+
+    for (const item of pricing.items) {
+      const product = productById.get(Number(item.product_id));
+      if (!product) throw new HttpError(404, "Apparel item not found");
+      if (Number(product.stock || 0) < item.quantity) {
+        throw new HttpError(400, `Only ${product.stock} items remaining in stock.`);
+      }
+      if (Math.abs(Number(product.price || 0) - Number(item.price || 0)) > 0.009) {
+        throw new HttpError(409, "An item price changed. Please review your cart and try again.");
+      }
+    }
+
+    const [orderResult] = await conn.execute(
+      `INSERT INTO orders
+        (user_id, status, payment_method, payment_status, fulfillment_method, delivery_address, delivery_latitude, delivery_longitude, delivery_landmark, delivery_notes, subtotal_amount, coupon_discount, sale_discount, shipping_fee, coupon_code, total_amount)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        userId,
+        input.payment_method === "cod" ? "pending" : "awaiting_payment",
+        input.payment_method,
+        input.payment_method === "cod" ? "unpaid" : "awaiting_payment",
+        input.fulfillment_method,
+        input.fulfillment_method === "delivery" ? input.delivery_address : null,
+        input.fulfillment_method === "delivery" ? input.delivery_latitude ?? null : null,
+        input.fulfillment_method === "delivery" ? input.delivery_longitude ?? null : null,
+        input.fulfillment_method === "delivery" ? input.delivery_landmark || null : null,
+        input.fulfillment_method === "delivery" ? input.delivery_notes || null : null,
+        pricing.subtotal,
+        pricing.couponDiscount,
+        pricing.saleDiscount,
+        pricing.shippingFee,
+        pricing.coupon?.code || null,
+        pricing.total
+      ]
+    );
+
+    const inventoryUpdates = [];
+    const outOfStockProducts = [];
+    for (const item of pricing.items) {
+      const finalLinePrice = item.quantity ? Math.max(0, (item.subtotal - item.saleDiscount) / item.quantity) : item.price;
+      await conn.execute(
+        "INSERT INTO order_items (order_id, product_id, quantity, price) VALUES (?, ?, ?, ?)",
+        [orderResult.insertId, item.product_id, item.quantity, finalLinePrice]
+      );
+      const [stockResult] = await conn.execute(
+        `UPDATE products
+         SET stock = stock - ?,
+             status = CASE
+               WHEN stock - ? <= 0 THEN 'Out of Stock'
+               WHEN stock - ? <= 5 THEN 'Low Stock'
+               ELSE 'In Stock'
+             END
+         WHERE id = ?
+           AND is_deleted = FALSE
+           AND stock >= ?`,
+        [item.quantity, item.quantity, item.quantity, item.product_id, item.quantity]
+      );
+      if (stockResult.affectedRows !== 1) {
+        const product = productById.get(Number(item.product_id));
+        throw new HttpError(400, `${product?.name || "This apparel item"} does not have enough stock.`);
+      }
+      const [updatedProducts] = await conn.execute("SELECT id, name, stock FROM products WHERE id = ?", [item.product_id]);
+      const nextStock = Number(updatedProducts[0]?.stock || 0);
+      const nextStatus = nextStock <= 0 ? "Out of Stock" : nextStock <= 5 ? "Low Stock" : "In Stock";
+      inventoryUpdates.push({
+        id: Number(item.product_id),
+        name: updatedProducts[0]?.name,
+        stock: nextStock,
+        status: nextStatus
+      });
+      if (nextStock === 0) {
+        outOfStockProducts.push({ id: Number(item.product_id), name: updatedProducts[0]?.name || item.name });
+      }
+    }
+
+    if (pricing.items.length) {
+      await conn.execute(
+        `DELETE FROM cart_items
+         WHERE user_id = ?
+           AND product_id IN (${placeholders})`,
+        [userId, ...productIds]
+      );
+    }
+
+    await conn.commit();
+    console.log("[order-transaction] committed", {
+      userId,
+      orderId: orderResult.insertId,
+      durationMs: Date.now() - startedAt,
+      attempt
+    });
+
+    return {
+      orderId: orderResult.insertId,
+      inventoryUpdates,
+      outOfStockProducts,
+      response: {
+        id: orderResult.insertId,
+        total_amount: pricing.total,
+        pricing,
+        status: input.payment_method === "cod" ? "pending" : "awaiting_payment",
+        payment_method: input.payment_method,
+        fulfillment_method: input.fulfillment_method
+      }
+    };
+  } catch (error) {
+    await rollbackQuietly(conn, "order-create");
+    console.error("[order-transaction] failed", {
+      userId,
+      durationMs: Date.now() - startedAt,
+      attempt,
+      code: error?.code,
+      errno: error?.errno,
+      message: error?.message
+    });
+    throw error;
+  } finally {
+    conn.release();
+  }
+}
+
+async function createOrderWithRetry(req, input, pricing) {
+  for (let attempt = 1; attempt <= maxOrderCreateAttempts; attempt += 1) {
+    try {
+      return await createOrderTransactionAttempt(req, input, pricing, attempt);
+    } catch (error) {
+      if (!isTransientOrderLockError(error)) throw error;
+      if (attempt >= maxOrderCreateAttempts) {
+        throw new HttpError(409, "This item is temporarily being updated. Please try checkout again.");
+      }
+      await sleep(100 * attempt + Math.floor(Math.random() * 120));
+    }
+  }
+  throw new HttpError(409, "This item is temporarily being updated. Please try checkout again.");
+}
+
+async function runOrderCreatedSideEffects(req, result) {
+  const io = req.app.get("io");
+  const orderBody = `Order #${result.orderId} was placed by ${req.user.username || "a customer"}.`;
+  try {
+    const adminNotification = await createAdminNotification({
+      type: "order",
+      title: "New order received",
+      body: orderBody,
+      customerId: req.user.id,
+      emit: false
+    });
+    io?.to("admin").emit("notification:new", adminNotification);
+  } catch (error) {
+    console.error("[order-side-effects] admin notification failed", { orderId: result.orderId, message: error?.message, code: error?.code });
+  }
+
+  try {
+    await query(
+      "INSERT INTO notifications (user_id, type, title, body) VALUES (?, 'order', 'Order placed', ?)",
+      [req.user.id, `Your order #${result.orderId} was placed successfully.`]
+    );
+  } catch (error) {
+    console.error("[order-side-effects] customer notification failed", { orderId: result.orderId, message: error?.message, code: error?.code });
+  }
+
+  for (const product of result.outOfStockProducts) {
+    try {
+      await query(
+        "INSERT INTO notifications (type, title, body, product_id) VALUES ('inventory', 'Out of stock', ?, ?)",
+        [`${product.name} is now out of stock.`, product.id]
+      );
+    } catch (error) {
+      console.error("[order-side-effects] inventory notification failed", { orderId: result.orderId, productId: product.id, message: error?.message, code: error?.code });
+    }
+  }
+
+  io?.to("admin").emit("order:new", { id: result.orderId, total_amount: result.response.total_amount });
+  result.inventoryUpdates.forEach((update) => {
+    io?.emit("inventory:update", { type: "inventory", action: "ordered", ...update });
+  });
+  result.outOfStockProducts.forEach((product) => {
+    io?.to("admin").emit("notification:new", { type: "inventory", title: "Out of stock", body: `${product.name} is now out of stock.` });
+  });
+}
 
 router.post("/", requireAuth, requireApproved, asyncHandler(async (req, res) => {
   await ensureOrderColumns();
@@ -326,105 +562,14 @@ router.post("/", requireAuth, requireApproved, asyncHandler(async (req, res) => 
   if (input.fulfillment_method === "delivery" && !input.delivery_address) {
     throw new HttpError(400, "Please set your delivery location before checkout.");
   }
-  const pricing = await calculateCheckoutPricing(input.items, input.coupon_code, input.fulfillment_method);
+  const compactItems = compactOrderItems(input.items);
+  const pricing = await calculateCheckoutPricing(compactItems, input.coupon_code, input.fulfillment_method);
   if (input.coupon_code && !pricing.coupon) throw new HttpError(400, "Coupon is invalid or expired.");
-  const conn = await pool.getConnection();
-  try {
-    await conn.beginTransaction();
-    const outOfStockProducts = [];
-    const inventoryUpdates = [];
-    for (const item of pricing.items) {
-      const [rows] = await conn.execute("SELECT id, price, stock FROM products WHERE id = ? AND is_deleted = FALSE FOR UPDATE", [item.product_id]);
-      if (!rows.length) throw new HttpError(404, "Apparel item not found");
-      if (rows[0].stock < item.quantity) throw new HttpError(400, `Only ${rows[0].stock} items remaining in stock.`);
-    }
-    const [orderResult] = await conn.execute(
-      `INSERT INTO orders
-        (user_id, status, payment_method, payment_status, fulfillment_method, delivery_address, delivery_latitude, delivery_longitude, delivery_landmark, delivery_notes, subtotal_amount, coupon_discount, sale_discount, shipping_fee, coupon_code, total_amount)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        req.user.id,
-        input.payment_method === "cod" ? "pending" : "awaiting_payment",
-        input.payment_method,
-        input.payment_method === "cod" ? "unpaid" : "awaiting_payment",
-        input.fulfillment_method,
-        input.fulfillment_method === "delivery" ? input.delivery_address : null,
-        input.fulfillment_method === "delivery" ? input.delivery_latitude ?? null : null,
-        input.fulfillment_method === "delivery" ? input.delivery_longitude ?? null : null,
-        input.fulfillment_method === "delivery" ? input.delivery_landmark || null : null,
-        input.fulfillment_method === "delivery" ? input.delivery_notes || null : null,
-        pricing.subtotal,
-        pricing.couponDiscount,
-        pricing.saleDiscount,
-        pricing.shippingFee,
-        pricing.coupon?.code || null,
-        pricing.total
-      ]
-    );
-    for (const item of pricing.items) {
-      const finalLinePrice = item.quantity ? Math.max(0, (item.subtotal - item.saleDiscount) / item.quantity) : item.price;
-      await conn.execute(
-        "INSERT INTO order_items (order_id, product_id, quantity, price) VALUES (?, ?, ?, ?)",
-        [orderResult.insertId, item.product_id, item.quantity, finalLinePrice]
-      );
-      await conn.execute(
-        "UPDATE products SET stock = stock - ?, status = CASE WHEN stock - ? <= 0 THEN 'Out of Stock' WHEN stock - ? <= 5 THEN 'Low Stock' ELSE 'In Stock' END WHERE id = ?",
-        [item.quantity, item.quantity, item.quantity, item.product_id]
-      );
-      const [updatedProducts] = await conn.execute("SELECT id, name, stock FROM products WHERE id = ?", [item.product_id]);
-      const nextStock = Number(updatedProducts[0]?.stock || 0);
-      inventoryUpdates.push({
-        id: Number(item.product_id),
-        name: updatedProducts[0]?.name,
-        stock: nextStock,
-        status: nextStock <= 0 ? "Out of Stock" : nextStock <= 5 ? "Low Stock" : "In Stock"
-      });
-      if (Number(updatedProducts[0]?.stock || 0) === 0) {
-        outOfStockProducts.push(updatedProducts[0].name);
-        await conn.execute(
-          "INSERT INTO notifications (type, title, body, product_id) VALUES ('inventory', 'Out of stock', ?, ?)",
-          [`${updatedProducts[0].name} is now out of stock.`, item.product_id]
-        );
-      }
-    }
-    if (pricing.items.length) {
-      const productIds = pricing.items.map((item) => item.product_id);
-      await conn.execute(
-        `DELETE FROM cart_items
-         WHERE user_id = ?
-           AND product_id IN (${productIds.map(() => "?").join(",")})`,
-        [req.user.id, ...productIds]
-      );
-    }
-    const adminOrderBody = `Order #${orderResult.insertId} was placed by ${req.user.username || "a customer"}.`;
-    const adminNotification = await createAdminNotification({
-      type: "order",
-      title: "New order received",
-      body: adminOrderBody,
-      customerId: req.user.id,
-      executor: conn.execute.bind(conn),
-      emit: false
-    });
-    await conn.execute(
-      "INSERT INTO notifications (user_id, type, title, body) VALUES (?, 'order', 'Order placed', ?)",
-      [req.user.id, `Your order #${orderResult.insertId} was placed successfully.`]
-    );
-    await conn.commit();
-    req.app.get("io")?.to("admin").emit("notification:new", adminNotification);
-    req.app.get("io")?.to("admin").emit("order:new", { id: orderResult.insertId, total_amount: pricing.total });
-    inventoryUpdates.forEach((update) => {
-      req.app.get("io")?.emit("inventory:update", { type: "inventory", action: "ordered", ...update });
-    });
-    outOfStockProducts.forEach((name) => {
-      req.app.get("io")?.to("admin").emit("notification:new", { type: "inventory", title: "Out of stock", body: `${name} is now out of stock.` });
-    });
-    res.status(201).json({ id: orderResult.insertId, total_amount: pricing.total, pricing, status: input.payment_method === "cod" ? "pending" : "awaiting_payment", payment_method: input.payment_method, fulfillment_method: input.fulfillment_method });
-  } catch (error) {
-    await conn.rollback();
-    throw error;
-  } finally {
-    conn.release();
-  }
+  const result = await createOrderWithRetry(req, input, pricing);
+  void runOrderCreatedSideEffects(req, result).catch((error) => {
+    console.error("[order-side-effects] failed", { orderId: result.orderId, message: error?.message, code: error?.code });
+  });
+  res.status(201).json(result.response);
 }));
 
 router.patch("/:id/status", requireAuth, requireRole("admin"), asyncHandler(async (req, res) => {

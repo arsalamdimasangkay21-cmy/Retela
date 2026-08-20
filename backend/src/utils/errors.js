@@ -86,6 +86,13 @@ function publicErrorFor(err, status, req = null) {
       errors
     };
   }
+  if (err?.code === "ER_LOCK_WAIT_TIMEOUT" || err?.code === "ER_LOCK_DEADLOCK" || [1205, 1213].includes(Number(err?.errno))) {
+    return {
+      status: 409,
+      message: "This item is temporarily being updated. Please try checkout again.",
+      error: "resource_busy"
+    };
+  }
   if (err instanceof HttpError || err?.status || err?.statusCode) {
     return {
       status,
