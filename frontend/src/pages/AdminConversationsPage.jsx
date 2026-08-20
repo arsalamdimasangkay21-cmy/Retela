@@ -56,6 +56,12 @@ function previewText(messages) {
   return latest.body;
 }
 
+function compactPreview(value) {
+  const text = String(value || "No messages yet").replace(/\s+/g, " ").trim();
+  if (text.length <= 96) return text;
+  return `${text.slice(0, 93).trim()}...`;
+}
+
 function buildSuggestedReplies(selectedConversation, messages) {
   const latestCustomerMessage = [...messages].reverse().find((message) => message.sender_type === "customer")?.body || "";
   const lower = latestCustomerMessage.toLowerCase();
@@ -457,39 +463,42 @@ function PresenceDot({ status }) {
 }
 
 function ConversationListCard({ conversation, active, onClick }) {
+  const preview = compactPreview(conversation.preview);
   return (
     <motion.button
       type="button"
       onClick={onClick}
-      className={`group flex min-w-0 items-start gap-3 rounded-[24px] border px-3 py-3 text-left transition ${
+      className={`conversation-list-card group flex w-full min-w-0 items-start gap-3 rounded-2xl border px-3 py-2.5 text-left transition ${
         active
-          ? "border-emerald-300 bg-emerald-50 text-[#102018] shadow-sm"
-          : "border-[#d8eadf] bg-white text-[#102018] hover:border-emerald-300 hover:bg-[#f7fff9]"
+          ? "is-active border-emerald-300 bg-emerald-50 text-[#102018] shadow-sm"
+          : "border-transparent bg-transparent text-[#102018] hover:border-emerald-200 hover:bg-[#f7fff9]"
       }`}
-      whileHover={{ y: -2, scale: 1.01 }}
+      whileHover={{ y: -1 }}
     >
-      <span className={`relative grid h-12 w-12 shrink-0 place-items-center rounded-2xl border text-sm font-black ${active ? "border-emerald-300 bg-white text-[#15803d]" : "border-[#d8eadf] bg-[#f7fff9] text-[#102018]"}`}>
+      <span className={`conversation-list-avatar relative grid h-11 w-11 shrink-0 place-items-center rounded-2xl border text-sm font-black ${active ? "border-emerald-300 bg-white text-[#15803d]" : "border-[#d8eadf] bg-[#f7fff9] text-[#102018]"}`}>
         {(conversation.username || "C").slice(0, 1).toUpperCase()}
         <span className="absolute bottom-1 right-1"><PresenceDot status={conversation.presence_status} /></span>
       </span>
       <span className="min-w-0 flex-1">
-        <span className="flex items-start justify-between gap-3">
-          <strong className="truncate text-sm text-[#102018]">{conversation.username || `Customer #${conversation.customer_id}`}</strong>
-          <span className="shrink-0 text-[11px] font-semibold text-[#5f6f66]">
+        <span className="flex min-w-0 items-center justify-between gap-3">
+          <strong className="conversation-list-name truncate text-sm text-[#102018]">{conversation.username || `Customer #${conversation.customer_id}`}</strong>
+          <span className="conversation-list-time shrink-0 text-[11px] font-semibold text-[#5f6f66]">
             {formatTime(conversation.timestamp) || formatDateLabel(conversation.timestamp)}
           </span>
         </span>
-        <span className={`mt-1 inline-flex items-center gap-2 rounded-full border px-2 py-1 text-[10px] font-black uppercase tracking-[0.12em] ${toneClasses(conversation.presence_status)}`}>
-          <PresenceDot status={conversation.presence_status} />
-          {presenceLabel(conversation.presence_status)}
+        <span className="conversation-list-meta mt-1 flex min-w-0 items-center justify-between gap-2">
+          <span className={`conversation-presence-pill inline-flex min-w-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] font-black uppercase tracking-[0.1em] ${toneClasses(conversation.presence_status)}`}>
+            <PresenceDot status={conversation.presence_status} />
+            {presenceLabel(conversation.presence_status)}
+          </span>
+          {conversation.unread ? (
+            <span className="conversation-unread-badge grid min-h-5 min-w-5 shrink-0 place-items-center rounded-full bg-[#2fbf71] px-1.5 text-[10px] font-black text-white">
+              {conversation.unread}
+            </span>
+          ) : null}
         </span>
-        <span className="mt-2 line-clamp-2 block text-xs leading-5 text-[#5f6f66]">{conversation.preview}</span>
+        <span className="conversation-preview mt-1.5 block truncate text-xs leading-5 text-[#5f6f66]" title={preview}>{preview}</span>
       </span>
-      {conversation.unread ? (
-        <span className="grid min-h-6 min-w-6 shrink-0 place-items-center rounded-full bg-[#2fbf71] px-1.5 text-[11px] font-black text-white">
-          {conversation.unread}
-        </span>
-      ) : null}
     </motion.button>
   );
 }
@@ -634,7 +643,7 @@ function InputActionButton({ icon: Icon, label, onClick, disabled = false }) {
 
 function EmptyStateCard({ title, subtitle, compact = false }) {
   return (
-    <div className={`grid place-items-center rounded-[26px] border border-dashed border-[#d8eadf] bg-white text-center ${compact ? "min-h-52 p-5" : "min-h-64 p-6"}`}>
+    <div className={`support-empty-state grid place-items-center rounded-[26px] border border-dashed border-[#d8eadf] bg-white text-center ${compact ? "min-h-40 p-5" : "min-h-56 p-6"}`}>
       <div>
         <span className="mx-auto grid h-12 w-12 place-items-center rounded-2xl border border-emerald-200 bg-emerald-50 text-[#15803d]">
           <MessageCircle size={20} />
