@@ -102,6 +102,47 @@
   width: min(100%, 52rem);
 }
 
+.retela-registration-agreement-modal {
+  display: flex;
+  max-height: min(90dvh, 34rem);
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+}
+
+.retela-registration-agreement-content {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 1.4rem 1.4rem 0;
+}
+
+.retela-registration-agreement-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  border-top: 1px solid #e2e8f0;
+  background: #ffffff;
+  padding: 1rem 1.4rem 1.4rem;
+}
+
+.retela-dark .retela-registration-agreement-modal {
+  border-color: rgba(34, 197, 94, 0.28);
+  background: #0f172a;
+}
+
+.retela-dark .retela-registration-agreement-modal .text-slate-900 {
+  color: #f8fafc;
+}
+
+.retela-dark .retela-registration-agreement-modal .text-slate-600 {
+  color: #cbd5e1;
+}
+
+.retela-dark .retela-registration-agreement-actions {
+  border-top-color: rgba(148, 163, 184, 0.22);
+  background: #0f172a;
+}
+
 .retela-stepper {
   display: flex;
   flex-wrap: wrap;
@@ -889,6 +930,19 @@
   .retela-wizard-modal {
     border-radius: 1rem;
     padding: 1rem;
+  }
+
+  .retela-registration-agreement-modal {
+    max-height: calc(100dvh - 1rem - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    padding: 0;
+  }
+
+  .retela-registration-agreement-content {
+    padding: 1rem 1rem 0;
+  }
+
+  .retela-registration-agreement-actions {
+    padding: 0.85rem 1rem 1rem;
   }
 
   .retela-id-preview,

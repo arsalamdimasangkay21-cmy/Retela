@@ -6,6 +6,7 @@ import { useAuth } from "../../context/AuthContext";
 import { getPasswordBlueprint, getPasswordStrength, PasswordBlueprint } from "../PasswordBlueprint";
 import { Button, Field } from "../ui";
 import Register from "./Register";
+import RegistrationAgreementModal from "./RegistrationAgreementModal";
 
 function savedLogoUrl() {
   const cached = localStorage.getItem("retela_logo_url");
@@ -15,6 +16,7 @@ function savedLogoUrl() {
 export default function AuthPage() {
   const { login } = useAuth();
   const [signupOpen, setSignupOpen] = useState(false);
+  const [registrationAgreementOpen, setRegistrationAgreementOpen] = useState(false);
   const [signupStep, setSignupStep] = useState("form");
   const [resetOpen, setResetOpen] = useState(false);
   const [resetStep, setResetStep] = useState("phone");
@@ -217,7 +219,24 @@ export default function AuthPage() {
   }
 
   function openSignup() {
+    setRegistrationAgreementOpen(true);
+    setSignupOpen(false);
+    setResetOpen(false);
+    setSignupStep("form");
+    setMessage("");
+  }
+
+  function agreeToRegistration() {
+    setRegistrationAgreementOpen(false);
     setSignupOpen(true);
+    setResetOpen(false);
+    setSignupStep("form");
+    setMessage("");
+  }
+
+  function disagreeToRegistration() {
+    setRegistrationAgreementOpen(false);
+    setSignupOpen(false);
     setResetOpen(false);
     setSignupStep("form");
     setMessage("");
@@ -225,6 +244,7 @@ export default function AuthPage() {
 
   function closeSignup() {
     setSignupOpen(false);
+    setRegistrationAgreementOpen(false);
     setResetOpen(false);
     setSignupStep("form");
     setResetStep("phone");
@@ -362,6 +382,7 @@ export default function AuthPage() {
           ) : null}
         </section>
       </div>
+      <RegistrationAgreementModal open={registrationAgreementOpen} onAgree={agreeToRegistration} onDisagree={disagreeToRegistration} />
     </main>
   );
 }
