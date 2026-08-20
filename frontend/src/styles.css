@@ -7862,3 +7862,130 @@ button {
 .premium-shell.retela-dark-shell .sales-channel-row progress::-moz-progress-bar {
   background: var(--retela-primary-dark) !important;
 }
+
+@media (max-width: 1023px) {
+  .customer-layout-shell.retela-dark-shell .retela-sidebar-overlay {
+    background: rgba(3, 7, 18, 0.62) !important;
+    backdrop-filter: blur(4px);
+  }
+
+  .customer-layout-shell.retela-dark-shell .retela-mobile-menu-button {
+    border-color: rgba(142, 211, 171, 0.28) !important;
+    background: #14211b !important;
+    color: #eefaf3 !important;
+    box-shadow: 0 14px 32px rgba(0, 0, 0, 0.32) !important;
+  }
+
+  .customer-layout-shell.retela-dark-shell .retela-mobile-menu-button.is-open {
+    border-color: rgba(134, 239, 172, 0.46) !important;
+    background: #1b2b24 !important;
+    color: #ffffff !important;
+  }
+
+  .customer-layout-shell.retela-dark-shell .customer-sidebar-panel {
+    border-color: rgba(142, 211, 171, 0.24) !important;
+    background: linear-gradient(180deg, #111a16 0%, #15231d 52%, #0b120f 100%) !important;
+    color: #f4fbf6 !important;
+    box-shadow: 18px 0 54px rgba(0, 0, 0, 0.46) !important;
+  }
+
+  .customer-layout-shell.retela-dark-shell .customer-sidebar-panel .customer-sidebar-brand {
+    border-color: rgba(142, 211, 171, 0.26) !important;
+    background: linear-gradient(180deg, #1b2b24 0%, #16251e 100%) !important;
+    color: #f4fbf6 !important;
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.28) !important;
+  }
+
+  .customer-layout-shell.retela-dark-shell .customer-sidebar-panel .retela-sidebar-logo {
+    border-color: rgba(142, 211, 171, 0.3) !important;
+    background: #ffffff !important;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.24) !important;
+  }
+
+  .customer-layout-shell.retela-dark-shell .customer-sidebar-panel .retela-sidebar-title {
+    color: #f4fbf6 !important;
+  }
+
+  .customer-layout-shell.retela-dark-shell .customer-sidebar-panel .retela-sidebar-subtitle {
+    color: #9ee6ba !important;
+  }
+
+  .customer-layout-shell.retela-dark-shell .customer-sidebar-panel nav > div {
+    border-color: rgba(184, 200, 191, 0.26) !important;
+  }
+
+  .customer-layout-shell.retela-dark-shell .customer-sidebar-panel .sidebar-nav-item {
+    border-color: transparent !important;
+    background: transparent !important;
+    color: #e7f1eb !important;
+    opacity: 1 !important;
+  }
+
+  .customer-layout-shell.retela-dark-shell .customer-sidebar-panel .sidebar-nav-item span {
+    color: #e7f1eb !important;
+    opacity: 1 !important;
+  }
+
+  .customer-layout-shell.retela-dark-shell .customer-sidebar-panel .sidebar-nav-icon {
+    color: #b9d5c7 !important;
+    opacity: 1 !important;
+  }
+
+  .customer-layout-shell.retela-dark-shell .customer-sidebar-panel .sidebar-nav-item:hover,
+  .customer-layout-shell.retela-dark-shell .customer-sidebar-panel .sidebar-nav-item:focus-visible {
+    border-color: rgba(142, 211, 171, 0.28) !important;
+    background: rgba(255, 255, 255, 0.07) !important;
+    color: #ffffff !important;
+  }
+
+  .customer-layout-shell.retela-dark-shell .customer-sidebar-panel .sidebar-nav-item:hover span,
+  .customer-layout-shell.retela-dark-shell .customer-sidebar-panel .sidebar-nav-item:focus-visible span,
+  .customer-layout-shell.retela-dark-shell .customer-sidebar-panel .sidebar-nav-item:hover .sidebar-nav-icon,
+  .customer-layout-shell.retela-dark-shell .customer-sidebar-panel .sidebar-nav-item:focus-visible .sidebar-nav-icon {
+    color: #ffffff !important;
+  }
+
+  .customer-layout-shell.retela-dark-shell .customer-sidebar-panel .sidebar-nav-item-active,
+  .customer-layout-shell.retela-dark-shell .customer-sidebar-panel .sidebar-nav-item-active:hover,
+  .customer-layout-shell.retela-dark-shell .customer-sidebar-panel .sidebar-nav-item-active:focus-visible {
+    border-color: rgba(134, 239, 172, 0.72) !important;
+    background: linear-gradient(180deg, #dcfce7 0%, #bbf7d0 100%) !important;
+    color: #10351f !important;
+    box-shadow: 0 10px 24px rgba(34, 197, 94, 0.16) !important;
+  }
+
+  .customer-layout-shell.retela-dark-shell .customer-sidebar-panel .sidebar-nav-item-active span,
+  .customer-layout-shell.retela-dark-shell .customer-sidebar-panel .sidebar-nav-item-active .sidebar-nav-icon,
+  .customer-layout-shell.retela-dark-shell .customer-sidebar-panel .sidebar-nav-item-active:hover span,
+  .customer-layout-shell.retela-dark-shell .customer-sidebar-panel .sidebar-nav-item-active:hover .sidebar-nav-icon {
+    color: #10351f !important;
+  }
+
+  .customer-layout-shell.retela-dark-shell .customer-sidebar-panel .sidebar-logout {
+    border-color: rgba(184, 200, 191, 0.24) !important;
+    background: rgba(255, 255, 255, 0.065) !important;
+    color: #f4fbf6 !important;
+    opacity: 1 !important;
+    box-shadow: none !important;
+  }
+
+  .customer-layout-shell.retela-dark-shell .customer-sidebar-panel .sidebar-logout span,
+  .customer-layout-shell.retela-dark-shell .customer-sidebar-panel .sidebar-logout svg {
+    color: #f4fbf6 !important;
+    opacity: 1 !important;
+  }
+
+  .customer-layout-shell.retela-dark-shell .customer-sidebar-panel .sidebar-logout:hover,
+  .customer-layout-shell.retela-dark-shell .customer-sidebar-panel .sidebar-logout:focus-visible {
+    border-color: rgba(251, 113, 133, 0.42) !important;
+    background: rgba(251, 113, 133, 0.12) !important;
+    color: #fecdd3 !important;
+  }
+
+  .customer-layout-shell.retela-dark-shell .customer-sidebar-panel .sidebar-logout:hover span,
+  .customer-layout-shell.retela-dark-shell .customer-sidebar-panel .sidebar-logout:hover svg,
+  .customer-layout-shell.retela-dark-shell .customer-sidebar-panel .sidebar-logout:focus-visible span,
+  .customer-layout-shell.retela-dark-shell .customer-sidebar-panel .sidebar-logout:focus-visible svg {
+    color: #fecdd3 !important;
+  }
+}
