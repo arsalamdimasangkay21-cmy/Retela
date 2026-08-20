@@ -863,6 +863,7 @@ async function ensureCommunicationTables() {
       ai_provider VARCHAR(20) NULL,
       response_time_ms INT NULL,
       token_usage INT NULL,
+      product_action JSON NULL,
       body TEXT NOT NULL,
       delivery_status ENUM('sent','delivered','seen') NOT NULL DEFAULT 'sent',
       delivered_at DATETIME NULL,
@@ -876,6 +877,7 @@ async function ensureCommunicationTables() {
   await ensureColumn("messages", "ai_provider", "ai_provider VARCHAR(20) NULL AFTER mode");
   await ensureColumn("messages", "response_time_ms", "response_time_ms INT NULL AFTER ai_provider");
   await ensureColumn("messages", "token_usage", "token_usage INT NULL AFTER response_time_ms");
+  await ensureColumn("messages", "product_action", "product_action JSON NULL AFTER token_usage");
   await ensureColumn("messages", "delivery_status", "delivery_status ENUM('sent','delivered','seen') NOT NULL DEFAULT 'sent' AFTER body");
   await ensureColumn("messages", "delivered_at", "delivered_at DATETIME NULL AFTER delivery_status");
   await ensureColumn("messages", "seen_at", "seen_at DATETIME NULL AFTER delivered_at");

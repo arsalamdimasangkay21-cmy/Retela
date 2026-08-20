@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Bot, Loader2, Send, X } from "lucide-react";
+import { Bot, Eye, Loader2, Send, ShoppingCart, X } from "lucide-react";
 import { api } from "../api/client";
 
 const initialSuggestions = [
@@ -80,6 +80,41 @@ function suggestionsForMessages(messages = []) {
   return limitedSuggestions(categoryForText(recentCustomerContext(messages)));
 }
 
+function parseProductAction(value) {
+  if (!value) return null;
+  if (typeof value === "object") return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
+function productActionsForMessage(message) {
+  const action = parseProductAction(message?.product_action || message?.productAction);
+  if (!action) return [];
+  if (action.action === "product_choices" && Array.isArray(action.products)) return action.products.filter(Boolean).slice(0, 5);
+  return [action];
+}
+
+function productActionLabel(action) {
+  if (action?.action === "buy_product") return "Buy This Item";
+  if (action?.action === "purchase_product") return "Proceed to Product";
+  return "View Product";
+}
+
+function openProductAction(action) {
+  if (!action?.productId) return;
+  window.dispatchEvent(new CustomEvent("retela:view-product", {
+    detail: {
+      productId: Number(action.productId),
+      productName: action.productName || "",
+      action: action.action || "view_product"
+    }
+  }));
+  window.dispatchEvent(new CustomEvent("retela:close-customer-assistant"));
+}
+
 export function FloatingCustomerAssistant({ hidden = false }) {
   const [open, setOpen] = useState(false);
   const [prompt, setPrompt] = useState("");
@@ -112,8 +147,15 @@ export function FloatingCustomerAssistant({ hidden = false }) {
     function openAssistant() {
       setOpen(true);
     }
+    function closeAssistant() {
+      setOpen(false);
+    }
     window.addEventListener("retela:open-customer-assistant", openAssistant);
-    return () => window.removeEventListener("retela:open-customer-assistant", openAssistant);
+    window.addEventListener("retela:close-customer-assistant", closeAssistant);
+    return () => {
+      window.removeEventListener("retela:open-customer-assistant", openAssistant);
+      window.removeEventListener("retela:close-customer-assistant", closeAssistant);
+    };
   }, []);
 
   async function sendMessage(eventOrText) {
@@ -160,14 +202,33 @@ export function FloatingCustomerAssistant({ hidden = false }) {
           </div>
 
           <div ref={scrollRef} className="ai-chat-messages grid content-start gap-3 p-4">
-            {messages.length ? messages.map((message, index) => (
-              <div key={message.id || index} className={`grid max-w-[84%] gap-1 ${message.sender_type === "customer" ? "ml-auto justify-items-end" : "justify-items-start"}`}>
-                <p className={`break-words rounded-2xl px-4 py-3 text-sm leading-6 shadow-sm ${message.sender_type === "customer" ? "bg-emerald-700 text-white" : message.sender_type === "admin" ? "bg-emerald-50 text-slate-900" : "bg-[#F3FAF6] text-slate-900"}`}>
-                  {message.body}
-                </p>
-                <span className="px-2 text-[11px] font-semibold text-slate-500">{messageStatusLabel(message.delivery_status)}</span>
-              </div>
-            )) : (
+            {messages.length ? messages.map((message, index) => {
+              const productActions = message.sender_type === "ai" ? productActionsForMessage(message) : [];
+              return (
+                <div key={message.id || index} className={`grid max-w-[84%] gap-1 ${message.sender_type === "customer" ? "ml-auto justify-items-end" : "justify-items-start"}`}>
+                  <div className={`rounded-2xl px-4 py-3 text-sm leading-6 shadow-sm ${message.sender_type === "customer" ? "bg-emerald-700 text-white" : message.sender_type === "admin" ? "bg-emerald-50 text-slate-900" : "bg-[#F3FAF6] text-slate-900"}`}>
+                    <p className="ai-chat-message-text">{message.body}</p>
+                    {productActions.length ? (
+                      <div className="ai-chat-product-actions">
+                        {productActions.map((action) => (
+                          <button
+                            key={`${action.productId}-${action.action}`}
+                            type="button"
+                            disabled={action.action === "buy_product" && !action.available}
+                            onClick={() => openProductAction(action)}
+                            className="ai-chat-product-action-button"
+                          >
+                            {action.action === "buy_product" ? <ShoppingCart size={15} /> : <Eye size={15} />}
+                            {productActionLabel(action)}
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                  <span className="px-2 text-[11px] font-semibold text-slate-500">{messageStatusLabel(message.delivery_status)}</span>
+                </div>
+              );
+            }) : (
               <div className="rounded-3xl border border-emerald-100 bg-[#F3FAF6] p-4 text-sm leading-6 text-slate-700">
                 Ask about available tees, caps, jackets, sizes, prices, stock, delivery, or payment.
               </div>

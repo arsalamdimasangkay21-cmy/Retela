@@ -3744,6 +3744,49 @@ button {
   -webkit-overflow-scrolling: touch;
 }
 
+.ai-chat-message-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  line-height: 1.58;
+}
+
+.ai-chat-product-actions {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.ai-chat-product-action-button {
+  display: inline-flex;
+  min-height: 40px;
+  width: 100%;
+  min-width: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid #16a36a;
+  border-radius: 14px;
+  background: #16a36a;
+  padding: 9px 12px;
+  color: #ffffff;
+  font-size: 0.84rem;
+  font-weight: 850;
+  line-height: 1.2;
+  transition: background 0.18s ease, border-color 0.18s ease, transform 0.18s ease, opacity 0.18s ease;
+}
+
+.ai-chat-product-action-button:hover:not(:disabled) {
+  border-color: #08764d;
+  background: #08764d;
+  transform: translateY(-1px);
+}
+
+.ai-chat-product-action-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .ai-chat-suggestions {
   display: flex;
   flex: 0 0 auto;

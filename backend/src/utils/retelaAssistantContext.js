@@ -143,6 +143,7 @@ function productSearchText(product) {
     product.category,
     product.gender,
     product.size,
+    product.color,
     product.condition,
     product.description
   ].filter(Boolean).join(" "));
@@ -194,6 +195,7 @@ function formatProductLine(product, { includeDescription = false } = {}) {
     product.brand ? `Brand: ${product.brand}` : null,
     product.category ? `Category: ${product.category}` : null,
     product.size ? `Size: ${product.size}` : null,
+    product.color ? `Color: ${product.color}` : null,
     product.condition ? `Condition: ${product.condition}` : null,
     includeDescription && product.description ? `Description: ${product.description}` : null,
     `Price: ${formatMoney(product.price)}`,

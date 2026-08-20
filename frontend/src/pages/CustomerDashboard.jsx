@@ -126,6 +126,7 @@ export default function CustomerDashboard({ active, onChange }) {
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [filters, setFilters] = useState(defaultCustomerFilters);
   const [shopProductIdsFilter, setShopProductIdsFilter] = useState([]);
+  const [chatTargetProductId, setChatTargetProductId] = useState(null);
   const [filterOptions, setFilterOptions] = useState({ brands: [], categories: [], sizes: [] });
   const [shopInfo, setShopInfo] = useState(null);
   const [reviews, setReviews] = useState([]);
@@ -168,6 +169,19 @@ export default function CustomerDashboard({ active, onChange }) {
     setFilters(defaultCustomerFilters);
     onChange("Shop");
   }
+
+  useEffect(() => {
+    function handleViewProduct(event) {
+      const productId = Number(event.detail?.productId);
+      if (!productId) return;
+      setChatTargetProductId(productId);
+      setShopProductIdsFilter([]);
+      setFilters(defaultCustomerFilters);
+      onChange("Shop");
+    }
+    window.addEventListener("retela:view-product", handleViewProduct);
+    return () => window.removeEventListener("retela:view-product", handleViewProduct);
+  }, [onChange]);
 
   const load = useCallback(async (options = filtersRef.current, { cancelled, force = false } = {}) => {
     const params = new URLSearchParams();
@@ -598,7 +612,7 @@ export default function CustomerDashboard({ active, onChange }) {
           />
           <FloatingNotificationsWidget rows={notifications} onViewAll={() => onChange("Notifications")} />
         </div>
-        <Shop products={filteredProducts.slice(0, 6)} addToCart={addToCart} buyNow={buyNow} filters={filters} setFilters={updateFilters} filterOptions={filterOptions} />
+        <Shop products={filteredProducts.slice(0, 6)} addToCart={addToCart} buyNow={buyNow} filters={filters} setFilters={updateFilters} filterOptions={filterOptions} focusProductId={chatTargetProductId} onFocusProductHandled={() => setChatTargetProductId(null)} />
       </div>
     );
   }
@@ -606,7 +620,7 @@ export default function CustomerDashboard({ active, onChange }) {
   if (active === "Shop") {
     return (
       <div className="grid min-w-0 gap-5">
-        <Shop products={filteredProducts} addToCart={addToCart} buyNow={buyNow} filters={filters} setFilters={updateFilters} filterOptions={filterOptions} clearFilters={clearFilters} />
+        <Shop products={filteredProducts} addToCart={addToCart} buyNow={buyNow} filters={filters} setFilters={updateFilters} filterOptions={filterOptions} clearFilters={clearFilters} focusProductId={chatTargetProductId} onFocusProductHandled={() => setChatTargetProductId(null)} />
       </div>
     );
   }
@@ -659,7 +673,7 @@ export default function CustomerDashboard({ active, onChange }) {
   if (active === "Shop") {
     return (
       <div className="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,360px)]">
-        <Shop products={filteredProducts} addToCart={addToCart} buyNow={buyNow} filters={filters} setFilters={setFilters} filterOptions={filterOptions} clearFilters={clearFilters} />
+        <Shop products={filteredProducts} addToCart={addToCart} buyNow={buyNow} filters={filters} setFilters={setFilters} filterOptions={filterOptions} clearFilters={clearFilters} focusProductId={chatTargetProductId} onFocusProductHandled={() => setChatTargetProductId(null)} />
         <Card className="sticky top-24 h-fit rounded-[28px] border-neonbrand/15 bg-white/[0.07] shadow-[0_0_45px_rgba(56,255,136,0.08)]">
           <div className="flex items-center justify-between gap-3">
             <div>
@@ -1163,7 +1177,7 @@ function FeaturedApparelDetailsModal({ item, onClose, onAddToCart }) {
   );
 }
 
-function Shop({ products, addToCart, buyNow, filters, setFilters, filterOptions, clearFilters }) {
+function Shop({ products, addToCart, buyNow, filters, setFilters, filterOptions, clearFilters, focusProductId, onFocusProductHandled }) {
   const [selectedApparel, setSelectedApparel] = useState(null);
   const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
   const [isPhotoModalOpen, setIsPhotoModalOpen] = useState(false);
@@ -1211,6 +1225,16 @@ function Shop({ products, addToCart, buyNow, filters, setFilters, filterOptions,
     }
     if (latest !== selectedApparel) setSelectedApparel(latest);
   }, [products, selectedApparel]);
+
+  useEffect(() => {
+    if (!focusProductId) return;
+    const target = products.find((item) => Number(item.id) === Number(focusProductId));
+    if (!target) return;
+    setSelectedApparel(target);
+    setIsDetailsModalOpen(true);
+    setIsPhotoModalOpen(false);
+    onFocusProductHandled?.();
+  }, [focusProductId, onFocusProductHandled, products]);
 
   return (
     <>

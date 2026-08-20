@@ -6,9 +6,10 @@ import { requireApproved, requireAuth } from "../middleware/auth.js";
 import { loadSystemSettings } from "../utils/systemSettings.js";
 import { shippingSummary } from "../utils/shippingSettings.js";
 import { generateAIResponse } from "../utils/aiProvider.js";
-import { availableProductWhere, ensureProductInventoryColumns, nonDeletedProductWhere } from "../utils/productInventory.js";
+import { ensureProductInventoryColumns, nonDeletedProductWhere } from "../utils/productInventory.js";
 import { productImageExpression } from "../utils/productImages.js";
 import { createAdminNotification } from "../utils/adminNotifications.js";
+import { CHAT_INTENTS, detectChatIntent, findBestProductMatch, resolveReferencedProduct } from "../utils/retelaAssistantContext.js";
 
 const router = Router();
 let messageStatusColumnsReady;
@@ -65,7 +66,7 @@ async function ensureMessageStatusColumns() {
        FROM INFORMATION_SCHEMA.COLUMNS
          WHERE TABLE_SCHEMA = DATABASE()
          AND TABLE_NAME = 'messages'
-         AND COLUMN_NAME IN ('delivery_status', 'delivered_at', 'seen_at', 'ai_provider', 'response_time_ms', 'token_usage')`
+         AND COLUMN_NAME IN ('delivery_status', 'delivered_at', 'seen_at', 'ai_provider', 'response_time_ms', 'token_usage', 'product_action')`
     );
     const columns = new Set(rows.map((row) => row.COLUMN_NAME));
     if (!columns.has("delivery_status")) {
@@ -85,6 +86,9 @@ async function ensureMessageStatusColumns() {
     }
     if (!columns.has("token_usage")) {
       await query("ALTER TABLE messages ADD COLUMN token_usage INT NULL AFTER response_time_ms");
+    }
+    if (!columns.has("product_action")) {
+      await query("ALTER TABLE messages ADD COLUMN product_action JSON NULL AFTER token_usage");
     }
     await query(
       `UPDATE messages
@@ -180,7 +184,7 @@ function similarityRatio(a, b) {
 
 async function recentDuplicateMessage({ conversationId, senderType, body, seconds = 180 }) {
   const rows = await query(
-    `SELECT id, body, ai_provider
+    `SELECT id, body, ai_provider, product_action
      FROM messages
      WHERE conversation_id = :conversationId
        AND sender_type = :senderType
@@ -307,6 +311,94 @@ function buildInventorySuggestions(prompt, products) {
     "I can help check availability. Let me review the shop inventory.",
     ...cannedAdminReplies.slice(4)
   ];
+}
+
+const productActionIntents = new Set([
+  CHAT_INTENTS.PRODUCT_AVAILABILITY,
+  CHAT_INTENTS.PRODUCT_PRICE,
+  CHAT_INTENTS.PRODUCT_SIZE,
+  CHAT_INTENTS.PRODUCT_CONDITION
+]);
+
+function hasPurchaseIntent(prompt = "") {
+  return /\b(buy this|buy it|i want this|i want it|purchase this|purchase it|order this|order it|get this|get it|add this|add it|proceed|checkout this|checkout it|bilhin ko|gusto ko ito|gusto ko to|order ko ito|order ko to)\b/i.test(String(prompt || ""));
+}
+
+function productActionPayload(product, prompt = "") {
+  if (!product?.id) return null;
+  const available = Number(product.stock || 0) > 0;
+  const purchaseIntent = hasPurchaseIntent(prompt);
+  return {
+    productId: Number(product.id),
+    productName: product.name || "Apparel item",
+    available,
+    action: purchaseIntent && available ? "buy_product" : "view_product"
+  };
+}
+
+function productSearchTokens(prompt = "") {
+  const ignored = new Set(["is", "it", "this", "that", "the", "a", "an", "available", "avail", "stock", "price", "hm", "how", "much", "size", "condition", "shirt", "tshirt", "t", "item", "product", "apparel"]);
+  return normalizeText(prompt).split(" ").filter((token) => token.length >= 3 && !ignored.has(token));
+}
+
+function productMatchScore(product, prompt = "") {
+  const source = normalizeText(prompt);
+  const haystack = normalizeText([product.name, product.brand, product.category, product.gender, product.size, product.color, product.condition, product.description].filter(Boolean).join(" "));
+  const name = normalizeText(product.name);
+  let score = 0;
+  if (name && source.includes(name)) score += 20;
+  for (const token of productSearchTokens(prompt)) {
+    if (name.split(" ").includes(token)) score += 6;
+    else if (name.includes(token)) score += 5;
+    else if (haystack.includes(token)) score += 2;
+  }
+  return score;
+}
+
+function matchingProductActions(prompt = "", products = [], limit = 5) {
+  return products
+    .map((product) => ({ product, score: productMatchScore(product, prompt) }))
+    .filter((item) => item.score >= 4)
+    .sort((left, right) => right.score - left.score)
+    .slice(0, limit)
+    .map((item) => productActionPayload(item.product, prompt))
+    .filter(Boolean);
+}
+
+function buildProductActionMetadata({ prompt, products, history }) {
+  const intent = detectChatIntent(prompt);
+  const purchaseIntent = hasPurchaseIntent(prompt);
+  if (!purchaseIntent && !productActionIntents.has(intent)) return { productAction: null, productActions: [] };
+  if (intent === CHAT_INTENTS.PRODUCT_SEARCH || intent === CHAT_INTENTS.NEW_ARRIVAL) return { productAction: null, productActions: [] };
+
+  const referencedProduct = resolveReferencedProduct(prompt, products, history) || findBestProductMatch(prompt, products);
+  if (referencedProduct) {
+    return { productAction: productActionPayload(referencedProduct, prompt), productActions: [] };
+  }
+
+  const productActions = matchingProductActions(prompt, products);
+  return {
+    productAction: productActions.length === 1 ? productActions[0] : null,
+    productActions: productActions.length > 1 ? productActions : []
+  };
+}
+
+function parseProductAction(value) {
+  if (!value) return null;
+  if (typeof value === "object") return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
+function storedProductAction(metadata = {}) {
+  if (metadata.productAction) return metadata.productAction;
+  if (Array.isArray(metadata.productActions) && metadata.productActions.length) {
+    return { action: "product_choices", products: metadata.productActions };
+  }
+  return null;
 }
 
 async function markConversationSeen({ conversationId, viewer }) {
@@ -482,7 +574,10 @@ router.get("/:conversationId", requireAuth, asyncHandler(async (req, res) => {
     await markConversationSeen({ conversationId: req.params.conversationId, viewer: req.user.role === "admin" ? "admin" : "customer" });
   }
   const rows = await query("SELECT * FROM messages WHERE conversation_id = :id ORDER BY created_at ASC", { id: req.params.conversationId });
-  res.json(rows);
+  res.json(rows.map((row) => ({
+    ...row,
+    product_action: parseProductAction(row.product_action)
+  })));
 }));
 
 router.get("/:conversationId/suggestions", requireAuth, asyncHandler(async (req, res) => {
@@ -721,9 +816,9 @@ router.post("/ai", requireAuth, requireApproved, asyncHandler(async (req, res) =
       { conversationId: conversation.id }
     );
     const products = await query(
-      `SELECT name, brand, category, gender, size, price, stock, \`condition\`, description, ${productImageExpression("products")} AS image_url
+      `SELECT id, name, brand, category, gender, size, color, price, stock, \`condition\`, description, ${productImageExpression("products")} AS image_url
        FROM products
-       WHERE ${availableProductWhere()}
+       WHERE ${nonDeletedProductWhere()}
        ORDER BY created_at DESC
        LIMIT 200`
     );
@@ -743,6 +838,7 @@ router.post("/ai", requireAuth, requireApproved, asyncHandler(async (req, res) =
       getCustomerProfile(req.user.id),
       getConversationHistory(conversation.id)
     ]);
+    const productActionMetadata = buildProductActionMetadata({ prompt: input.prompt, products, history });
     const settings = {
       ...settingsResult.config,
       payment: {
@@ -792,12 +888,12 @@ router.post("/ai", requireAuth, requireApproved, asyncHandler(async (req, res) =
     if (!body) throw new HttpError(503, assistantUnavailableMessage);
 
     if (latestAi?.body && similarityRatio(latestAi.body, body) >= 0.9) {
-      return res.json({ conversation_id: conversation.id, body: latestAi.body, provider: latestAi.ai_provider || aiResult.provider, admin_takeover: false, duplicate: true, suggestions: [], products: availableProducts.slice(0, 12) });
+      return res.json({ conversation_id: conversation.id, body: latestAi.body, message: latestAi.body, provider: latestAi.ai_provider || aiResult.provider, admin_takeover: false, duplicate: true, suggestions: [], products: availableProducts.slice(0, 12), ...productActionMetadata });
     }
 
     const duplicateAi = await recentDuplicateMessage({ conversationId: conversation.id, senderType: "ai", body, seconds: 300 });
     if (duplicateAi) {
-      return res.json({ conversation_id: conversation.id, body: duplicateAi.body, provider: duplicateAi.ai_provider || aiResult.provider, admin_takeover: false, duplicate: true, suggestions: [], products: availableProducts.slice(0, 12) });
+      return res.json({ conversation_id: conversation.id, body: duplicateAi.body, message: duplicateAi.body, provider: duplicateAi.ai_provider || aiResult.provider, admin_takeover: false, duplicate: true, suggestions: [], products: availableProducts.slice(0, 12), productAction: parseProductAction(duplicateAi.product_action) || productActionMetadata.productAction, productActions: productActionMetadata.productActions });
     }
 
     const aiProvider = aiResult.provider === "gemini" ? "Gemini" : "OpenAI";
@@ -807,8 +903,8 @@ router.post("/ai", requireAuth, requireApproved, asyncHandler(async (req, res) =
       bodyLength: String(body || "").length
     });
     await query(
-      "INSERT INTO messages (conversation_id, sender_id, sender_type, body, delivery_status, delivered_at, mode, ai_provider, response_time_ms, token_usage) VALUES (:conversationId, NULL, 'ai', :body, 'delivered', NOW(), 'ai', :aiProvider, :responseTime, :tokenUsage)",
-      { conversationId: conversation.id, body, aiProvider, responseTime: aiResult.responseTime, tokenUsage: aiResult.tokenUsage }
+      "INSERT INTO messages (conversation_id, sender_id, sender_type, body, delivery_status, delivered_at, mode, ai_provider, response_time_ms, token_usage, product_action) VALUES (:conversationId, NULL, 'ai', :body, 'delivered', NOW(), 'ai', :aiProvider, :responseTime, :tokenUsage, :productAction)",
+      { conversationId: conversation.id, body, aiProvider, responseTime: aiResult.responseTime, tokenUsage: aiResult.tokenUsage, productAction: storedProductAction(productActionMetadata) ? JSON.stringify(storedProductAction(productActionMetadata)) : null }
     );
     await query(
       `UPDATE conversations
@@ -832,7 +928,7 @@ router.post("/ai", requireAuth, requireApproved, asyncHandler(async (req, res) =
       conversationId: conversation.id,
       provider: aiProvider
     });
-    res.json({ conversation_id: conversation.id, body, provider: aiProvider, responseTime: aiResult.responseTime, tokenUsage: aiResult.tokenUsage, admin_takeover: false, suggestions, products: availableProducts.slice(0, 12) });
+    res.json({ conversation_id: conversation.id, body, message: body, provider: aiProvider, responseTime: aiResult.responseTime, tokenUsage: aiResult.tokenUsage, admin_takeover: false, suggestions, products: availableProducts.slice(0, 12), ...productActionMetadata });
   } catch (error) {
     console.error("[ai-route] failed", safeAiRouteError(error));
     throw error;
