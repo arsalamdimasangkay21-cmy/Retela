@@ -2162,6 +2162,7 @@ button {
   width: 100%;
   min-width: 0;
   overflow-x: hidden;
+  gap: 18px !important;
 }
 
 .sales-analytics-toolbar {
@@ -2296,6 +2297,9 @@ button {
 .sales-analytics-page .premium-card {
   border-color: #d9eee2;
   background: #ffffff;
+  border-radius: 20px !important;
+  padding: 18px !important;
+  box-shadow: 0 12px 28px rgba(18, 92, 55, 0.07);
 }
 
 .sales-analytics-page .premium-card h2,
@@ -2393,16 +2397,21 @@ button {
 }
 
 .sales-barcode-card {
-  padding: 16px !important;
+  padding: 14px 16px !important;
 }
 
 .sales-barcode-card > div {
-  grid-template-columns: minmax(0, 1fr) minmax(240px, 0.8fr) !important;
+  grid-template-columns: minmax(250px, 0.95fr) minmax(300px, 1.05fr) !important;
   align-items: center;
+  gap: 14px !important;
 }
 
 .sales-barcode-card h2 {
   font-size: 1.1rem !important;
+}
+
+.sales-barcode-card .mt-4 {
+  margin-top: 10px !important;
 }
 
 .sales-barcode-card input {
@@ -2423,7 +2432,7 @@ button {
   border-color: #d9eee2 !important;
   border-radius: 16px !important;
   background: #f7fff9 !important;
-  padding: 12px !important;
+  padding: 10px 12px !important;
 }
 
 .sales-barcode-status {
@@ -2434,7 +2443,84 @@ button {
 }
 
 .sales-trends-stage {
-  height: 300px !important;
+  height: clamp(280px, 28vw, 340px) !important;
+  margin-top: 16px !important;
+}
+
+.analytics-primary-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(300px, 0.82fr);
+  gap: 18px;
+  align-items: stretch;
+}
+
+.analytics-primary-grid > * {
+  min-width: 0;
+}
+
+.analytics-chart-card,
+.analytics-revenue-card {
+  height: 100%;
+}
+
+.analytics-chart-card {
+  display: flex;
+  flex-direction: column;
+}
+
+.analytics-chart-card .sales-trends-stage {
+  flex: 0 0 auto;
+}
+
+.analytics-revenue-card {
+  display: flex;
+  flex-direction: column;
+}
+
+.analytics-revenue-card .analytics-donut-stage {
+  flex: 0 0 auto;
+  height: 218px !important;
+  max-width: 280px !important;
+}
+
+.analytics-revenue-card .analytics-donut-legend-row {
+  min-height: 42px;
+}
+
+.analytics-lower-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.32fr) minmax(300px, 0.9fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.analytics-lower-grid > * {
+  min-width: 0;
+}
+
+.analytics-side-stack {
+  display: grid;
+  gap: 18px;
+  align-content: start;
+}
+
+.analytics-reports-card {
+  padding: 16px !important;
+}
+
+.analytics-top-products-card,
+.analytics-monthly-card,
+.analytics-summary-card,
+.sales-channel-card {
+  height: auto !important;
+}
+
+.analytics-product-row {
+  min-height: 74px;
+}
+
+.analytics-month-row {
+  min-height: 42px;
 }
 
 .analytics-donut-stage {
@@ -2603,7 +2689,7 @@ button {
   font-weight: 750;
 }
 
-.sales-analytics-page .grid.gap-3 > .flex.items-center.justify-between,
+.analytics-month-row,
 .sales-summary-row {
   border: 1px solid #e5eee8 !important;
   border-radius: 14px !important;
@@ -2611,11 +2697,11 @@ button {
   padding: 10px 12px !important;
 }
 
-.sales-analytics-page .grid.gap-3 > .flex.items-center.justify-between span {
+.analytics-month-row span {
   color: #345a49 !important;
 }
 
-.sales-analytics-page .grid.gap-3 > .flex.items-center.justify-between strong {
+.analytics-month-row strong {
   color: #0f5f36 !important;
 }
 
@@ -6217,6 +6303,23 @@ button {
     height: 210px !important;
   }
 
+  .analytics-primary-grid,
+  .analytics-lower-grid,
+  .analytics-side-stack {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
+
+  .analytics-chart-card,
+  .analytics-revenue-card {
+    height: auto;
+  }
+
+  .analytics-revenue-card .analytics-donut-stage {
+    height: 210px !important;
+    max-width: 260px !important;
+  }
+
   .analytics-donut-legend-row {
     padding: 8px 9px;
   }
@@ -6241,24 +6344,26 @@ button {
     border-radius: 16px !important;
   }
 
-  .sales-analytics-page .grid.gap-3 {
+  .analytics-top-products-card .grid.gap-3,
+  .analytics-monthly-card .grid.gap-3,
+  .analytics-summary-card .grid.gap-3 {
     gap: 8px !important;
   }
 
-  .sales-analytics-page .grid.gap-3 > .flex.items-center.justify-between,
+  .analytics-month-row,
   .sales-summary-row {
     border-radius: 12px !important;
     padding: 8px 10px !important;
   }
 
-  .sales-analytics-page .grid.gap-3 > article {
+  .analytics-product-row {
     gap: 10px !important;
     border-radius: 14px !important;
     padding: 9px !important;
   }
 
-  .sales-analytics-page .grid.gap-3 > article img,
-  .sales-analytics-page .grid.gap-3 > article .h-14.w-14 {
+  .analytics-product-row img,
+  .analytics-product-row .h-14.w-14 {
     width: 48px !important;
     height: 48px !important;
   }
@@ -7663,4 +7768,97 @@ button {
   border-color: var(--retela-border-dark) !important;
   background: var(--retela-surface-dark-2) !important;
   color: var(--retela-text-dark) !important;
+}
+
+.retela-dark .sales-analytics-toolbar,
+.retela-dark .sales-analytics-page .premium-card,
+.retela-dark .sales-metric-card,
+.retela-dark .sales-barcode-card > div > div:last-child,
+.retela-dark .analytics-month-row,
+.retela-dark .analytics-product-row,
+.retela-dark .sales-summary-row,
+.retela-dark .analytics-donut-legend-row,
+.retela-dark .sales-channel-card,
+.retela-dark .analytics-reports-card,
+.retela-dark .analytics-top-products-card,
+.retela-dark .analytics-monthly-card,
+.retela-dark .analytics-summary-card,
+.premium-shell.retela-dark-shell .sales-analytics-toolbar,
+.premium-shell.retela-dark-shell .sales-analytics-page .premium-card,
+.premium-shell.retela-dark-shell .sales-metric-card,
+.premium-shell.retela-dark-shell .sales-barcode-card > div > div:last-child,
+.premium-shell.retela-dark-shell .analytics-month-row,
+.premium-shell.retela-dark-shell .analytics-product-row,
+.premium-shell.retela-dark-shell .sales-summary-row,
+.premium-shell.retela-dark-shell .analytics-donut-legend-row,
+.premium-shell.retela-dark-shell .sales-channel-card,
+.premium-shell.retela-dark-shell .analytics-reports-card,
+.premium-shell.retela-dark-shell .analytics-top-products-card,
+.premium-shell.retela-dark-shell .analytics-monthly-card,
+.premium-shell.retela-dark-shell .analytics-summary-card {
+  border-color: var(--retela-border-dark) !important;
+  background: var(--retela-surface-dark-2) !important;
+  color: var(--retela-text-dark) !important;
+  box-shadow: var(--retela-shadow-dark) !important;
+}
+
+.retela-dark .sales-analytics-toolbar h1,
+.retela-dark .sales-analytics-page :where(h2, h3, strong),
+.premium-shell.retela-dark-shell .sales-analytics-toolbar h1,
+.premium-shell.retela-dark-shell .sales-analytics-page :where(h2, h3, strong) {
+  color: var(--retela-text-dark) !important;
+}
+
+.retela-dark .sales-analytics-toolbar p:not(.sales-analytics-eyebrow),
+.retela-dark .sales-analytics-page :where(p, span, small),
+.premium-shell.retela-dark-shell .sales-analytics-toolbar p:not(.sales-analytics-eyebrow),
+.premium-shell.retela-dark-shell .sales-analytics-page :where(p, span, small) {
+  color: var(--retela-text-muted-dark) !important;
+}
+
+.retela-dark .sales-analytics-eyebrow,
+.retela-dark .sales-analytics-page :where(.text-neonbrand, .sales-metric-chip, .analytics-month-row strong, .sales-summary-row strong.is-positive),
+.premium-shell.retela-dark-shell .sales-analytics-eyebrow,
+.premium-shell.retela-dark-shell .sales-analytics-page :where(.text-neonbrand, .sales-metric-chip, .analytics-month-row strong, .sales-summary-row strong.is-positive) {
+  color: var(--retela-primary-dark) !important;
+}
+
+.retela-dark .sales-channel-tabs,
+.retela-dark .sales-date-select,
+.retela-dark .sales-custom-range input,
+.retela-dark .sales-custom-range button,
+.retela-dark .sales-export-row button,
+.premium-shell.retela-dark-shell .sales-channel-tabs,
+.premium-shell.retela-dark-shell .sales-date-select,
+.premium-shell.retela-dark-shell .sales-custom-range input,
+.premium-shell.retela-dark-shell .sales-custom-range button,
+.premium-shell.retela-dark-shell .sales-export-row button {
+  border-color: var(--retela-border-dark) !important;
+  background: #0f1a15 !important;
+  color: var(--retela-text-dark) !important;
+}
+
+.retela-dark .sales-channel-tabs button.is-active,
+.premium-shell.retela-dark-shell .sales-channel-tabs button.is-active,
+.retela-dark .sales-export-row button:first-child,
+.premium-shell.retela-dark-shell .sales-export-row button:first-child {
+  background: linear-gradient(180deg, var(--retela-primary-dark), var(--retela-primary-dark-2)) !important;
+  color: #062413 !important;
+}
+
+.retela-dark .sales-channel-row progress,
+.retela-dark .sales-channel-row progress::-webkit-progress-bar,
+.premium-shell.retela-dark-shell .sales-channel-row progress,
+.premium-shell.retela-dark-shell .sales-channel-row progress::-webkit-progress-bar {
+  background: rgba(142, 211, 171, 0.16) !important;
+}
+
+.retela-dark .sales-channel-row progress::-webkit-progress-value,
+.premium-shell.retela-dark-shell .sales-channel-row progress::-webkit-progress-value {
+  background: var(--retela-primary-dark) !important;
+}
+
+.retela-dark .sales-channel-row progress::-moz-progress-bar,
+.premium-shell.retela-dark-shell .sales-channel-row progress::-moz-progress-bar {
+  background: var(--retela-primary-dark) !important;
 }

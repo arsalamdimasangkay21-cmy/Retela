@@ -2427,7 +2427,7 @@ function SalesAnalytics({ summary }) {
         display: true,
         position: "top",
         align: "end",
-        labels: { color: "#111827", boxWidth: 12, usePointStyle: true, pointStyle: "circle" }
+        labels: { color: "#64748b", boxWidth: 12, usePointStyle: true, pointStyle: "circle" }
       },
       tooltip: {
         backgroundColor: "#111827",
@@ -2663,11 +2663,20 @@ function SalesAnalytics({ summary }) {
         </Card>
       ) : null}
 
+      <BarcodeScannerPanel
+        title="Sales Barcode Scanner"
+        value={salesBarcodeQuery}
+        onChange={setSalesBarcodeQuery}
+        product={scannedSalesProduct}
+        onPrint={printProductBarcode}
+        compact
+      />
+
       <div className="analytics-stats-grid grid gap-4 overflow-x-auto pb-2">
         {cards.map((card, index) => <SalesMetricCard key={card.title} index={index} {...card} />)}
       </div>
 
-      <Card>
+      <Card className="analytics-reports-card">
         <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-center">
           <div>
             <h2 className="font-display text-xl font-bold text-white">Apparel Reports</h2>
@@ -2681,18 +2690,9 @@ function SalesAnalytics({ summary }) {
         </div>
       </Card>
 
-      <BarcodeScannerPanel
-        title="Sales Barcode Scanner"
-        value={salesBarcodeQuery}
-        onChange={setSalesBarcodeQuery}
-        product={scannedSalesProduct}
-        onPrint={printProductBarcode}
-        compact
-      />
-
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,1.55fr)_minmax(320px,0.85fr)]">
-        <div ref={salesChartRef}>
-        <Card className="chart-3d-card">
+      <div className="analytics-primary-grid">
+        <div ref={salesChartRef} className="min-w-0">
+        <Card className="chart-3d-card analytics-chart-card">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <h2 className="font-display text-xl font-bold text-white">Sales Trends</h2>
@@ -2711,13 +2711,13 @@ function SalesAnalytics({ summary }) {
               ))}
             </div>
           </div>
-          <div className="chart-stage sales-trends-stage mt-6 h-[360px]">
+          <div className="chart-stage sales-trends-stage">
             {trendRows.length ? <Line data={chartData} options={chartOptions} /> : <EmptyState title="No sales yet" subtitle="Live orders from the database will populate the sales trend." />}
           </div>
         </Card>
         </div>
-        <div ref={paymentChartRef}>
-          <AnalyticsDonutCard title="Revenue Overview" data={paymentMethodData} icon={Tags} total={paymentMethodTotal} />
+        <div ref={paymentChartRef} className="min-w-0">
+          <AnalyticsDonutCard title="Revenue Overview" data={paymentMethodData} icon={Tags} total={paymentMethodTotal} className="analytics-revenue-card" compact />
         </div>
       </div>
 
@@ -2743,8 +2743,8 @@ function SalesAnalytics({ summary }) {
         </div>
       </Card>
 
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)]">
-        <Card>
+      <div className="analytics-lower-grid">
+        <Card className="analytics-top-products-card">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <div>
               <h2 className="font-display text-xl font-bold text-white">Top Selling Apparel</h2>
@@ -2754,7 +2754,7 @@ function SalesAnalytics({ summary }) {
           </div>
           <div className="grid gap-3">
             {topProducts.length ? topProducts.map((product, index) => (
-              <motion.article key={product.name} className="flex min-w-0 items-center gap-4 rounded-2xl border border-white/10 bg-white/[0.045] p-3 transition hover:border-neonbrand/25 hover:bg-neonbrand/[0.055]" initial={{ opacity: 0, x: -12 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.28, delay: index * 0.04 }}>
+              <motion.article key={product.name} className="analytics-product-row flex min-w-0 items-center gap-4 rounded-2xl border border-white/10 bg-white/[0.045] p-3 transition hover:border-neonbrand/25 hover:bg-neonbrand/[0.055]" initial={{ opacity: 0, x: -12 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.28, delay: index * 0.04 }}>
                 {product.imageUrl ? <img src={product.imageUrl} alt={product.name} className="h-14 w-14 shrink-0 rounded-xl object-cover" /> : <div className="grid h-14 w-14 shrink-0 place-items-center rounded-xl border border-white/10 bg-white/[0.06] text-[10px] font-bold text-white/35">No Image</div>}
                 <div className="min-w-0 flex-1">
                   <strong className="block truncate text-white">{product.name}</strong>
@@ -2769,20 +2769,20 @@ function SalesAnalytics({ summary }) {
           </div>
         </Card>
 
-        <div className="grid gap-5">
-          <Card>
+        <div className="analytics-side-stack">
+          <Card className="analytics-monthly-card">
             <h2 className="font-display text-xl font-bold text-white">Monthly Sales</h2>
             <p className="mt-1 text-sm text-white/45">Live sales grouped by month.</p>
             <div className="mt-4 grid gap-3">
               {monthlySales.length ? monthlySales.slice(-6).map((item) => (
-                <div key={item.label} className="flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/[0.045] px-3 py-2">
+                <div key={item.label} className="analytics-month-row flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/[0.045] px-3 py-2">
                   <span className="text-sm font-semibold text-white/72">{item.label}</span>
                   <strong className="text-sm text-neonbrand">{money(item.total)}</strong>
                 </div>
               )) : <EmptyState title="No monthly sales yet" subtitle="Live orders will appear here by month." />}
             </div>
           </Card>
-          <Card>
+          <Card className="analytics-summary-card">
             <h2 className="font-display text-xl font-bold text-white">Sales Summary</h2>
             <div className="mt-4 grid gap-3">
               <SummaryRow label="Gross Sales" value={money(totalSales)} positive />
@@ -2832,7 +2832,7 @@ function SalesMetricCard({ title, value, change, caption, icon: Icon, index, ton
   );
 }
 
-function AnalyticsDonutCard({ title, data, icon: Icon, compact, total = 0 }) {
+function AnalyticsDonutCard({ title, data, icon: Icon, compact, total = 0, className = "" }) {
   const hasSales = data.some((item) => Number(item.value || 0) > 0);
   const chart = {
     labels: data.map((item) => item.label),
@@ -2847,7 +2847,7 @@ function AnalyticsDonutCard({ title, data, icon: Icon, compact, total = 0 }) {
     }]
   };
   return (
-    <Card className="chart-3d-card">
+    <Card className={`chart-3d-card ${className}`}>
       <div className="flex items-center justify-between gap-3">
         <div>
           <h2 className="font-display text-xl font-bold text-[#123526]">{title}</h2>
