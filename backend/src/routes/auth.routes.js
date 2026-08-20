@@ -13,6 +13,7 @@ const adminUsername = "AdministratorRetela";
 const adminPassword = "Retela2026";
 let phoneColumnReady;
 let resetColumnsReady;
+let recaptchaConfigWarningLogged = false;
 
 function normalizeAdminCredential(value) {
   return String(value || "").replace(/\s+/g, "").toLowerCase();
@@ -36,6 +37,40 @@ function getPasswordBlueprint(password) {
 
 function isStrongPassword(password) {
   return Object.values(getPasswordBlueprint(password)).every(Boolean);
+}
+
+function captchaRequired() {
+  return process.env.NODE_ENV === "production" || Boolean(process.env.RECAPTCHA_SECRET_KEY);
+}
+
+async function verifyRecaptchaToken(token, remoteIp) {
+  if (!captchaRequired()) return;
+  const secret = process.env.RECAPTCHA_SECRET_KEY;
+  if (!secret) {
+    if (!recaptchaConfigWarningLogged) {
+      console.error("[auth] RECAPTCHA_SECRET_KEY is required for login CAPTCHA verification in production.");
+      recaptchaConfigWarningLogged = true;
+    }
+    throw new HttpError(500, "CAPTCHA verification is not configured.");
+  }
+  if (!token) throw new HttpError(400, "Please complete the CAPTCHA first.");
+
+  let response;
+  try {
+    const body = new URLSearchParams({ secret, response: token });
+    if (remoteIp) body.set("remoteip", remoteIp);
+    response = await fetch("https://www.google.com/recaptcha/api/siteverify", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body
+    });
+  } catch {
+    throw new HttpError(400, "CAPTCHA verification failed. Please try again.");
+  }
+
+  if (!response.ok) throw new HttpError(400, "CAPTCHA verification failed. Please try again.");
+  const data = await response.json().catch(() => ({}));
+  if (!data.success) throw new HttpError(400, "CAPTCHA verification failed. Please try again.");
 }
 
 const registerSchema = z.object({
@@ -459,8 +494,13 @@ router.post("/password-reset/complete", asyncHandler(async (req, res) => {
 
 router.post("/login", asyncHandler(async (req, res) => {
   await ensurePhoneNumberColumn();
-  const schema = z.object({ username: z.string().min(1), password: z.string().min(1) });
-  const { username, password } = schema.parse(req.body);
+  const schema = z.object({
+    username: z.string().min(1),
+    password: z.string().min(1),
+    captchaToken: z.string().trim().optional().default("")
+  });
+  const { username, password, captchaToken } = schema.parse(req.body);
+  await verifyRecaptchaToken(captchaToken, req.ip);
   if (isAdministratorCredential(username, password)) {
     const user = await getOrCreateAdministrator();
     return res.json({ token: signToken(user), user });

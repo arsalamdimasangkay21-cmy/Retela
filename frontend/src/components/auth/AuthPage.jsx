@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { CheckCircle2, KeyRound, Loader2, Mail, MapPin, Phone, RotateCcw, ShieldCheck, User } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ArrowRight, CheckCircle2, KeyRound, Loader2, Phone, RotateCcw, ShieldCheck, User, UserPlus } from "lucide-react";
 import { api, cachedGet, getApiErrorMessage } from "../../api/client";
 import { logoFromSettings, RETELA_LOGO_URL } from "../../config/branding";
 import { useAuth } from "../../context/AuthContext";
@@ -13,6 +13,71 @@ function savedLogoUrl() {
   return cached && !cached.includes("scontent.") ? cached : RETELA_LOGO_URL;
 }
 
+let recaptchaScriptPromise;
+
+function loadRecaptchaScript() {
+  if (window.grecaptcha?.render) return Promise.resolve(window.grecaptcha);
+  if (recaptchaScriptPromise) return recaptchaScriptPromise;
+  recaptchaScriptPromise = new Promise((resolve, reject) => {
+    const existing = document.getElementById("retela-recaptcha-script");
+    if (existing) {
+      existing.addEventListener("load", () => resolve(window.grecaptcha), { once: true });
+      existing.addEventListener("error", reject, { once: true });
+      return;
+    }
+    const script = document.createElement("script");
+    script.id = "retela-recaptcha-script";
+    script.src = "https://www.google.com/recaptcha/api.js?render=explicit";
+    script.async = true;
+    script.defer = true;
+    script.onload = () => resolve(window.grecaptcha);
+    script.onerror = reject;
+    document.head.appendChild(script);
+  });
+  return recaptchaScriptPromise;
+}
+
+function RecaptchaCheckbox({ siteKey, resetKey, onChange, onExpired, onError }) {
+  const containerRef = useRef(null);
+  const widgetIdRef = useRef(null);
+
+  useEffect(() => {
+    if (!siteKey) return undefined;
+    let cancelled = false;
+    loadRecaptchaScript()
+      .then((grecaptcha) => {
+        grecaptcha.ready(() => {
+          if (cancelled || !containerRef.current || widgetIdRef.current !== null) return;
+          widgetIdRef.current = grecaptcha.render(containerRef.current, {
+            sitekey: siteKey,
+            callback: onChange,
+            "expired-callback": onExpired,
+            "error-callback": onError
+          });
+        });
+      })
+      .catch(onError);
+    return () => {
+      cancelled = true;
+    };
+  }, [siteKey, onChange, onExpired, onError]);
+
+  useEffect(() => {
+    if (!siteKey || widgetIdRef.current === null || !window.grecaptcha?.reset) return;
+    window.grecaptcha.reset(widgetIdRef.current);
+  }, [siteKey, resetKey]);
+
+  if (!siteKey) {
+    return <p className="auth-captcha-config">CAPTCHA is not configured for this environment.</p>;
+  }
+
+  return (
+    <div className="auth-captcha-box" aria-label="CAPTCHA verification">
+      <div ref={containerRef} />
+    </div>
+  );
+}
+
 export default function AuthPage() {
   const { login } = useAuth();
   const [signupOpen, setSignupOpen] = useState(false);
@@ -23,6 +88,8 @@ export default function AuthPage() {
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState("");
   const [loginForm, setLoginForm] = useState({ username: "", password: "" });
+  const [captchaToken, setCaptchaToken] = useState("");
+  const [captchaResetKey, setCaptchaResetKey] = useState(0);
   const [signupForm, setSignupForm] = useState({ username: "", email: "", phoneNumber: "", location: "", otp: "", password: "", confirmPassword: "" });
   const [resetForm, setResetForm] = useState({ phoneNumber: "", otp: "", password: "", confirmPassword: "" });
   const [logoUrl, setLogoUrl] = useState(savedLogoUrl);
@@ -32,6 +99,9 @@ export default function AuthPage() {
   const resetPasswordBlueprint = useMemo(() => getPasswordBlueprint(resetForm.password), [resetForm.password]);
   const resetPasswordStrength = useMemo(() => getPasswordStrength(resetPasswordBlueprint), [resetPasswordBlueprint]);
   const resetPasswordStrong = resetPasswordBlueprint.every((item) => item.met);
+  const recaptchaSiteKey = import.meta.env.VITE_RECAPTCHA_SITE_KEY || "";
+  const captchaUnavailable = import.meta.env.PROD && !recaptchaSiteKey;
+  const captchaRequired = Boolean(recaptchaSiteKey);
 
   useEffect(() => {
     let cancelled = false;
@@ -57,15 +127,40 @@ export default function AuthPage() {
   async function submitLogin(event) {
     event.preventDefault();
     setMessage("");
+    if (captchaUnavailable) {
+      setMessage("CAPTCHA is not configured. Please contact support.");
+      return;
+    }
+    if (captchaRequired && !captchaToken) {
+      setMessage("Please complete the CAPTCHA first.");
+      return;
+    }
     setLoading("login");
     try {
-      await login(loginForm);
+      await login({ ...loginForm, captchaToken });
     } catch (error) {
       setMessage(getApiErrorMessage(error, "Invalid credentials or email OTP is not verified yet"));
+      setCaptchaToken("");
+      setCaptchaResetKey((value) => value + 1);
     } finally {
       setLoading("");
     }
   }
+
+  const handleCaptchaChange = useCallback((token) => {
+    setCaptchaToken(token || "");
+    setMessage("");
+  }, []);
+
+  const handleCaptchaExpired = useCallback(() => {
+    setCaptchaToken("");
+    setMessage("CAPTCHA expired. Please verify again.");
+  }, []);
+
+  const handleCaptchaError = useCallback(() => {
+    setCaptchaToken("");
+    setMessage("CAPTCHA verification failed. Please try again.");
+  }, []);
 
   async function submitSignup(event) {
     event.preventDefault();
@@ -261,18 +356,24 @@ export default function AuthPage() {
   const Spinner = () => <Loader2 className="animate-spin" size={16} />;
 
   return (
-    <main className="auth-shell grid place-items-center overflow-x-hidden p-4 py-6">
-      <div className={`auth-card grid w-full max-w-5xl overflow-hidden rounded-[28px] bg-white shadow-2xl md:min-h-[640px] md:grid-cols-2 ${(signupOpen || resetOpen) ? "auth-card-shifted" : ""}`}>
-        <section className="auth-info-panel hidden flex-col justify-center bg-emerald-700 p-12 text-white md:flex">
-          <img src={logoUrl} className="mb-6 h-20 w-20 rounded-3xl border border-white/30 bg-white object-cover" alt="RETELA SYSTEM logo" />
-          <h1 className="font-display text-4xl font-bold">Retela</h1>
-          <p className="mt-4 text-lg text-white/90">Sales, inventory, and ecommerce management for Tela to Pera Thrift Shop.</p>
-          <Button variant="secondary" className="mt-8 w-fit border-white/20 bg-white/10 text-white hover:bg-white hover:text-emerald-800" onClick={(signupOpen || resetOpen) ? closeSignup : openSignup}>
+    <main className="auth-shell grid place-items-center overflow-x-hidden px-4 py-6 sm:px-6">
+      <div className={`auth-card grid w-full max-w-5xl overflow-hidden bg-white md:min-h-[640px] md:grid-cols-[0.96fr_1.04fr] ${(signupOpen || resetOpen) ? "auth-card-shifted" : ""}`}>
+        <section className="auth-info-panel relative flex flex-col justify-center overflow-hidden bg-emerald-800 p-7 text-white sm:p-9 md:p-12">
+          <div className="auth-panel-dots" aria-hidden="true" />
+          <div className="auth-panel-ring auth-panel-ring-one" aria-hidden="true" />
+          <div className="auth-panel-ring auth-panel-ring-two" aria-hidden="true" />
+          <div className="relative z-10">
+            <img src={logoUrl} className="mb-6 h-20 w-20 rounded-3xl border border-white/30 bg-white object-cover shadow-lg shadow-emerald-950/20" alt="RETELA SYSTEM logo" />
+            <h1 className="font-display text-4xl font-bold tracking-tight sm:text-5xl">Retela</h1>
+            <p className="mt-4 max-w-sm text-base leading-7 text-white/85 sm:text-lg">Sales, inventory, and ecommerce management for Tela to Pera Thrift Shop.</p>
+          </div>
+          <Button variant="secondary" className="relative z-10 mt-8 w-fit border-white/30 bg-white/10 px-5 py-3 text-white shadow-none hover:border-white/50 hover:bg-white/15 hover:text-white" onClick={(signupOpen || resetOpen) ? closeSignup : openSignup}>
+            <UserPlus size={17} />
             {(signupOpen || resetOpen) ? "Back to Login" : "Register"}
           </Button>
         </section>
 
-        <section className="auth-form-panel p-5 sm:p-7 md:p-12">
+        <section className="auth-form-panel bg-white p-5 sm:p-8 md:p-12">
           <div className="mb-4 flex items-center gap-3 md:hidden">
             <img src={logoUrl} className="h-12 w-12 rounded-2xl border border-emerald-100 bg-white object-cover shadow-sm" alt="RETELA SYSTEM logo" />
             <div>
@@ -282,16 +383,28 @@ export default function AuthPage() {
           </div>
           {!signupOpen ? (
             !resetOpen ? (
-            <form name="retela-login-form" data-feature="auth-login" onSubmit={submitLogin} className="mx-auto flex h-full max-w-sm flex-col justify-center gap-4">
-              <div>
-                <h2 className="mt-2 font-display text-3xl font-bold uppercase">Login</h2>
-              </div>
-              <Field id="login-username" name="username" autoComplete="username" icon={User} placeholder="Username" value={loginForm.username} onChange={(e) => setLoginForm({ ...loginForm, username: e.target.value })} />
-              <Field id="login-password" name="password" autoComplete="current-password" icon={KeyRound} type="password" placeholder="Password" value={loginForm.password} onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })} />
-              <Button type="submit" disabled={loading === "login"}>{loading === "login" ? <><Spinner /> Logging in</> : "Login"}</Button>
-              <button type="button" className="text-sm font-semibold text-bluebrand" onClick={openReset}>Forgot password?</button>
-              <button type="button" className="text-sm font-semibold text-bluebrand" onClick={openSignup}>No account? Register first</button>
-              {message ? <p className="rounded-xl bg-blue-50 p-3 text-sm text-blue-700">{message}</p> : null}
+            <form name="retela-login-form" data-feature="auth-login" onSubmit={submitLogin} className="auth-login-form mx-auto flex h-full max-w-sm flex-col justify-center gap-4">
+              <h2 className="font-display text-4xl font-black uppercase tracking-[0.08em] text-slate-950">LOGIN</h2>
+              <Field id="login-username" name="username" autoComplete="username" icon={User} placeholder="Username" value={loginForm.username} onChange={(e) => setLoginForm({ ...loginForm, username: e.target.value })} wrapperClassName="auth-login-field" />
+              <Field id="login-password" name="password" autoComplete="current-password" icon={KeyRound} type="password" placeholder="Password" value={loginForm.password} onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })} wrapperClassName="auth-login-field" />
+              <RecaptchaCheckbox
+                siteKey={recaptchaSiteKey}
+                resetKey={captchaResetKey}
+                onChange={handleCaptchaChange}
+                onExpired={handleCaptchaExpired}
+                onError={handleCaptchaError}
+              />
+              <button type="submit" className="auth-login-button" disabled={loading === "login" || captchaUnavailable}>
+                <span>{loading === "login" ? <><Spinner /> Logging in...</> : "Login"}</span>
+                {loading === "login" ? null : <ArrowRight size={18} />}
+              </button>
+              <button type="button" className="auth-forgot-link" onClick={openReset}>Forgot password?</button>
+              <div className="auth-divider"><span>or</span></div>
+              <p className="text-center text-sm font-semibold text-slate-500">
+                No account?{" "}
+                <button type="button" className="font-bold text-emerald-700 transition hover:text-emerald-900" onClick={openSignup}>Register first</button>
+              </p>
+              {message ? <p className="rounded-xl bg-emerald-50 p-3 text-sm font-semibold text-emerald-800">{message}</p> : null}
             </form>
             ) : null
           ) : null}
