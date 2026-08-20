@@ -3416,7 +3416,7 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
                   <button type="button" onClick={saveTracking} className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-emerald-700">Save</button>
                 </div>
               </div>
-              {source.fulfillment_method === "delivery" ? <OrderDeliveryInfo order={source} title="Delivery Location" mapLabel="View on Map" /> : null}
+              {source.fulfillment_method === "delivery" ? <OrderDeliveryInfo order={source} title="Delivery Location" mapLabel="View Delivery Route" routeEnabled /> : null}
               <div className="grid gap-3">
                 {selectedOrder.items.map((item) => (
                   <div key={`${item.product_id}-${item.quantity}`} className="flex items-center gap-3 rounded-2xl border border-[#dfe9e3] bg-white p-3 shadow-sm transition hover:border-emerald-200">
@@ -3727,7 +3727,7 @@ function orderButtonClass(status) {
     approved: "bg-emerald-50 text-emerald-700",
     processing: "bg-blue-50 text-bluebrand",
     ready: "bg-amber-50 text-amber-700",
-    completed: "bg-slate-900 text-white",
+    completed: "order-action-completed border border-emerald-200 bg-emerald-50 text-emerald-800 hover:border-emerald-300 hover:bg-emerald-100",
     cancelled: "bg-rose-50 text-rose-700"
   };
   return styles[status] || "bg-white text-bluebrand";

@@ -13,12 +13,14 @@ import {
   FileText,
   Loader2,
   LockKeyhole,
+  MapPin,
   Moon,
   Package,
   Palette,
   RefreshCw,
   RotateCcw,
   Save,
+  Search,
   ShieldCheck,
   SlidersHorizontal,
   Sparkles,
@@ -43,6 +45,8 @@ const defaultSettings = {
     contactNumber: "",
     emailAddress: "",
     shopAddress: "",
+    shopLatitude: null,
+    shopLongitude: null,
     currency: "PHP",
     language: "English"
   },
@@ -205,6 +209,19 @@ function validateSettings(settings, scope = "all") {
     }
     if (settings.general.contactNumber && !/^[0-9+\-\s()]{7,30}$/.test(settings.general.contactNumber)) {
       errors["general.contactNumber"] = "Use a valid contact number.";
+    }
+    const latitude = settings.general.shopLatitude;
+    const longitude = settings.general.shopLongitude;
+    const hasLatitude = latitude !== "" && latitude !== null && latitude !== undefined;
+    const hasLongitude = longitude !== "" && longitude !== null && longitude !== undefined;
+    if (hasLatitude !== hasLongitude) {
+      errors["general.shopLocation"] = "Set both latitude and longitude for the exact shop location.";
+    }
+    if (hasLatitude && (Number(latitude) < -90 || Number(latitude) > 90 || Number.isNaN(Number(latitude)))) {
+      errors["general.shopLocation"] = "Shop latitude must be between -90 and 90.";
+    }
+    if (hasLongitude && (Number(longitude) < -180 || Number(longitude) > 180 || Number.isNaN(Number(longitude)))) {
+      errors["general.shopLocation"] = "Shop longitude must be between -180 and 180.";
     }
   }
 
@@ -535,6 +552,22 @@ export default function AdminSettingsPage({ onChange }) {
             <TextInput label="Contact Number" value={settings.general.contactNumber} error={errors["general.contactNumber"]} onChange={(value) => updateSetting("general", "contactNumber", value)} />
             <TextInput label="Email Address" type="email" value={settings.general.emailAddress} error={errors["general.emailAddress"]} onChange={(value) => updateSetting("general", "emailAddress", value)} />
             <TextInput label="Shop Address" value={settings.general.shopAddress} onChange={(value) => updateSetting("general", "shopAddress", value)} className="md:col-span-2" />
+            <ShopLocationSetting
+              value={settings.general}
+              error={errors["general.shopLocation"]}
+              onChange={(next) => {
+                setSettings((current) => ({
+                  ...current,
+                  general: {
+                    ...current.general,
+                    shopAddress: next.shopAddress,
+                    shopLatitude: next.shopLatitude,
+                    shopLongitude: next.shopLongitude
+                  }
+                }));
+                setErrors((current) => ({ ...current, "general.shopLocation": "" }));
+              }}
+            />
             <SelectInput label="Currency" value={settings.general.currency} options={["PHP"]} onChange={(value) => updateSetting("general", "currency", value)} />
             <SelectInput label="Language" value={settings.general.language} options={["English", "Filipino"]} onChange={(value) => updateSetting("general", "language", value)} />
           </div>
@@ -840,6 +873,207 @@ function TextInput({ label, value, onChange, type = "text", error, className = "
       <input type={type} className={controlClasses(error)} value={value} onChange={(event) => onChange(event.target.value)} />
     </FieldShell>
   );
+}
+
+const defaultShopMapCenter = { latitude: 7.1907, longitude: 124.5307 };
+
+function finiteCoordinate(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function ShopLocationSetting({ value, onChange, error }) {
+  const initialAddress = String(value.shopAddress || "");
+  const latitude = finiteCoordinate(value.shopLatitude);
+  const longitude = finiteCoordinate(value.shopLongitude);
+  const [query, setQuery] = useState(initialAddress);
+  const [results, setResults] = useState([]);
+  const [searching, setSearching] = useState(false);
+  const [resolving, setResolving] = useState(false);
+
+  useEffect(() => {
+    setQuery(String(value.shopAddress || ""));
+  }, [value.shopAddress]);
+
+  function applyLocation({ address, latitude: nextLatitude, longitude: nextLongitude }) {
+    onChange({
+      shopAddress: String(address || value.shopAddress || "").trim(),
+      shopLatitude: finiteCoordinate(nextLatitude),
+      shopLongitude: finiteCoordinate(nextLongitude)
+    });
+  }
+
+  async function searchLocation(event) {
+    event?.preventDefault();
+    const text = query.trim();
+    if (!text) return;
+    setSearching(true);
+    try {
+      const response = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=5&countrycodes=ph&q=${encodeURIComponent(text)}`);
+      if (!response.ok) throw new Error("Search failed");
+      const data = await response.json();
+      setResults((Array.isArray(data) ? data : []).map((item) => ({
+        id: item.place_id,
+        address: item.display_name,
+        latitude: Number(item.lat),
+        longitude: Number(item.lon)
+      })).filter((item) => item.address && Number.isFinite(item.latitude) && Number.isFinite(item.longitude)));
+    } catch {
+      setResults([]);
+    } finally {
+      setSearching(false);
+    }
+  }
+
+  async function reverseGeocode(nextLatitude, nextLongitude) {
+    setResolving(true);
+    try {
+      const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(nextLatitude)}&lon=${encodeURIComponent(nextLongitude)}&zoom=18&addressdetails=1`);
+      const data = response.ok ? await response.json() : {};
+      const address = String(data?.display_name || value.shopAddress || "").trim();
+      applyLocation({ address, latitude: nextLatitude, longitude: nextLongitude });
+      if (address) setQuery(address);
+    } catch {
+      applyLocation({ address: value.shopAddress || query, latitude: nextLatitude, longitude: nextLongitude });
+    } finally {
+      setResolving(false);
+    }
+  }
+
+  function selectResult(result) {
+    setQuery(result.address);
+    setResults([]);
+    applyLocation(result);
+  }
+
+  return (
+    <div className="grid gap-3 rounded-[24px] border border-neonbrand/20 bg-neonbrand/10 p-4 md:col-span-2">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className="text-xs font-bold uppercase tracking-[0.16em] text-neonbrand/80">Exact Shop Location</p>
+          <h3 className="mt-1 text-base font-bold text-white">Set Exact Shop Location</h3>
+          <p className="mt-1 text-sm text-white/55">Used as the delivery-route starting point in Admin Order Details.</p>
+        </div>
+        {latitude !== null && longitude !== null ? (
+          <span className="inline-flex w-fit items-center gap-2 rounded-full border border-neonbrand/25 bg-neonbrand/10 px-3 py-1 text-xs font-bold text-neonbrand">
+            <MapPin size={14} /> Exact pin saved
+          </span>
+        ) : null}
+      </div>
+
+      <form className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]" onSubmit={searchLocation}>
+        <label className="flex min-h-12 items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-2 text-white">
+          <Search size={16} className="text-neonbrand" />
+          <input
+            className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-white/35"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search shop address or landmark..."
+          />
+        </label>
+        <ActionButton size="sm" icon={searching ? Loader2 : Search} loading={searching} onClick={searchLocation}>Search</ActionButton>
+      </form>
+
+      {results.length ? (
+        <div className="max-h-44 overflow-y-auto rounded-2xl border border-white/10 bg-black/20 p-2">
+          {results.map((result) => (
+            <button key={result.id} type="button" className="flex w-full gap-2 rounded-xl px-3 py-2 text-left text-sm font-semibold text-white/75 transition hover:bg-neonbrand/10 hover:text-neonbrand" onClick={() => selectResult(result)}>
+              <MapPin size={15} className="mt-0.5 shrink-0" />
+              <span>{result.address}</span>
+            </button>
+          ))}
+        </div>
+      ) : null}
+
+      <SettingsMiniMap
+        latitude={latitude ?? defaultShopMapCenter.latitude}
+        longitude={longitude ?? defaultShopMapCenter.longitude}
+        hasPin={latitude !== null && longitude !== null}
+        resolving={resolving}
+        onSelect={(nextLatitude, nextLongitude) => reverseGeocode(nextLatitude, nextLongitude)}
+      />
+
+      <div className="grid gap-3 sm:grid-cols-2">
+        <StatusPill label="Latitude" value={latitude !== null ? latitude.toFixed(6) : "Not set"} />
+        <StatusPill label="Longitude" value={longitude !== null ? longitude.toFixed(6) : "Not set"} />
+      </div>
+      {error ? <ErrorText>{error}</ErrorText> : null}
+      <button
+        type="button"
+        className="w-fit rounded-2xl border border-white/10 bg-white/[0.06] px-3 py-2 text-xs font-bold text-white/70 transition hover:border-rose-300/35 hover:text-rose-200"
+        onClick={() => applyLocation({ address: value.shopAddress || "", latitude: null, longitude: null })}
+      >
+        Clear exact pin
+      </button>
+    </div>
+  );
+}
+
+function SettingsMiniMap({ latitude, longitude, hasPin, resolving, onSelect }) {
+  const [zoom, setZoom] = useState(15);
+  const center = projectToTile(latitude, longitude, zoom);
+  const tileX = Math.floor(center.x);
+  const tileY = Math.floor(center.y);
+  const offsetX = center.x - tileX;
+  const offsetY = center.y - tileY;
+  const tiles = [];
+  for (let y = -1; y <= 1; y += 1) {
+    for (let x = -1; x <= 1; x += 1) {
+      tiles.push({ x, y, tileX: tileX + x, tileY: tileY + y });
+    }
+  }
+
+  function handleMapClick(event) {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const dx = (event.clientX - rect.left - rect.width / 2) / 256;
+    const dy = (event.clientY - rect.top - rect.height / 2) / 256;
+    const next = unprojectFromTile(center.x + dx, center.y + dy, zoom);
+    onSelect(next.latitude, next.longitude);
+  }
+
+  return (
+    <div className="retela-delivery-map-card">
+      <div className="retela-delivery-map h-72" onClick={handleMapClick} role="button" tabIndex={0} aria-label="Tap map to set exact shop pin">
+        {tiles.map((tile) => (
+          <img
+            key={`${tile.tileX}-${tile.tileY}-${zoom}`}
+            src={`https://tile.openstreetmap.org/${zoom}/${tile.tileX}/${tile.tileY}.png`}
+            alt=""
+            loading="lazy"
+            style={{
+              left: `calc(50% + ${(tile.x - offsetX) * 256}px)`,
+              top: `calc(50% + ${(tile.y - offsetY) * 256}px)`
+            }}
+          />
+        ))}
+        <span className={`retela-delivery-map-pin ${hasPin ? "" : "opacity-60"}`}><MapPin size={30} /></span>
+        <div className="retela-delivery-map-tools">
+          <button type="button" onClick={(event) => { event.stopPropagation(); setZoom((current) => Math.min(18, current + 1)); }}>+</button>
+          <button type="button" onClick={(event) => { event.stopPropagation(); setZoom((current) => Math.max(11, current - 1)); }}>-</button>
+        </div>
+        {resolving ? <span className="retela-delivery-map-status"><Loader2 size={14} className="animate-spin" /> Resolving address</span> : null}
+      </div>
+      <p>Search, then tap the map to fine-tune the RETELA shop pin.</p>
+    </div>
+  );
+}
+
+function projectToTile(latitude, longitude, zoom) {
+  const safeLatitude = Math.max(-85.0511, Math.min(85.0511, Number(latitude) || 0));
+  const safeLongitude = Math.max(-180, Math.min(180, Number(longitude) || 0));
+  const latRad = (safeLatitude * Math.PI) / 180;
+  const scale = 2 ** zoom;
+  return {
+    x: ((safeLongitude + 180) / 360) * scale,
+    y: ((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * scale
+  };
+}
+
+function unprojectFromTile(x, y, zoom) {
+  const scale = 2 ** zoom;
+  const longitude = (x / scale) * 360 - 180;
+  const latitude = (Math.atan(Math.sinh(Math.PI * (1 - (2 * y) / scale))) * 180) / Math.PI;
+  return { latitude, longitude };
 }
 
 function AIProviderSelector({ value = "auto", onChange, currentProvider, lastProviderUsed, apiStatus, providerStatus = {} }) {

@@ -10,6 +10,8 @@ export const DEFAULT_SYSTEM_SETTINGS = {
     contactNumber: "",
     emailAddress: "",
     shopAddress: "",
+    shopLatitude: null,
+    shopLongitude: null,
     currency: "PHP",
     language: "English"
   },
@@ -106,6 +108,8 @@ const settingsSchema = z.object({
     contactNumber: z.string().trim().max(30).optional().default(""),
     emailAddress: z.string().trim().email("Use a valid email address").or(z.literal("")).default(""),
     shopAddress: z.string().trim().max(255).optional().default(""),
+    shopLatitude: z.preprocess((value) => value === "" || value == null ? null : Number(value), z.number().min(-90).max(90).nullable()).optional().default(null),
+    shopLongitude: z.preprocess((value) => value === "" || value == null ? null : Number(value), z.number().min(-180).max(180).nullable()).optional().default(null),
     currency: z.enum(["PHP"]).default("PHP"),
     language: z.enum(["English", "Filipino"]).default("English")
   }),
