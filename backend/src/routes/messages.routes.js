@@ -4,6 +4,7 @@ import { ensureAutoIncrementId, query, requireUsableAutoIncrementId } from "../c
 import { asyncHandler, HttpError } from "../utils/errors.js";
 import { requireApproved, requireAuth } from "../middleware/auth.js";
 import { loadSystemSettings } from "../utils/systemSettings.js";
+import { shippingSummary } from "../utils/shippingSettings.js";
 import { generateAIResponse } from "../utils/aiProvider.js";
 import { availableProductWhere, ensureProductInventoryColumns, nonDeletedProductWhere } from "../utils/productInventory.js";
 import { productImageExpression } from "../utils/productImages.js";
@@ -735,12 +736,23 @@ router.post("/ai", requireAuth, requireApproved, asyncHandler(async (req, res) =
       suggestionCount: suggestions.length
     });
 
-    const [orders, settingsResult, customerProfile, history] = await Promise.all([
+    const [orders, settingsResult, shipping, customerProfile, history] = await Promise.all([
       getCustomerOrders(req.user.id),
       loadSystemSettings(),
+      shippingSummary(),
       getCustomerProfile(req.user.id),
       getConversationHistory(conversation.id)
     ]);
+    const settings = {
+      ...settingsResult.config,
+      payment: {
+        ...settingsResult.config.payment,
+        shippingFeeType: shipping.type,
+        shippingRateName: shipping.name,
+        shippingFeeEnabled: shipping.enabled,
+        shippingFee: Number(shipping.fee || 0)
+      }
+    };
     console.info("[ai-route] calling provider", {
       conversationId: conversation.id,
       hasMessage: Boolean(String(input.prompt || "").trim()),
@@ -748,7 +760,7 @@ router.post("/ai", requireAuth, requireApproved, asyncHandler(async (req, res) =
       historyCount: history.length,
       orderCount: orders.length,
       hasProductContext: availableProducts.length > 0,
-      configuredProvider: settingsResult.config?.ai?.aiProvider || process.env.AI_PROVIDER || "auto"
+      configuredProvider: settings?.ai?.aiProvider || process.env.AI_PROVIDER || "auto"
     });
     let aiResult;
     try {
@@ -756,9 +768,9 @@ router.post("/ai", requireAuth, requireApproved, asyncHandler(async (req, res) =
         products: availableProducts,
         history,
         orders,
-        settings: settingsResult.config,
+        settings,
         customer: customerProfile,
-        provider: settingsResult.config?.ai?.aiProvider
+        provider: settings?.ai?.aiProvider
       });
     } catch (error) {
       console.error("[ai-route] provider failed", safeAiRouteError(error));

@@ -2,6 +2,7 @@ import express from "express";
 import { query } from "../config/db.js";
 import { generateAIResponse } from "../utils/aiProvider.js";
 import { loadSystemSettings } from "../utils/systemSettings.js";
+import { shippingSummary } from "../utils/shippingSettings.js";
 import { ensureProductInventoryColumns, nonDeletedProductWhere } from "../utils/productInventory.js";
 import { productImageExpression } from "../utils/productImages.js";
 import { asyncHandler, HttpError } from "../utils/errors.js";
@@ -16,8 +17,9 @@ router.post("/", asyncHandler(async (req, res) => {
   }
 
   await ensureProductInventoryColumns();
-  const [{ config }, products] = await Promise.all([
+  const [{ config }, shipping, products] = await Promise.all([
     loadSystemSettings(),
+    shippingSummary(),
     query(
       `SELECT name, brand, category, gender, size, price, stock, \`condition\`, description, ${productImageExpression("products")} AS image_url
        FROM products
@@ -26,6 +28,16 @@ router.post("/", asyncHandler(async (req, res) => {
        LIMIT 200`
     )
   ]);
+  const settings = {
+    ...config,
+    payment: {
+      ...config.payment,
+      shippingFeeType: shipping.type,
+      shippingRateName: shipping.name,
+      shippingFeeEnabled: shipping.enabled,
+      shippingFee: Number(shipping.fee || 0)
+    }
+  };
   const availableProducts = products.filter((item) => Number(item.stock || 0) > 0);
   let response;
   try {
@@ -33,9 +45,9 @@ router.post("/", asyncHandler(async (req, res) => {
       products: availableProducts,
       history: [],
       orders: [],
-      settings: config,
+      settings,
       customer: {},
-      provider: config?.ai?.aiProvider
+      provider: settings?.ai?.aiProvider
     });
   } catch (error) {
     throw new HttpError(error.status || 502, "Retela Assistant is temporarily unavailable. Please try again shortly.");

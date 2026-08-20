@@ -2,6 +2,7 @@ import { HttpError } from "./errors.js";
 import { query } from "../config/db.js";
 import { generateGeminiResult, isGeminiConfigured } from "./gemini.js";
 import { generateOpenAiResult, isOpenAiConfigured } from "./openai.js";
+import { buildRetelaAssistantContext } from "./retelaAssistantContext.js";
 
 const PROVIDERS = new Set(["openai", "gemini", "auto"]);
 
@@ -57,7 +58,7 @@ async function runOpenAi(message, context) {
     throw error;
   }
   return {
-    body: result.text,
+    body: sanitizeAssistantReply(result.text),
     provider: "openai",
     tokenUsage: result.tokenUsage ?? null
   };
@@ -72,10 +73,19 @@ async function runGemini(message, context) {
     throw error;
   }
   return {
-    body: result.text,
+    body: sanitizeAssistantReply(result.text),
     provider: "gemini",
     tokenUsage: result.tokenUsage ?? null
   };
+}
+
+function sanitizeAssistantReply(value) {
+  return String(value || "")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/__([^_]+)__/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 function markProviderUsed(provider, status = "Ready") {
@@ -177,6 +187,15 @@ export async function generateAIResponse(message, context = {}) {
   logAIStartupDiagnostics();
   const start = Date.now();
   const selectedProvider = getProviderConfig(context.provider);
+  const assistantContext = buildRetelaAssistantContext({
+    prompt: message,
+    products: Array.isArray(context.products) ? context.products : [],
+    history: Array.isArray(context.history) ? context.history : [],
+    orders: Array.isArray(context.orders) ? context.orders : [],
+    settings: context.settings || {},
+    customer: context.customer || {}
+  });
+  const providerContext = { ...context, assistantContext };
   const hasGemini = hasProviderConfig("gemini");
   const hasOpenAI = hasProviderConfig("openai");
   console.info("[ai] request context", {
@@ -185,6 +204,9 @@ export async function generateAIResponse(message, context = {}) {
     historyCount: Array.isArray(context.history) ? context.history.length : 0,
     hasProductContext: Array.isArray(context.products) && context.products.length > 0,
     productCount: Array.isArray(context.products) ? context.products.length : 0,
+    intent: assistantContext.intent,
+    relevantProductCount: assistantContext.relevantProducts.length,
+    referencedProduct: assistantContext.referencedProduct?.name || null,
     primaryProvider: selectedProvider,
     geminiModel: geminiModelName(),
     openaiModel: openAiModelName()
@@ -212,8 +234,8 @@ export async function generateAIResponse(message, context = {}) {
     console.info(`[ai] attempting ${providerLabel(provider)}`);
     try {
       const result = provider === "gemini"
-        ? await runGemini(message, context)
-        : await runOpenAi(message, context);
+        ? await runGemini(message, providerContext)
+        : await runOpenAi(message, providerContext);
       const responseTime = Date.now() - start;
       markProviderUsed(result.provider);
       console.info(`[ai] ${providerLabel(result.provider)} success`, { responseTime });
