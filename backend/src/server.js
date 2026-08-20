@@ -13,22 +13,20 @@ if (!process.env.PAYMONGO_SECRET_KEY && !globalThis.__RETELA_PAYMONGO_WARNING_LO
   console.error("PAYMONGO_SECRET_KEY is missing");
 }
 
-const port = process.env.PORT || 5000;
+const PORT = Number(process.env.PORT) || 5000;
+const HOST = "0.0.0.0";
 
 async function initializeDatabaseOrExit() {
   try {
     await initializeDatabase();
   } catch (error) {
-    console.error("[database] Startup failed. API will not start with a broken database connection.", {
+    console.error("[database] Startup initialization failed. Shutting down backend.", {
       code: error.code || null,
       message: error.message
     });
     process.exit(1);
   }
 }
-
-await initializeDatabaseOrExit();
-validateEmailConfiguration();
 
 const app = createApp();
 const httpServer = createServer(app);
@@ -50,11 +48,18 @@ httpServer.on("error", (error) => {
   console.error("[server] Unable to start HTTP server.", {
     code: error.code || null,
     message: error.message,
-    port
+    port: PORT
   });
   process.exit(1);
 });
 
-httpServer.listen(port, () => {
-  console.log(`Retela API running on port ${port}`);
+httpServer.listen(PORT, HOST, () => {
+  console.log(`[server] RETELA backend listening on port ${PORT}`);
+
+  initializeDatabaseOrExit()
+    .then(() => {
+      validateEmailConfiguration();
+      console.log("[database] Startup initialization completed.");
+    })
+    .catch(() => {});
 });

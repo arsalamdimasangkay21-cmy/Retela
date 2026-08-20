@@ -22,7 +22,7 @@ import chatRoutes from "./routes/chat.routes.js";
 import posRoutes from "./routes/pos.routes.js";
 import customerRoutes from "./routes/customer.routes.js";
 import identityVerificationsRoutes from "./routes/identity-verifications.routes.js";
-import { checkDatabaseConnection, query, requestContextMiddleware } from "./config/db.js";
+import { query, requestContextMiddleware } from "./config/db.js";
 import { allowedOrigins, corsOptions } from "./config/cors.js";
 import { PRODUCT_UPLOAD_DIR, UPLOAD_ROOT, logUploadConfig } from "./config/uploads.js";
 
@@ -106,18 +106,11 @@ export function createApp(io) {
   app.use("/uploads/products", express.static(PRODUCT_UPLOAD_DIR));
   app.use("/uploads", express.static(UPLOAD_ROOT));
 
-  app.get("/api/health", async (req, res) => {
-    const database = await checkDatabaseConnection().catch((error) => ({
-      connected: false,
-      databaseName: process.env.DB_NAME || "retela_db",
-      checkedAt: new Date().toISOString(),
-      error: error.code || "database_unavailable"
-    }));
-    res.status(database.connected ? 200 : 503).json({
-      success: database.connected,
-      status: "ok",
-      database: database.connected ? "connected" : "unavailable",
-      checkedAt: database.checkedAt
+  app.get(["/health", "/api/health"], (req, res) => {
+    res.status(200).json({
+      ok: true,
+      service: "retela-backend",
+      checkedAt: new Date().toISOString()
     });
   });
 
