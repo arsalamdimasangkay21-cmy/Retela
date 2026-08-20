@@ -5,6 +5,10 @@ import { disconnectSocket } from "../api/socket";
 const AuthContext = createContext(null);
 
 function readStoredUser() {
+  if (!localStorage.getItem("retela_token")) {
+    localStorage.removeItem("retela_user");
+    return null;
+  }
   const raw = localStorage.getItem("retela_user");
   if (!raw) return null;
 
@@ -20,6 +24,7 @@ function readStoredUser() {
 export function AuthProvider({ children }) {
   const [token, setToken] = useState(localStorage.getItem("retela_token"));
   const [user, setUser] = useState(readStoredUser);
+  const [authReady, setAuthReady] = useState(!localStorage.getItem("retela_token"));
 
   async function loadCurrentUser() {
     clearGetCache("/users/me");
@@ -30,12 +35,18 @@ export function AuthProvider({ children }) {
   }
 
   useEffect(() => {
-    if (!token) return;
+    if (!token) {
+      setAuthReady(true);
+      setUser(null);
+      return;
+    }
     let cancelled = false;
+    setAuthReady(false);
     loadCurrentUser()
       .then((data) => {
         if (cancelled) return;
         setUser(data);
+        setAuthReady(true);
       })
       .catch(() => {
         if (cancelled) return;
@@ -44,6 +55,7 @@ export function AuthProvider({ children }) {
         localStorage.removeItem("retela_user");
         setToken(null);
         setUser(null);
+        setAuthReady(true);
       });
     return () => {
       cancelled = true;
@@ -57,6 +69,7 @@ export function AuthProvider({ children }) {
       localStorage.removeItem("retela_user");
       setToken(null);
       setUser(null);
+      setAuthReady(true);
     }
     window.addEventListener("retela:auth-expired", handleAuthExpired);
     return () => window.removeEventListener("retela:auth-expired", handleAuthExpired);
@@ -80,6 +93,7 @@ export function AuthProvider({ children }) {
     setToken(data.token);
     const freshUser = await loadCurrentUser();
     setUser(freshUser);
+    setAuthReady(true);
   }
 
   function logout() {
@@ -88,9 +102,10 @@ export function AuthProvider({ children }) {
     localStorage.removeItem("retela_user");
     setToken(null);
     setUser(null);
+    setAuthReady(true);
   }
 
-  const value = useMemo(() => ({ token, user, login, logout, setUser }), [token, user]);
+  const value = useMemo(() => ({ token, user, authReady, login, logout, setUser }), [token, user, authReady]);
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 

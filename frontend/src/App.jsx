@@ -11,7 +11,7 @@ import CustomerDashboard from "./pages/CustomerDashboard";
 import PosPage from "./pages/PosPage";
 
 function Shell() {
-  const { user } = useAuth();
+  const { user, authReady } = useAuth();
   const [active, setActive] = useState(user?.role === "admin" ? "Dashboard" : user?.role === "staff" ? "POS" : "Home");
   const [paymentReturn, setPaymentReturn] = useState(null);
 
@@ -37,6 +37,17 @@ function Shell() {
     }
     window.history.replaceState({}, "", "/");
   }, [user]);
+
+  if (!authReady) {
+    return (
+      <div className="grid min-h-screen place-items-center bg-slate-950 p-6 text-center text-white">
+        <div>
+          <div className="mx-auto h-10 w-10 animate-spin rounded-full border-4 border-emerald-400/30 border-t-emerald-400" />
+          <p className="mt-4 text-sm font-bold text-white/70">Restoring your RETELA session...</p>
+        </div>
+      </div>
+    );
+  }
 
   if (!user) return <AuthPage />;
 
