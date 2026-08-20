@@ -266,8 +266,8 @@ export default function AdminDashboard({ active, onChange }) {
     return matchesSearch && matchesCategory && matchesBrand && matchesStock && matchesSize && matchesCondition;
   }), [products, filters]);
 
-  function showProductToast(message, tone = "success") {
-    setProductToast({ message, tone });
+  function showProductToast(message, tone = "success", placement = "bottom-right") {
+    setProductToast({ message, tone, placement });
     window.clearTimeout(showProductToast.timer);
     showProductToast.timer = window.setTimeout(() => setProductToast(null), 2800);
   }
@@ -1719,8 +1719,9 @@ function BarcodeScannerPanel({ title, value, onChange, product, onPrint, compact
 
 function AdminToast({ toast, onClose }) {
   const success = toast?.tone !== "error";
+  const positionClass = toast?.placement === "top-right" ? "top-5 right-5" : "bottom-5 right-5";
   return (
-    <div className={`fixed bottom-5 right-5 z-[170] flex max-w-sm items-start gap-3 rounded-[24px] border p-4 text-white shadow-2xl backdrop-blur-2xl ${success ? "border-neonbrand/25 bg-black/85" : "border-rose-300/25 bg-rose-950/85"}`}>
+    <div className={`fixed ${positionClass} z-[170] flex max-w-sm items-start gap-3 rounded-[24px] border p-4 text-white shadow-2xl backdrop-blur-2xl ${success ? "border-neonbrand/25 bg-black/85" : "border-rose-300/25 bg-rose-950/85"}`}>
       {success ? <Check size={20} className="mt-0.5 shrink-0 text-neonbrand" /> : <Trash2 size={20} className="mt-0.5 shrink-0 text-rose-200" />}
       <p className="min-w-0 flex-1 text-sm leading-6 text-white/72">{toast?.message}</p>
       <button type="button" onClick={onClose} className="shrink-0 rounded-full px-2 text-white/45 hover:bg-white/10 hover:text-white">x</button>
@@ -1734,8 +1735,8 @@ function ProductEditorModal({ editingProductId, form, setForm, productImage, set
   const primaryButtonClass = "inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-[#20b66a] px-5 py-2.5 text-sm font-bold text-white shadow-lg shadow-emerald-700/18 transition hover:bg-[#15884f] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#20b66a] active:scale-95";
   const [otherValues, setOtherValues] = useState({ brand: "", category: "", gender: "", size: "", color: "", condition: "" });
   const [otherErrors, setOtherErrors] = useState({});
-  const [pendingOptionDelete, setPendingOptionDelete] = useState(null);
-  const [deletingOption, setDeletingOption] = useState(false);
+  const [deletingOptionKeys, setDeletingOptionKeys] = useState([]);
+  const deletingOptionKeysRef = useRef(new Set());
   const [existingImageUrl, setExistingImageUrl] = useState(null);
   const [selectedImageFile, setSelectedImageFile] = useState(null);
   const [previewImageUrl, setPreviewImageUrl] = useState(null);
@@ -1818,21 +1819,24 @@ function ProductEditorModal({ editingProductId, form, setForm, productImage, set
     return nextForm;
   }
 
-  async function confirmRemoveOption() {
-    if (!pendingOptionDelete?.kind || !pendingOptionDelete?.id) return;
+  async function removeOptionImmediately(option) {
+    if (!option?.kind || !option?.id) return;
+    const optionKey = `${option.kind}:${option.id}`;
+    if (deletingOptionKeysRef.current.has(optionKey)) return;
+    deletingOptionKeysRef.current.add(optionKey);
+    setDeletingOptionKeys([...deletingOptionKeysRef.current]);
     try {
-      setDeletingOption(true);
-      await deleteApparelOption(pendingOptionDelete.kind, pendingOptionDelete.id);
-      if (form[pendingOptionDelete.formKey] === pendingOptionDelete.name) {
-        setForm((current) => ({ ...current, [pendingOptionDelete.formKey]: "" }));
+      await deleteApparelOption(option.kind, option.id);
+      if (form[option.formKey] === option.name) {
+        setForm((current) => ({ ...current, [option.formKey]: "" }));
       }
       await refreshApparelOptions();
-      setPendingOptionDelete(null);
-      showProductToast(`${pendingOptionDelete.name} removed from reusable options.`);
-    } catch (error) {
-      showProductToast(getApiErrorMessage(error, "Could not remove this option."), "error");
+      showProductToast(`${option.name} removed from reusable options.`);
+    } catch {
+      showProductToast("Could not remove option.", "error", "top-right");
     } finally {
-      setDeletingOption(false);
+      deletingOptionKeysRef.current.delete(optionKey);
+      setDeletingOptionKeys([...deletingOptionKeysRef.current]);
     }
   }
 
@@ -1893,7 +1897,9 @@ function ProductEditorModal({ editingProductId, form, setForm, productImage, set
                 setOtherValues((current) => ({ ...current, [config.formKey]: value }));
                 setOtherErrors((errors) => ({ ...errors, [config.formKey]: "" }));
               }}
-              onDeleteOption={(option) => setPendingOptionDelete({ ...option, kind: config.kind, formKey: config.formKey })}
+              deleteKeyPrefix={config.kind}
+              deletingOptionKeys={deletingOptionKeys}
+              onDeleteOption={(option) => removeOptionImmediately({ ...option, kind: config.kind, formKey: config.formKey })}
             />
           ))}
             <input className={inputClass} placeholder="Price" type="number" min="1" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} />
@@ -1917,7 +1923,9 @@ function ProductEditorModal({ editingProductId, form, setForm, productImage, set
                 setOtherValues((current) => ({ ...current, [config.formKey]: value }));
                 setOtherErrors((errors) => ({ ...errors, [config.formKey]: "" }));
               }}
-              onDeleteOption={(option) => setPendingOptionDelete({ ...option, kind: config.kind, formKey: config.formKey })}
+              deleteKeyPrefix={config.kind}
+              deletingOptionKeys={deletingOptionKeys}
+              onDeleteOption={(option) => removeOptionImmediately({ ...option, kind: config.kind, formKey: config.formKey })}
             />
           ))}
           <div className="grid gap-2">
@@ -1952,26 +1960,12 @@ function ProductEditorModal({ editingProductId, form, setForm, productImage, set
           </div>
           </div>
         </form>
-        {pendingOptionDelete ? (
-          <div className="fixed inset-0 z-[130] grid place-items-center bg-black/25 p-4 backdrop-blur-[6px]">
-            <div className="w-full max-w-sm rounded-[22px] border border-white/50 bg-white p-5 text-slate-950 shadow-[0_24px_80px_rgba(15,23,42,0.22)]">
-              <h3 className="font-display text-lg font-bold">Remove this option?</h3>
-              <p className="mt-2 text-sm leading-6 text-slate-600">{pendingOptionDelete.name} will be removed from reusable dropdown options only. Existing apparel records will not be changed.</p>
-              <div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-                <button type="button" className={secondaryButtonClass} disabled={deletingOption} onClick={() => setPendingOptionDelete(null)}>Cancel</button>
-                <button type="button" className="inline-flex min-h-12 items-center justify-center rounded-xl bg-rose-600 px-5 py-2.5 text-sm font-bold text-white shadow-lg shadow-rose-700/18 transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-60" disabled={deletingOption} onClick={confirmRemoveOption}>
-                  {deletingOption ? "Removing..." : "Remove"}
-                </button>
-              </div>
-            </div>
-          </div>
-        ) : null}
       </motion.section>
     </motion.div>
   );
 }
 
-function ApparelOptionSelect({ label, value, options = [], placeholder, customPlaceholder, customValue, customError, onChange = () => {}, onCustomChange = () => {}, onDeleteOption }) {
+function ApparelOptionSelect({ label, value, options = [], placeholder, customPlaceholder, customValue, customError, deleteKeyPrefix = "", deletingOptionKeys = [], onChange = () => {}, onCustomChange = () => {}, onDeleteOption }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef(null);
   const safeOptions = Array.isArray(options) ? options : [];
@@ -2016,6 +2010,8 @@ function ApparelOptionSelect({ label, value, options = [], placeholder, customPl
             const optionName = String(option?.name || option?.value || "").trim();
             if (!optionName) return null;
             const custom = Boolean(option?.id) && option?.is_system !== true && optionName !== "Other" && typeof onDeleteOption === "function";
+            const deleteKey = `${deleteKeyPrefix}:${option?.id}`;
+            const deleting = custom && deletingOptionKeys.includes(deleteKey);
             return (
               <div
                 key={`${option?.id || "system"}-${optionName}`}
@@ -2038,24 +2034,25 @@ function ApparelOptionSelect({ label, value, options = [], placeholder, customPl
                 {custom ? (
                   <span
                     role="button"
-                    tabIndex={0}
+                    tabIndex={deleting ? -1 : 0}
                     aria-label={`Remove ${optionName}`}
-                    className="grid h-7 w-7 shrink-0 place-items-center rounded-full text-slate-400 transition hover:bg-rose-50 hover:text-rose-600"
+                    aria-disabled={deleting}
+                    className={`grid h-7 w-7 shrink-0 place-items-center rounded-full transition ${deleting ? "cursor-wait text-slate-300" : "text-slate-400 hover:bg-rose-50 hover:text-rose-600"}`}
                     onClick={(event) => {
                       event.preventDefault();
                       event.stopPropagation();
-                      setOpen(false);
+                      if (deleting) return;
                       onDeleteOption({ ...option, name: optionName });
                     }}
                     onKeyDown={(event) => {
                       if (event.key !== "Enter" && event.key !== " ") return;
                       event.preventDefault();
                       event.stopPropagation();
-                      setOpen(false);
+                      if (deleting) return;
                       onDeleteOption({ ...option, name: optionName });
                     }}
                   >
-                    <X size={14} />
+                    {deleting ? <Loader2 className="animate-spin" size={14} /> : <X size={14} />}
                   </span>
                 ) : null}
               </div>
