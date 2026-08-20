@@ -102,6 +102,7 @@ function optionNames(rows = [], fallback = []) {
 
 function optionItems(rows = [], fallback = []) {
   const map = new Map();
+  const fallbackKeys = new Set(fallback.map((name) => String(name || "").trim().toLowerCase()).filter(Boolean));
   fallback.forEach((name) => {
     const value = String(name || "").trim();
     if (value) map.set(value.toLowerCase(), { id: null, name: value, is_system: true });
@@ -109,10 +110,11 @@ function optionItems(rows = [], fallback = []) {
   rows.forEach((row) => {
     const value = String(row?.name || row || "").trim();
     if (!value) return;
+    const key = value.toLowerCase();
     map.set(value.toLowerCase(), {
       id: row?.id ?? null,
       name: value,
-      is_system: Boolean(row?.is_system)
+      is_system: row?.is_system === true || row?.is_system === 1 || String(row?.is_system).toLowerCase() === "true" || fallbackKeys.has(key) || key === "other"
     });
   });
   const items = [...map.values()].sort((left, right) => {
@@ -774,6 +776,7 @@ export default function AdminDashboard({ active, onChange }) {
           saveProduct={saveProduct}
           productSaving={productSaving}
           optionValues={optionValues}
+          optionMeta={optionMeta}
           refreshApparelOptions={loadApparelOptions}
           showProductToast={showProductToast}
           productToast={productToast}
@@ -1294,7 +1297,8 @@ function PremiumInventoryPage({
   setProductImage,
   saveProduct,
   productSaving = false,
-  optionValues,
+  optionValues = {},
+  optionMeta = {},
   refreshApparelOptions,
   showProductToast,
   productToast,
@@ -1388,9 +1392,9 @@ function PremiumInventoryPage({
       <Card className="inventory-filter-card">
         <div className="grid gap-3 lg:grid-cols-[minmax(220px,1fr)_160px_150px_170px_auto]">
           <Field icon={Search} placeholder="Search apparel inventory" value={filters.search} onChange={(e) => setFilters({ ...filters, search: e.target.value })} />
-          <InventorySelect label="Category" value={filters.category} onChange={(value) => setFilters({ ...filters, category: value })} options={["all", ...optionValues.categories.filter((value) => value !== "Other")]} />
-          <InventorySelect label="Size" value={filters.size} onChange={(value) => setFilters({ ...filters, size: value })} options={["all", ...optionValues.sizes.filter((value) => value !== "Other")]} />
-          <InventorySelect label="Condition" value={filters.condition} onChange={(value) => setFilters({ ...filters, condition: value })} options={["all", ...optionValues.conditions.filter((value) => value !== "Other")]} />
+          <InventorySelect label="Category" value={filters.category} onChange={(value) => setFilters({ ...filters, category: value })} options={["all", ...(optionValues.categories || []).filter((value) => value !== "Other")]} />
+          <InventorySelect label="Size" value={filters.size} onChange={(value) => setFilters({ ...filters, size: value })} options={["all", ...(optionValues.sizes || []).filter((value) => value !== "Other")]} />
+          <InventorySelect label="Condition" value={filters.condition} onChange={(value) => setFilters({ ...filters, condition: value })} options={["all", ...(optionValues.conditions || []).filter((value) => value !== "Other")]} />
           <button type="button" className="inline-flex items-center justify-center gap-2 rounded-2xl border border-neonbrand/30 bg-neonbrand/10 px-5 py-3 text-sm font-bold text-neonbrand transition hover:bg-neonbrand hover:text-black hover:shadow-[0_0_30px_rgba(56,255,136,0.18)]">
             <SlidersHorizontal size={17} />
             Filter
@@ -1724,7 +1728,7 @@ function AdminToast({ toast, onClose }) {
   );
 }
 
-function ProductEditorModal({ editingProductId, form, setForm, productImage, setProductImage, saveProduct, productSaving = false, optionValues, optionMeta, refreshApparelOptions, showProductToast, onClose }) {
+function ProductEditorModal({ editingProductId, form, setForm, productImage, setProductImage, saveProduct, productSaving = false, optionValues = {}, optionMeta = {}, refreshApparelOptions, showProductToast, onClose }) {
   const inputClass = "h-12 min-h-12 w-full rounded-xl border border-[#cfded4] bg-white px-3 py-2 text-sm font-semibold text-[#17211b] outline-none transition placeholder:text-[#8b9a91] focus:border-[#20b66a] focus:ring-4 focus:ring-[rgba(32,182,106,0.18)]";
   const secondaryButtonClass = "inline-flex min-h-12 items-center justify-center rounded-xl border border-[#cfded4] bg-white px-5 py-2.5 text-sm font-bold text-[#17211b] shadow-sm transition hover:border-[#20b66a] hover:text-[#15884f] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#20b66a] active:scale-95";
   const primaryButtonClass = "inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-[#20b66a] px-5 py-2.5 text-sm font-bold text-white shadow-lg shadow-emerald-700/18 transition hover:bg-[#15884f] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#20b66a] active:scale-95";
@@ -1875,7 +1879,7 @@ function ProductEditorModal({ editingProductId, form, setForm, productImage, set
               key={config.formKey}
               label={config.inputLabel}
               value={form[config.formKey] || ""}
-              options={optionMeta[config.kind] || []}
+              options={optionMeta?.[config.kind] || []}
               placeholder={`Select ${config.label}`}
               customPlaceholder={config.placeholder}
               customValue={otherValues[config.formKey] || ""}
@@ -1899,7 +1903,7 @@ function ProductEditorModal({ editingProductId, form, setForm, productImage, set
               key={config.formKey}
               label={config.inputLabel}
               value={form[config.formKey] || ""}
-              options={optionMeta[config.kind] || []}
+              options={optionMeta?.[config.kind] || []}
               placeholder={`Select ${config.label}`}
               customPlaceholder={config.placeholder}
               customValue={otherValues[config.formKey] || ""}
@@ -1967,10 +1971,11 @@ function ProductEditorModal({ editingProductId, form, setForm, productImage, set
   );
 }
 
-function ApparelOptionSelect({ label, value, options = [], placeholder, customPlaceholder, customValue, customError, onChange, onCustomChange, onDeleteOption }) {
+function ApparelOptionSelect({ label, value, options = [], placeholder, customPlaceholder, customValue, customError, onChange = () => {}, onCustomChange = () => {}, onDeleteOption }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef(null);
-  const selected = options.find((option) => option.name === value);
+  const safeOptions = Array.isArray(options) ? options : [];
+  const selected = safeOptions.find((option) => option?.name === value || option?.value === value) || null;
 
   useEffect(() => {
     if (!open) return undefined;
@@ -2007,45 +2012,47 @@ function ApparelOptionSelect({ label, value, options = [], placeholder, customPl
           <button type="button" className="flex min-h-10 w-full items-center rounded-lg px-3 text-left text-sm font-semibold text-slate-400 transition hover:bg-emerald-50" onClick={() => { onChange(""); setOpen(false); }}>
             {placeholder}
           </button>
-          {options.map((option) => {
-            const custom = option.id && !option.is_system && option.name !== "Other";
+          {safeOptions.map((option) => {
+            const optionName = String(option?.name || option?.value || "").trim();
+            if (!optionName) return null;
+            const custom = Boolean(option?.id) && option?.is_system !== true && optionName !== "Other" && typeof onDeleteOption === "function";
             return (
               <div
-                key={`${option.id || "system"}-${option.name}`}
+                key={`${option?.id || "system"}-${optionName}`}
                 tabIndex={0}
-                className={`flex min-h-10 w-full items-center gap-2 rounded-lg px-3 text-left text-sm font-semibold transition ${value === option.name ? "bg-emerald-50 text-emerald-800" : "text-slate-700 hover:bg-emerald-50"}`}
+                className={`flex min-h-10 w-full items-center gap-2 rounded-lg px-3 text-left text-sm font-semibold transition ${value === optionName ? "bg-emerald-50 text-emerald-800" : "text-slate-700 hover:bg-emerald-50"}`}
                 onClick={() => {
-                  onChange(option.name);
+                  onChange(optionName);
                   setOpen(false);
                 }}
                 onKeyDown={(event) => {
                   if (event.key !== "Enter" && event.key !== " ") return;
                   event.preventDefault();
-                  onChange(option.name);
+                  onChange(optionName);
                   setOpen(false);
                 }}
                 role="option"
-                aria-selected={value === option.name}
+                aria-selected={value === optionName}
               >
-                <span className="min-w-0 flex-1 truncate">{option.name}</span>
+                <span className="min-w-0 flex-1 truncate">{optionName}</span>
                 {custom ? (
                   <span
                     role="button"
                     tabIndex={0}
-                    aria-label={`Remove ${option.name}`}
+                    aria-label={`Remove ${optionName}`}
                     className="grid h-7 w-7 shrink-0 place-items-center rounded-full text-slate-400 transition hover:bg-rose-50 hover:text-rose-600"
                     onClick={(event) => {
                       event.preventDefault();
                       event.stopPropagation();
                       setOpen(false);
-                      onDeleteOption(option);
+                      onDeleteOption({ ...option, name: optionName });
                     }}
                     onKeyDown={(event) => {
                       if (event.key !== "Enter" && event.key !== " ") return;
                       event.preventDefault();
                       event.stopPropagation();
                       setOpen(false);
-                      onDeleteOption(option);
+                      onDeleteOption({ ...option, name: optionName });
                     }}
                   >
                     <X size={14} />
@@ -3766,11 +3773,11 @@ function ProductGallery({ products, filters, setFilters, optionValues, onAdd, on
           <Field icon={Search} placeholder="Filter apparel items" value={filters.search} onChange={(e) => setFilters({ ...filters, search: e.target.value })} />
           <select className="rounded-xl border border-slate-200 bg-white p-3 text-sm" value={filters.category} onChange={(e) => setFilters({ ...filters, category: e.target.value })}>
             <option value="all">All items</option>
-            {optionValues.categories.filter((category) => category !== "Other").map((category) => <option key={category} value={category}>{category}</option>)}
+            {(optionValues.categories || []).filter((category) => category !== "Other").map((category) => <option key={category} value={category}>{category}</option>)}
           </select>
           <select className="rounded-xl border border-slate-200 bg-white p-3 text-sm" value={filters.brand} onChange={(e) => setFilters({ ...filters, brand: e.target.value })}>
             <option value="all">All brands</option>
-            {optionValues.brands.filter((brand) => brand !== "Other").map((brand) => <option key={brand} value={brand}>{brand}</option>)}
+            {(optionValues.brands || []).filter((brand) => brand !== "Other").map((brand) => <option key={brand} value={brand}>{brand}</option>)}
           </select>
           <select className="rounded-xl border border-slate-200 bg-white p-3 text-sm" value={filters.stock} onChange={(e) => setFilters({ ...filters, stock: e.target.value })}>
             <option value="all">All stock</option>
@@ -3780,7 +3787,7 @@ function ProductGallery({ products, filters, setFilters, optionValues, onAdd, on
           </select>
           <select className="rounded-xl border border-slate-200 bg-white p-3 text-sm" value={filters.condition} onChange={(e) => setFilters({ ...filters, condition: e.target.value })}>
             <option value="all">All condition</option>
-            {optionValues.conditions.filter((condition) => condition !== "Other").map((condition) => <option key={condition} value={condition}>{condition}</option>)}
+            {(optionValues.conditions || []).filter((condition) => condition !== "Other").map((condition) => <option key={condition} value={condition}>{condition}</option>)}
           </select>
         </div>
         {products.length ? <div className="retela-admin-product-grid">
