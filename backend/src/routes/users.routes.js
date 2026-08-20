@@ -159,7 +159,7 @@ router.get("/me", asyncHandler(async (req, res) => {
 router.patch("/me", upload.single("profilePhoto"), asyncHandler(async (req, res) => {
   await ensureUserColumns();
   const schema = z.object({
-    username: z.string().trim().min(3).optional(),
+    username: z.string().trim().min(3, "Username must contain at least 3 characters").max(80, "Username must contain at most 80 characters").optional(),
     display_name: z.string().trim().max(120).optional(),
     email: z.string().email().optional().or(z.literal("")),
     phone_number: z.string().trim().optional(),
@@ -176,13 +176,12 @@ router.patch("/me", upload.single("profilePhoto"), asyncHandler(async (req, res)
   const updates = [];
   const params = { id: req.user.id };
 
-  if (req.user.role !== "admin" && hasOwn(input, "username")) {
+  if (hasOwn(input, "username")) {
     const username = nullableTrim(input.username);
-    if (username) {
-      await assertUniqueUserField("username", username, req.user.id, "Username already exists");
-      updates.push("username = :username");
-      params.username = username;
-    }
+    if (!username) throw new HttpError(400, "Username is required");
+    await assertUniqueUserField("username", username, req.user.id, "Username already exists");
+    updates.push("username = :username");
+    params.username = username;
   }
 
   if (hasOwn(input, "display_name")) {

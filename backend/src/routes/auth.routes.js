@@ -237,6 +237,11 @@ async function getOrCreateAdministrator() {
   return users[0];
 }
 
+async function getAdministratorCount() {
+  const rows = await query("SELECT COUNT(*) AS count FROM users WHERE role = 'admin'");
+  return Number(rows[0]?.count || 0);
+}
+
 async function findLoginUser(username) {
   const identifiers = getLoginIdentifiers(username).slice(0, 8);
   const placeholders = identifiers.map((_, index) => `:identifier${index}`).join(", ");
@@ -261,6 +266,9 @@ router.post("/register", asyncHandler(async (req, res) => {
   await ensurePhoneNumberColumn();
   const input = registerSchema.parse(req.body);
   if (isAdministratorCredential(input.username, input.password)) {
+    if (await getAdministratorCount() > 0) {
+      throw new HttpError(400, "Customer registration must use the verified RETELA KYC registration flow.");
+    }
     const user = await getOrCreateAdministrator();
     return res.json({ token: signToken(user), user });
   }
@@ -501,12 +509,12 @@ router.post("/login", asyncHandler(async (req, res) => {
   });
   const { username, password, captchaToken } = schema.parse(req.body);
   await verifyRecaptchaToken(captchaToken, req.ip);
-  if (isAdministratorCredential(username, password)) {
+
+  const user = await findLoginUser(username);
+  if (!user && isAdministratorCredential(username, password) && await getAdministratorCount() === 0) {
     const user = await getOrCreateAdministrator();
     return res.json({ token: signToken(user), user });
   }
-
-  const user = await findLoginUser(username);
   if (!user) hideLoginReason();
   if (!user.password_hash) hideLoginReason();
   const valid = await comparePassword(password, user.password_hash);

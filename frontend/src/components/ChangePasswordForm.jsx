@@ -1,72 +1,132 @@
 import { useMemo, useState } from "react";
-import { Eye, EyeOff, KeyRound, Save } from "lucide-react";
+import { Eye, EyeOff, KeyRound, Loader2, Save, X } from "lucide-react";
 import { api, getApiErrorMessage } from "../api/client";
-import { dispatchCustomerToast } from "./CustomerToastStack";
-import { Button } from "./ui";
 import { getPasswordBlueprint, getPasswordStrength, PasswordBlueprint } from "./PasswordBlueprint";
 
-export function ChangePasswordForm() {
-  const [form, setForm] = useState({ currentPassword: "", newPassword: "", confirmPassword: "" });
-  const [visible, setVisible] = useState({ currentPassword: false, newPassword: false, confirmPassword: false });
+const emptyPasswordForm = {
+  currentPassword: "",
+  newPassword: "",
+  confirmPassword: ""
+};
+
+const hiddenPasswordFields = {
+  currentPassword: false,
+  newPassword: false,
+  confirmPassword: false
+};
+
+export function ChangePasswordForm({ onSuccess, onError } = {}) {
+  const [expanded, setExpanded] = useState(false);
+  const [form, setForm] = useState(emptyPasswordForm);
+  const [visible, setVisible] = useState(hiddenPasswordFields);
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
   const blueprint = useMemo(() => getPasswordBlueprint(form.newPassword), [form.newPassword]);
   const strength = useMemo(() => getPasswordStrength(blueprint), [blueprint]);
   const strong = blueprint.every((item) => item.met);
 
+  function resetForm() {
+    setForm(emptyPasswordForm);
+    setVisible(hiddenPasswordFields);
+    setMessage("");
+  }
+
+  function cancelPasswordChange() {
+    if (loading) return;
+    resetForm();
+    setExpanded(false);
+  }
+
   async function submit(event) {
     event.preventDefault();
     setMessage("");
+
+    if (!form.currentPassword || !form.newPassword || !form.confirmPassword) {
+      setMessage("Complete all password fields");
+      return;
+    }
+
     if (form.newPassword !== form.confirmPassword) {
       setMessage("Passwords do not match");
       return;
     }
+
     if (!strong) {
       setMessage("Use a stronger password with 8+ characters, uppercase, lowercase, number, and symbol");
       return;
     }
+
     setLoading(true);
     try {
-      const { data } = await api.patch("/users/me/password", {
+      await api.patch("/users/me/password", {
         currentPassword: form.currentPassword,
         newPassword: form.newPassword
       });
-      setMessage(data.message);
-      dispatchCustomerToast({ type: "success", message: data.message || "Password updated successfully." });
-      setForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
+      resetForm();
+      setExpanded(false);
+      onSuccess?.("Password changed successfully.");
     } catch (error) {
       const nextMessage = getApiErrorMessage(error, "Could not change password");
       setMessage(nextMessage);
-      dispatchCustomerToast({ type: "error", message: nextMessage });
+      onError?.(nextMessage);
     } finally {
       setLoading(false);
     }
   }
 
   return (
-    <form name="retela-profile-change-password-form" data-feature="profile-change-password" onSubmit={submit} className="mt-6 grid gap-3 border-t border-white/10 pt-5 md:grid-cols-2">
-      <div className="md:col-span-2">
-        <h4 className="font-display text-lg font-bold">Change Password</h4>
+    <section className="admin-password-card">
+      <div className="admin-password-summary">
+        <div className="admin-password-copy">
+          <p className="admin-profile-eyebrow">Security</p>
+          <h3>Password</h3>
+          <span>Keep your account password secure.</span>
+        </div>
+        {!expanded ? (
+          <button type="button" className="admin-password-expand-button" onClick={() => setExpanded(true)}>
+            <KeyRound size={16} />
+            Change Password
+          </button>
+        ) : null}
       </div>
-      <PasswordField id="profile-current-password" name="currentPassword" autoComplete="current-password" visible={visible.currentPassword} onToggle={() => setVisible({ ...visible, currentPassword: !visible.currentPassword })} placeholder="Current password" value={form.currentPassword} onChange={(e) => setForm({ ...form, currentPassword: e.target.value })} />
-      <PasswordField id="profile-new-password" name="newPassword" autoComplete="new-password" visible={visible.newPassword} onToggle={() => setVisible({ ...visible, newPassword: !visible.newPassword })} placeholder="New password" value={form.newPassword} onChange={(e) => setForm({ ...form, newPassword: e.target.value })} />
-      <div className="md:col-span-2">
-        <PasswordBlueprint blueprint={blueprint} strength={strength} />
-      </div>
-      <PasswordField id="profile-confirm-password" name="confirmPassword" autoComplete="new-password" visible={visible.confirmPassword} onToggle={() => setVisible({ ...visible, confirmPassword: !visible.confirmPassword })} placeholder="Confirm new password" value={form.confirmPassword} onChange={(e) => setForm({ ...form, confirmPassword: e.target.value })} />
-      <Button type="submit" disabled={loading || !form.currentPassword || !form.newPassword || !form.confirmPassword} className="md:w-fit"><Save size={17} /> {loading ? "Changing" : "Change Password"}</Button>
-      {message ? <p className="rounded-xl bg-blue-50 p-3 text-sm text-blue-700 md:col-span-2">{message}</p> : null}
-    </form>
+
+      {expanded ? (
+        <form name="retela-profile-change-password-form" data-feature="profile-change-password" onSubmit={submit} className="admin-password-form">
+          <div className="admin-password-grid">
+            <PasswordField id="profile-current-password" name="currentPassword" autoComplete="current-password" visible={visible.currentPassword} onToggle={() => setVisible((state) => ({ ...state, currentPassword: !state.currentPassword }))} placeholder="Current password" value={form.currentPassword} onChange={(event) => setForm((state) => ({ ...state, currentPassword: event.target.value }))} />
+            <PasswordField id="profile-new-password" name="newPassword" autoComplete="new-password" visible={visible.newPassword} onToggle={() => setVisible((state) => ({ ...state, newPassword: !state.newPassword }))} placeholder="New password" value={form.newPassword} onChange={(event) => setForm((state) => ({ ...state, newPassword: event.target.value }))} />
+            <PasswordField id="profile-confirm-password" name="confirmPassword" autoComplete="new-password" visible={visible.confirmPassword} onToggle={() => setVisible((state) => ({ ...state, confirmPassword: !state.confirmPassword }))} placeholder="Confirm new password" value={form.confirmPassword} onChange={(event) => setForm((state) => ({ ...state, confirmPassword: event.target.value }))} />
+          </div>
+
+          <div className="admin-password-blueprint">
+            <PasswordBlueprint blueprint={blueprint} strength={strength} />
+          </div>
+
+          {message ? <p className="admin-password-message">{message}</p> : null}
+
+          <div className="admin-password-actions">
+            <button type="button" className="admin-profile-cancel-button" disabled={loading} onClick={cancelPasswordChange}>
+              <X size={16} />
+              Cancel
+            </button>
+            <button type="submit" className="admin-profile-save-button" disabled={loading || !form.currentPassword || !form.newPassword || !form.confirmPassword}>
+              {loading ? <Loader2 className="animate-spin" size={16} /> : <Save size={16} />}
+              Change Password
+            </button>
+          </div>
+        </form>
+      ) : null}
+    </section>
   );
 }
 
 function PasswordField({ visible, onToggle, ...props }) {
   const Icon = visible ? EyeOff : Eye;
   return (
-    <label className="flex min-w-0 items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.06] px-3 py-2.5 shadow-sm transition focus-within:border-neonbrand/60 focus-within:ring-4 focus-within:ring-neonbrand/10">
-      <KeyRound size={18} className="shrink-0 text-neonbrand" />
-      <input className="min-w-0 flex-1 bg-transparent text-sm text-white outline-none placeholder:text-white/35" type={visible ? "text" : "password"} {...props} />
-      <button type="button" onClick={onToggle} className="grid h-8 w-8 shrink-0 place-items-center rounded-xl text-white/50 transition hover:bg-white/10 hover:text-neonbrand" aria-label={visible ? "Hide password" : "Show password"}>
+    <label className="admin-password-field">
+      <KeyRound size={18} className="admin-password-field-icon" />
+      <input type={visible ? "text" : "password"} {...props} />
+      <button type="button" onClick={onToggle} className="admin-password-visibility-button" aria-label={visible ? "Hide password" : "Show password"}>
         <Icon size={17} />
       </button>
     </label>

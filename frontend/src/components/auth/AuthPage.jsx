@@ -174,17 +174,6 @@ export default function AuthPage() {
       setMessage("Passwords do not match");
       return;
     }
-    if (signupForm.username === "AdministratorRetela" && signupForm.password === "Retela2026") {
-      setLoading("signup");
-      try {
-        await login({ username: signupForm.username, password: signupForm.password });
-      } catch (error) {
-        setMessage(getApiErrorMessage(error, "Admin login failed"));
-      } finally {
-        setLoading("");
-      }
-      return;
-    }
     if (!/^09\d{9}$/.test(signupForm.phoneNumber)) {
       setMessage("Phone number must be 11 digits and start with 09");
       return;

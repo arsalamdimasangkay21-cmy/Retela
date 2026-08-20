@@ -679,23 +679,25 @@ export default function AdminDashboard({ active, onChange }) {
     }
   }
 
-  async function saveProfile(event) {
+  async function saveProfile(event, profileInput = profile, photoInput = profilePhoto) {
     event.preventDefault();
     if (busyAction === "profile-save") return;
     setBusyAction("profile-save");
     try {
       const payload = new FormData();
-      Object.entries(profile || {}).forEach(([key, value]) => payload.append(key, value ?? ""));
-      if (profilePhoto) payload.append("profilePhoto", profilePhoto);
+      Object.entries(profileInput || {}).forEach(([key, value]) => payload.append(key, value ?? ""));
+      if (photoInput) payload.append("profilePhoto", photoInput);
       const { data } = await api.patch("/users/me", payload, { headers: { "Content-Type": "multipart/form-data" } });
       localStorage.setItem("retela_user", JSON.stringify(data));
       setUser(data);
       setProfile(data);
       setProfilePhoto(null);
       clearGetCache("/users/me");
-      showProductToast("Profile saved successfully.");
+      showProductToast("Profile updated successfully.", "success", "top-right");
+      return data;
     } catch (error) {
-      showProductToast(getApiErrorMessage(error, "Could not save profile."), "error");
+      showProductToast(getApiErrorMessage(error, "Could not save profile."), "error", "top-right");
+      throw error;
     } finally {
       setBusyAction("");
     }
@@ -940,7 +942,7 @@ export default function AdminDashboard({ active, onChange }) {
   if (active === "Trash Bin") return <TrashBinPage onChanged={refreshActiveData} />;
   if (active === "Messages") return <AdminConversationsPage />;
   if (active === "Locations") return <AdminLocations users={users} />;
-  if (active === "Profile") return <AdminProfile profile={profile} setProfile={setProfile} profilePhoto={profilePhoto} setProfilePhoto={setProfilePhoto} saveProfile={saveProfile} />;
+  if (active === "Profile") return <AdminProfile profile={profile} setProfile={setProfile} profilePhoto={profilePhoto} setProfilePhoto={setProfilePhoto} saveProfile={saveProfile} profileSaving={busyAction === "profile-save"} showToast={showProductToast} />;
   if (active === "Settings") return <AdminSettingsPage onChange={onChange} />;
   return <TableCard rows={returns} actions={(row) => <><button onClick={() => decideReturn(row.id, "approved")} className="rounded-lg bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700">Approve</button><button onClick={() => decideReturn(row.id, "rejected")} className="rounded-lg bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700">Reject</button></>} />;
 }
@@ -4487,30 +4489,147 @@ function chatKey(conversation) {
   return conversation.id ? String(conversation.id) : `customer-${conversation.customer_id}`;
 }
 
-function AdminProfile({ profile, setProfile, profilePhoto, setProfilePhoto, saveProfile }) {
+function AdminProfile({ profile, setProfile, profilePhoto, setProfilePhoto, saveProfile, profileSaving = false, showToast }) {
+  const [editing, setEditing] = useState(false);
+  const [draftProfile, setDraftProfile] = useState(profile || {});
+  const [photoPreviewUrl, setPhotoPreviewUrl] = useState("");
+
+  useEffect(() => {
+    if (!editing) setDraftProfile(profile || {});
+  }, [editing, profile]);
+
+  useEffect(() => {
+    if (!profilePhoto) {
+      setPhotoPreviewUrl("");
+      return undefined;
+    }
+    const url = URL.createObjectURL(profilePhoto);
+    setPhotoPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [profilePhoto]);
+
   if (!profile) return <Card><p className="text-sm text-slate-500">Loading profile...</p></Card>;
+
+  const current = editing ? draftProfile : profile;
+  const displayName = current.display_name || current.username || "RETELA Admin";
+  const username = current.username || "admin";
+  const photoUrl = photoPreviewUrl || assetUrl(profile.profile_photo_url);
+
+  function updateDraft(key, value) {
+    setDraftProfile((draft) => ({ ...draft, [key]: value }));
+  }
+
+  function startEditing() {
+    setDraftProfile(profile || {});
+    setProfilePhoto(null);
+    setEditing(true);
+  }
+
+  function cancelEditing() {
+    setDraftProfile(profile || {});
+    setProfilePhoto(null);
+    setEditing(false);
+  }
+
+  async function submitProfile(event) {
+    event.preventDefault();
+    const nextUsername = String(draftProfile.username || "").trim();
+    if (!nextUsername) {
+      showToast?.("Username is required.", "error", "top-right");
+      return;
+    }
+    if (nextUsername.length < 3 || nextUsername.length > 80) {
+      showToast?.("Username must be 3 to 80 characters.", "error", "top-right");
+      return;
+    }
+    try {
+      const saved = await saveProfile(event, { ...draftProfile, username: nextUsername }, profilePhoto);
+      if (saved) {
+        setProfile(saved);
+        setEditing(false);
+      }
+    } catch {
+      // saveProfile owns the toast message; keep edit mode open for correction.
+    }
+  }
+
   return (
-    <Card>
-      <h3 className="font-display text-xl font-bold">Admin Profile</h3>
-      <form onSubmit={saveProfile} className="mt-4 grid gap-3 md:grid-cols-2">
-        <div className="md:col-span-2 flex flex-wrap items-center gap-4">
-          {profile.profile_photo_url ? <img src={assetUrl(profile.profile_photo_url)} className="h-20 w-20 rounded-full object-cover" alt={profile.display_name || profile.username || "Profile"} /> : <div className="grid h-20 w-20 place-items-center rounded-full bg-slate-100 text-sm font-bold text-slate-400">Photo</div>}
-          <label className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-bluebrand bg-blue-50 px-4 py-3 text-sm font-semibold text-bluebrand">
-            <Upload size={17} />
-            {profilePhoto ? profilePhoto.name : "Browse profile photo"}
-            <input className="hidden" type="file" accept="image/*" onChange={(e) => setProfilePhoto(e.target.files?.[0] || null)} />
-          </label>
+    <motion.div className="admin-profile-page" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
+      <section className="admin-profile-hero">
+        <div className="admin-profile-avatar-wrap">
+          {photoUrl ? (
+            <img src={photoUrl} className="admin-profile-avatar" alt={displayName} />
+          ) : (
+            <div className="admin-profile-avatar admin-profile-avatar-fallback">{customerInitials(current)}</div>
+          )}
         </div>
-        <Field placeholder="Admin display name" value={profile.display_name || ""} onChange={(e) => setProfile({ ...profile, display_name: e.target.value })} />
-        <Field placeholder="Login username" value={profile.username || ""} readOnly title="Login username is fixed for admin accounts." />
-        <Field placeholder="Email" type="email" value={profile.email || ""} onChange={(e) => setProfile({ ...profile, email: e.target.value })} />
-        <Field placeholder="Phone number" value={profile.phone_number || ""} onChange={(e) => setProfile({ ...profile, phone_number: e.target.value })} />
-        <Field placeholder="Shop location" value={profile.location || ""} onChange={(e) => setProfile({ ...profile, location: e.target.value })} />
-        <textarea className="min-h-28 rounded-xl border border-slate-200 bg-white/70 p-3 text-sm outline-none focus:border-bluebrand md:col-span-2" placeholder="About the shop" value={profile.shop_description || ""} onChange={(e) => setProfile({ ...profile, shop_description: e.target.value })} />
-        <div className="flex items-center gap-2 rounded-xl bg-slate-50 p-3 text-sm text-slate-600 md:col-span-2"><ReceiptText size={18} /> Orders can be reviewed from Order Management.</div>
-        <Button type="submit" className="md:w-fit"><Save size={17} /> Save Profile</Button>
+        <div className="admin-profile-identity">
+          <p className="admin-profile-eyebrow">Admin Profile</p>
+          <h2>{displayName}</h2>
+          <div className="admin-profile-meta-row">
+            <span>@{username}</span>
+            <span className="admin-profile-role-badge">Admin</span>
+          </div>
+        </div>
+        <div className="admin-profile-actions">
+          {!editing ? (
+            <button type="button" className="admin-profile-edit-button" onClick={startEditing}>
+              <Edit3 size={16} /> Edit Profile
+            </button>
+          ) : (
+            <>
+              <button type="button" className="admin-profile-cancel-button" disabled={profileSaving} onClick={cancelEditing}>
+                <X size={16} /> Cancel
+              </button>
+              <button type="submit" form="retela-admin-profile-form" className="admin-profile-save-button" disabled={profileSaving}>
+                {profileSaving ? <Loader2 className="animate-spin" size={16} /> : <Save size={16} />} Save Profile
+              </button>
+            </>
+          )}
+        </div>
+      </section>
+
+      <form id="retela-admin-profile-form" onSubmit={submitProfile} className="admin-profile-card">
+        <div className="admin-profile-section-heading">
+          <h3>Profile Information</h3>
+          {editing ? (
+            <label className="admin-profile-photo-button">
+              <Upload size={16} />
+              {profilePhoto ? profilePhoto.name : "Change Photo"}
+              <input className="hidden" type="file" accept="image/*" onChange={(event) => setProfilePhoto(event.target.files?.[0] || null)} />
+            </label>
+          ) : null}
+        </div>
+
+        <div className="admin-profile-grid">
+          <ProfileField label="Display Name" value={current.display_name || "RETELA Admin"} editing={editing} onChange={(value) => updateDraft("display_name", value)} placeholder="RETELA Admin" />
+          <ProfileField label="Username" value={current.username || ""} editing={editing} onChange={(value) => updateDraft("username", value)} placeholder="Username" prefix={!editing ? "@" : ""} required />
+          <ProfileField label="Email" value={current.email || ""} editing={editing} onChange={(value) => updateDraft("email", value)} placeholder="Email address" type="email" />
+          <ProfileField label="Phone Number" value={current.phone_number || ""} editing={editing} onChange={(value) => updateDraft("phone_number", value)} placeholder="Phone number" empty="Not set" />
+          <ProfileField label="Shop Location" value={current.location || ""} editing={editing} onChange={(value) => updateDraft("location", value)} placeholder="Shop location" empty="Not set" wide />
+          <ProfileField label="About the Shop" value={current.shop_description || ""} editing={editing} onChange={(value) => updateDraft("shop_description", value)} placeholder="About the shop" empty="No shop description added." textarea wide />
+        </div>
       </form>
-      <ChangePasswordForm />
-    </Card>
+
+      <ChangePasswordForm onSuccess={(message) => showToast?.(message || "Password changed successfully.", "success", "top-right")} onError={(message) => showToast?.(message || "Could not change password.", "error", "top-right")} />
+    </motion.div>
+  );
+}
+
+function ProfileField({ label, value, editing, onChange, placeholder, empty = "Not set", prefix = "", type = "text", textarea = false, wide = false, required = false }) {
+  const displayValue = String(value || "").trim();
+  return (
+    <label className={`admin-profile-field ${wide ? "is-wide" : ""}`}>
+      <span>{label}</span>
+      {editing ? (
+        textarea ? (
+          <textarea className="admin-profile-input admin-profile-textarea" value={value || ""} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} />
+        ) : (
+          <input className="admin-profile-input" type={type} required={required} minLength={required ? 3 : undefined} maxLength={label === "Username" ? 80 : undefined} value={value || ""} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} />
+        )
+      ) : (
+        <strong className={displayValue ? "" : "is-empty"}>{displayValue ? `${prefix}${displayValue}` : empty}</strong>
+      )}
+    </label>
   );
 }
