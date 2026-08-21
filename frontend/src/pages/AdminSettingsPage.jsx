@@ -1063,6 +1063,8 @@ function ShopLocationSetting({ value, onChange, error }) {
 
 function SettingsMiniMap({ latitude, longitude, hasPin, resolving, onSelect }) {
   const [zoom, setZoom] = useState(15);
+  const [tileState, setTileState] = useState("loading");
+  const [tileVersion, setTileVersion] = useState(0);
   const center = projectToTile(latitude, longitude, zoom);
   const tileX = Math.floor(center.x);
   const tileY = Math.floor(center.y);
@@ -1083,22 +1085,31 @@ function SettingsMiniMap({ latitude, longitude, hasPin, resolving, onSelect }) {
     onSelect(next.latitude, next.longitude);
   }
 
+  function retryTiles() {
+    setTileState("loading");
+    setTileVersion((value) => value + 1);
+  }
+
   return (
     <div className="retela-delivery-map-card">
       <div className="retela-delivery-map h-72" onClick={handleMapClick} role="button" tabIndex={0} aria-label="Tap map to set exact shop pin">
-        {tiles.map((tile) => (
+        {tileState !== "error" && tiles.map((tile) => (
           <img
-            key={`${tile.tileX}-${tile.tileY}-${zoom}`}
-            src={`https://tile.openstreetmap.org/${zoom}/${tile.tileX}/${tile.tileY}.png`}
+            key={`${tile.tileX}-${tile.tileY}-${zoom}-${tileVersion}`}
+            src={`https://tile.openstreetmap.org/${zoom}/${tile.tileX}/${tile.tileY}.png?v=${tileVersion}`}
             alt=""
             loading="lazy"
+            onLoad={() => setTileState((state) => state === "loading" ? "ready" : state)}
+            onError={() => { if (import.meta.env.DEV) console.warn("[map] tile load error"); setTileState("error"); }}
             style={{
               left: `calc(50% + ${(tile.x - offsetX) * 256}px)`,
               top: `calc(50% + ${(tile.y - offsetY) * 256}px)`
             }}
           />
         ))}
-        <span className={`retela-delivery-map-pin ${hasPin ? "" : "opacity-60"}`}><MapPin size={30} /></span>
+        {tileState === "error" ? <div className="retela-map-status-overlay"><span>Map could not be loaded.</span><button type="button" onClick={retryTiles}>Retry</button></div> : null}
+        {tileState === "loading" ? <div className="retela-map-status-overlay is-loading"><Loader2 size={16} className="animate-spin" /> Loading map...</div> : null}
+        {tileState === "ready" ? <span className={`retela-delivery-map-pin ${hasPin ? "" : "opacity-60"}`}><MapPin size={30} /></span> : null}
         <div className="retela-delivery-map-tools">
           <button type="button" onClick={(event) => { event.stopPropagation(); setZoom((current) => Math.min(18, current + 1)); }}>+</button>
           <button type="button" onClick={(event) => { event.stopPropagation(); setZoom((current) => Math.max(11, current - 1)); }}>-</button>

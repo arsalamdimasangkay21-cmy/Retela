@@ -113,7 +113,7 @@ async function ensureOrderColumns() {
        FROM INFORMATION_SCHEMA.COLUMNS
        WHERE TABLE_SCHEMA = DATABASE()
          AND TABLE_NAME = 'orders'
-         AND COLUMN_NAME IN ('tracking_number', 'fulfillment_method', 'delivery_address', 'delivery_latitude', 'delivery_longitude', 'delivery_landmark', 'delivery_notes', 'meeting_place', 'meeting_latitude', 'meeting_longitude', 'meetup_date', 'meetup_time', 'subtotal_amount', 'coupon_discount', 'sale_discount', 'shipping_fee', 'coupon_code', 'payment_status', 'payment_reference', 'transaction_id', 'paid_at', 'payment_provider', 'checkout_session_id', 'checkout_url', 'order_channel', 'cash_received', 'change_amount', 'pos_cashier_id')`
+         AND COLUMN_NAME IN ('tracking_number', 'fulfillment_method', 'delivery_address', 'delivery_latitude', 'delivery_longitude', 'delivery_landmark', 'delivery_notes', 'meeting_place', 'meeting_latitude', 'meeting_longitude', 'meetup_date', 'meetup_time', 'meetup_confirmation_status', 'meetup_confirmed_at', 'meetup_customer_note', 'subtotal_amount', 'coupon_discount', 'sale_discount', 'shipping_fee', 'coupon_code', 'payment_status', 'payment_reference', 'transaction_id', 'paid_at', 'payment_provider', 'checkout_session_id', 'checkout_url', 'order_channel', 'cash_received', 'change_amount', 'pos_cashier_id')`
     );
     const columns = new Set(rows.map((row) => row.COLUMN_NAME));
     await safeModifyColumn("orders", "status", "status enum update", "ALTER TABLE orders MODIFY status ENUM('pending','awaiting_payment','paid','approved','processing','ready','completed','cancelled','payment_failed') NOT NULL DEFAULT 'pending'");
@@ -136,6 +136,9 @@ async function ensureOrderColumns() {
     if (!columns.has("meeting_longitude")) await query("ALTER TABLE orders ADD COLUMN meeting_longitude DECIMAL(10,7) NULL AFTER meeting_latitude");
     if (!columns.has("meetup_date")) await query("ALTER TABLE orders ADD COLUMN meetup_date DATE NULL AFTER meeting_place");
     if (!columns.has("meetup_time")) await query("ALTER TABLE orders ADD COLUMN meetup_time TIME NULL AFTER meetup_date");
+    if (!columns.has("meetup_confirmation_status")) await query("ALTER TABLE orders ADD COLUMN meetup_confirmation_status ENUM('pending','agreed','disagreed') NOT NULL DEFAULT 'pending' AFTER meetup_time");
+    if (!columns.has("meetup_confirmed_at")) await query("ALTER TABLE orders ADD COLUMN meetup_confirmed_at DATETIME NULL AFTER meetup_confirmation_status");
+    if (!columns.has("meetup_customer_note")) await query("ALTER TABLE orders ADD COLUMN meetup_customer_note VARCHAR(500) NULL AFTER meetup_confirmed_at");
     if (!columns.has("subtotal_amount")) await query("ALTER TABLE orders ADD COLUMN subtotal_amount DECIMAL(10,2) NOT NULL DEFAULT 0 AFTER fulfillment_method");
     if (!columns.has("coupon_discount")) await query("ALTER TABLE orders ADD COLUMN coupon_discount DECIMAL(10,2) NOT NULL DEFAULT 0 AFTER subtotal_amount");
     if (!columns.has("sale_discount")) await query("ALTER TABLE orders ADD COLUMN sale_discount DECIMAL(10,2) NOT NULL DEFAULT 0 AFTER coupon_discount");
@@ -186,6 +189,9 @@ router.get("/", requireAuth, requireApproved, asyncHandler(async (req, res) => {
     o.meeting_longitude,
     o.meetup_date,
     o.meetup_time,
+    o.meetup_confirmation_status,
+    o.meetup_confirmed_at,
+    o.meetup_customer_note,
     o.subtotal_amount,
     o.coupon_discount,
     o.sale_discount,
@@ -248,6 +254,9 @@ GROUP BY
     o.meeting_longitude,
     o.meetup_date,
     o.meetup_time,
+    o.meetup_confirmation_status,
+    o.meetup_confirmed_at,
+    o.meetup_customer_note,
     o.subtotal_amount,
     o.coupon_discount,
     o.sale_discount,
@@ -271,7 +280,7 @@ router.get("/:id/items", requireAuth, requireApproved, asyncHandler(async (req, 
     `SELECT o.id, o.user_id, o.order_channel, o.status, o.payment_method, o.payment_status, o.payment_reference,
        o.transaction_id, o.paid_at, o.cash_received, o.change_amount,
        o.tracking_number, o.fulfillment_method, o.delivery_address, o.delivery_latitude,
-       o.delivery_longitude, o.delivery_landmark, o.delivery_notes, o.meeting_place, o.meeting_latitude, o.meeting_longitude, o.meetup_date, o.meetup_time, o.subtotal_amount, o.coupon_discount,
+       o.delivery_longitude, o.delivery_landmark, o.delivery_notes, o.meeting_place, o.meeting_latitude, o.meeting_longitude, o.meetup_date, o.meetup_time, o.meetup_confirmation_status, o.meetup_confirmed_at, o.meetup_customer_note, o.subtotal_amount, o.coupon_discount,
        o.sale_discount, o.shipping_fee, o.coupon_code, o.total_amount, o.checkout_url, o.created_at,
        u.username, u.location, u.phone_number
      FROM orders o
@@ -635,7 +644,7 @@ router.patch("/:id/status", requireAuth, requireRole("admin"), asyncHandler(asyn
   await ensureOrderColumns();
   const schema = z.object({ status: z.enum(statuses) });
   const { status } = schema.parse(req.body);
-  const orders = await query("SELECT user_id, status, payment_method, payment_status FROM orders WHERE id = :id", { id: req.params.id });
+  const orders = await query("SELECT user_id, status, payment_method, payment_status, fulfillment_method, delivery_address, meetup_confirmation_status FROM orders WHERE id = :id", { id: req.params.id });
   if (!orders.length) throw new HttpError(404, "Order not found");
   const currentStatus = normalizeOrderStatus(orders[0].status);
   if (currentStatus !== status && !allowedAdminStatusTransitions[currentStatus]?.has(status)) {
@@ -644,6 +653,12 @@ router.patch("/:id/status", requireAuth, requireRole("admin"), asyncHandler(asyn
   const isCod = String(orders[0].payment_method || "").toLowerCase() === "cod";
   if (status === "approved" && !isCod && orders[0].payment_status !== "paid") {
     throw new HttpError(409, "This online order must be paid before it can be accepted.");
+  }
+  if (status === "ready") {
+    const [decoratedOrder] = await decorateMeetupEligibility(orders);
+    if (decoratedOrder.meetup_eligible && orders[0].meetup_confirmation_status !== "agreed") {
+      throw new HttpError(409, "The customer must agree to the proposed meetup schedule before this order can go out for delivery.");
+    }
   }
   await query("UPDATE orders SET status = :status WHERE id = :id", { id: req.params.id, status });
   const title = status === "ready" ? "Ready to deliver" : status === "completed" ? "Order received" : "Order update";
@@ -717,26 +732,60 @@ router.patch("/:id/meeting-place", requireAuth, requireRole("admin"), asyncHandl
   const meetingLongitude = input.meetingLongitude ?? null;
   const meetupDate = input.meetupDate || null;
   const meetupTime = input.meetupTime || null;
-  await query("UPDATE orders SET meeting_place = :meetingPlace, meeting_latitude = :meetingLatitude, meeting_longitude = :meetingLongitude, meetup_date = :meetupDate, meetup_time = :meetupTime WHERE id = :id", { id: orderId, meetingPlace, meetingLatitude, meetingLongitude, meetupDate, meetupTime });
+  await query("UPDATE orders SET meeting_place = :meetingPlace, meeting_latitude = :meetingLatitude, meeting_longitude = :meetingLongitude, meetup_date = :meetupDate, meetup_time = :meetupTime, meetup_confirmation_status = 'pending', meetup_confirmed_at = NULL, meetup_customer_note = NULL WHERE id = :id", { id: orderId, meetingPlace, meetingLatitude, meetingLongitude, meetupDate, meetupTime });
   if (orders[0].user_id) {
     await query(
-      "INSERT INTO notifications (user_id, type, title, body) VALUES (:userId, 'order', 'Meeting place updated', :body)",
+      "INSERT INTO notifications (user_id, type, title, body) VALUES (:userId, 'order', 'Meetup schedule proposed', :body)",
       {
         userId: orders[0].user_id,
         body: meetingPlace
-          ? `Meeting place for Order #${orderId}: ${meetingPlace}`
-          : `Meeting place for Order #${orderId} was cleared.`
+          ? `Please review the meeting place, date, and time for Order #${orderId}: ${meetingPlace}`
+          : `The meetup schedule for Order #${orderId} was cleared.`
       }
     );
-    req.app.get("io")?.to(`user:${orders[0].user_id}`).emit("order:update", { id: orderId, meeting_place: meetingPlace, meeting_latitude: meetingLatitude, meeting_longitude: meetingLongitude, meetup_date: meetupDate, meetup_time: meetupTime });
+    req.app.get("io")?.to(`user:${orders[0].user_id}`).emit("order:update", { id: orderId, meeting_place: meetingPlace, meeting_latitude: meetingLatitude, meeting_longitude: meetingLongitude, meetup_date: meetupDate, meetup_time: meetupTime, meetup_confirmation_status: "pending", meetup_confirmed_at: null, meetup_customer_note: null });
     req.app.get("io")?.to(`user:${orders[0].user_id}`).emit("notification:new", {
       type: "order",
-      title: "Meeting place updated",
-      body: meetingPlace ? `Meeting place for Order #${orderId}: ${meetingPlace}` : `Meeting place for Order #${orderId} was cleared.`
+      title: "Meetup schedule proposed",
+      body: meetingPlace ? `Please review the meeting place, date, and time for Order #${orderId}: ${meetingPlace}` : `The meetup schedule for Order #${orderId} was cleared.`
     });
   }
-  req.app.get("io")?.to("admin").emit("order:update", { id: orderId, meeting_place: meetingPlace, meeting_latitude: meetingLatitude, meeting_longitude: meetingLongitude, meetup_date: meetupDate, meetup_time: meetupTime });
-  res.json({ message: "Meetup details saved", meeting_place: meetingPlace, meeting_latitude: meetingLatitude, meeting_longitude: meetingLongitude, meetup_date: meetupDate, meetup_time: meetupTime });
+  const meetupPayload = { id: orderId, meeting_place: meetingPlace, meeting_latitude: meetingLatitude, meeting_longitude: meetingLongitude, meetup_date: meetupDate, meetup_time: meetupTime, meetup_confirmation_status: "pending", meetup_confirmed_at: null, meetup_customer_note: null };
+  req.app.get("io")?.to("admin").emit("order:update", meetupPayload);
+  res.json({ message: "Meetup details saved", ...meetupPayload });
+}));
+
+router.patch("/:id/meetup-confirmation", requireAuth, requireApproved, asyncHandler(async (req, res) => {
+  await ensureOrderColumns();
+  const input = z.object({ decision: z.enum(["agreed", "disagreed"]), note: z.string().trim().max(500).optional().default("") }).parse(req.body);
+  const orderId = Number(req.params.id);
+  if (!Number.isInteger(orderId) || orderId <= 0) throw new HttpError(400, "A valid order ID is required");
+  const orders = await query(
+    `SELECT o.id, o.user_id, o.fulfillment_method, o.delivery_address, o.meeting_place, o.meetup_date, o.meetup_time,
+            o.meetup_confirmation_status, o.meetup_confirmed_at, o.meetup_customer_note, u.location
+     FROM orders o LEFT JOIN users u ON u.id = o.user_id
+     WHERE o.id = :id AND o.user_id = :userId LIMIT 1`,
+    { id: orderId, userId: req.user.id }
+  );
+  if (!orders.length) throw new HttpError(404, "Order not found");
+  const [eligible] = await decorateMeetupEligibility(orders);
+  if (!eligible.meetup_eligible || !(eligible.meeting_place || eligible.meetup_date || eligible.meetup_time)) {
+    throw new HttpError(409, "There is no active meetup schedule to confirm.");
+  }
+  const note = input.decision === "disagreed" ? (input.note || null) : null;
+  if (eligible.meetup_confirmation_status === input.decision && (eligible.meetup_customer_note || null) === note) {
+    return res.json({ message: "Meetup confirmation already recorded", meetup_confirmation_status: input.decision, meetup_confirmed_at: eligible.meetup_confirmed_at, meetup_customer_note: note });
+  }
+  const confirmedAt = input.decision === "agreed" ? new Date() : null;
+  await query("UPDATE orders SET meetup_confirmation_status = :status, meetup_confirmed_at = :confirmedAt, meetup_customer_note = :note WHERE id = :id AND user_id = :userId", { id: orderId, userId: req.user.id, status: input.decision, confirmedAt, note });
+  const title = input.decision === "agreed" ? "Meetup schedule confirmed" : "Meetup schedule declined";
+  const body = input.decision === "agreed" ? `Customer confirmed the meetup schedule for Order #${orderId}.` : `Customer declined the meetup schedule for Order #${orderId}.`;
+  await query("INSERT INTO notifications (type, title, body) VALUES ('order', :title, :body)", { title, body });
+  const payload = { id: orderId, meetup_confirmation_status: input.decision, meetup_confirmed_at: confirmedAt, meetup_customer_note: note };
+  req.app.get("io")?.to("admin").emit("order:update", payload);
+  req.app.get("io")?.to("admin").emit("notification:new", { type: "order", title, body });
+  req.app.get("io")?.to(`user:${req.user.id}`).emit("order:update", payload);
+  res.json({ message: "Meetup confirmation saved", ...payload });
 }));
 
 export default router;

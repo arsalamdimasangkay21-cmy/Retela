@@ -3082,6 +3082,16 @@ function OrderManagement({ rows, updateOrder, onNavigate }) {
     return () => { alive = false; };
   }, [selectedOrderId, reloadToken]);
 
+  useEffect(() => {
+    if (!selectedOrderId) return undefined;
+    const handleOrderUpdate = (event) => {
+      const payload = event.detail?.payload || {};
+      if (Number(payload.id) === Number(selectedOrderId)) setReloadToken((value) => value + 1);
+    };
+    window.addEventListener("retela:data-change", handleOrderUpdate);
+    return () => window.removeEventListener("retela:data-change", handleOrderUpdate);
+  }, [selectedOrderId]);
+
   const onlineOrders = rows.filter((row) => String(row.order_channel || "online").toLowerCase() !== "pos");
   const filteredOrders = onlineOrders.map((row, index) => ({
     id: row.id,
@@ -3457,8 +3467,11 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
         meeting_place: data.meeting_place || null,
         meeting_latitude: data.meeting_latitude ?? null,
         meeting_longitude: data.meeting_longitude ?? null,
-        meetup_date: data.meetup_date || null,
-        meetup_time: data.meetup_time || null
+                meetup_date: data.meetup_date || null,
+        meetup_time: data.meetup_time || null,
+        meetup_confirmation_status: data.meetup_confirmation_status || "pending",
+        meetup_confirmed_at: data.meetup_confirmed_at || null,
+        meetup_customer_note: data.meetup_customer_note || null
       });
     } catch (error) {
       setMeetingPlaceError(getApiErrorMessage(error, "Could not save meeting place."));
@@ -3542,6 +3555,11 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
                   </button>
                   {source.meeting_place || source.meetup_date || source.meetup_time ? <span className="break-words text-xs font-semibold text-slate-500">Saved: {source.meeting_place || "No meeting place"}{source.meetup_date ? ` · ${formatMeetupDate(source.meetup_date)}` : ""}{source.meetup_time ? ` · ${formatMeetupTime(source.meetup_time)}` : ""}</span> : <span className="text-xs font-semibold text-slate-500">Meeting place and meetup schedule will be provided by the shop.</span>}
                 </div>
+                {source.meeting_place || source.meetup_date || source.meetup_time ? <div className="retela-admin-meetup-response">
+                  <p className="text-xs font-bold uppercase tracking-[0.16em] text-emerald-700">Customer Confirmation</p>
+                  <p className="mt-1 text-sm font-bold text-slate-700">{source.meetup_confirmation_status === "agreed" ? "✓ Customer agreed" : source.meetup_confirmation_status === "disagreed" ? "Customer disagreed" : "Waiting for customer response"}</p>
+                  {source.meetup_customer_note ? <p className="mt-1 break-words text-sm text-slate-600">Customer note: {source.meetup_customer_note}</p> : null}
+                </div> : null}
                 {meetingPlaceError ? <p className="text-xs font-bold text-rose-600">{meetingPlaceError}</p> : null}
               </section> : null}
               <section className="admin-delivery-safety-card">

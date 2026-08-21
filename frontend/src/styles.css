@@ -6173,6 +6173,50 @@ button {
   background: #dcebe2;
 }
 
+.retela-map-status-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 8px;
+  padding: 16px;
+  background: rgba(244, 248, 246, 0.96);
+  color: #355449;
+  text-align: center;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.retela-map-status-overlay.is-loading {
+  display: flex;
+}
+
+.retela-map-status-overlay button {
+  min-height: 34px;
+  border: 1px solid #9bd9b8;
+  border-radius: 10px;
+  background: #e9f9ef;
+  padding: 6px 12px;
+  color: #08764d;
+  font-size: 0.75rem;
+  font-weight: 850;
+}
+
+.retela-admin-meetup-response,
+.retela-meetup-confirmation {
+  display: grid;
+  gap: 4px;
+  border: 1px solid #b7e4cf;
+  border-radius: 14px;
+  background: #effaf3;
+  padding: 12px;
+}
+
+.retela-meetup-confirmed { color: #08764d; font-weight: 850; }
+.retela-meetup-declined { color: #b42318; font-weight: 850; }
+
 .retela-inline-route {
   display: grid;
   gap: 10px;
@@ -9594,6 +9638,28 @@ button {
 .premium-shell.retela-dark-shell .retela-route-map {
   border-color: var(--retela-border-dark) !important;
   background: #0f1a15 !important;
+}
+
+.retela-dark .retela-map-status-overlay,
+.premium-shell.retela-dark-shell .retela-map-status-overlay {
+  background: rgba(15, 26, 21, 0.96);
+  color: #d9f5e4;
+}
+
+.retela-dark .retela-map-status-overlay button,
+.premium-shell.retela-dark-shell .retela-map-status-overlay button {
+  border-color: rgba(52, 211, 153, 0.42);
+  background: rgba(22, 163, 106, 0.16);
+  color: #b8ffd0;
+}
+
+.retela-dark .retela-admin-meetup-response,
+.retela-dark .retela-meetup-confirmation,
+.premium-shell.retela-dark-shell .retela-admin-meetup-response,
+.premium-shell.retela-dark-shell .retela-meetup-confirmation {
+  border-color: rgba(52, 211, 153, 0.28);
+  background: rgba(22, 163, 106, 0.12);
+  color: var(--retela-text-dark);
 }
 
 .retela-dark .retela-route-marker.is-customer,

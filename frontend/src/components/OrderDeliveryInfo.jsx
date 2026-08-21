@@ -202,31 +202,42 @@ function RouteMetric({ label, value }) {
 
 function DeliveryRouteMap({ shop, destination, route }) {
   const [zoomOffset, setZoomOffset] = useState(0);
+  const [tileState, setTileState] = useState("loading");
+  const [tileVersion, setTileVersion] = useState(0);
   const map = useMemo(() => buildRouteMapModel(shop, destination, route, zoomOffset), [destination, route, shop, zoomOffset]);
   const routePoints = (route?.coordinates?.length ? route.coordinates : [shop, destination]).map((point) => projectPointOnMap(point, map));
+  const routeReady = Boolean(route?.coordinates?.length);
   const shopPoint = projectPointOnMap(shop, map);
   const destinationPoint = projectPointOnMap(destination, map);
   const path = routePoints.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`).join(" ");
+  function retryTiles() {
+    setTileState("loading");
+    setTileVersion((value) => value + 1);
+  }
 
   return (
     <div className="retela-route-map" aria-label="Delivery route map">
-      {map.tiles.map((tile) => (
+      {tileState !== "error" && map.tiles.map((tile) => (
         <img
-          key={`${tile.tileX}-${tile.tileY}-${map.zoom}`}
-          src={`https://tile.openstreetmap.org/${map.zoom}/${tile.tileX}/${tile.tileY}.png`}
+          key={`${tile.tileX}-${tile.tileY}-${map.zoom}-${tileVersion}`}
+          src={`https://tile.openstreetmap.org/${map.zoom}/${tile.tileX}/${tile.tileY}.png?v=${tileVersion}`}
           alt=""
           loading="lazy"
+          onLoad={() => setTileState((state) => state === "loading" ? "ready" : state)}
+          onError={() => { if (import.meta.env.DEV) console.warn("[map] tile load error"); setTileState("error"); }}
           style={{
             left: `calc(50% + ${(tile.x - map.offsetX) * 256}px)`,
             top: `calc(50% + ${(tile.y - map.offsetY) * 256}px)`
           }}
         />
       ))}
-      <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-        <path d={path} />
-      </svg>
-      <RouteMarker point={shopPoint} tone="shop" label="RETELA Shop" />
-      <RouteMarker point={destinationPoint} tone="customer" label="Customer Delivery Location" />
+      {tileState === "error" ? <div className="retela-map-status-overlay"><span>Map could not be loaded.</span><button type="button" onClick={retryTiles}>Retry</button></div> : null}
+      {tileState === "loading" ? <div className="retela-map-status-overlay is-loading"><Loader2 size={16} className="animate-spin" /> Loading map...</div> : null}
+      {tileState === "ready" ? <>
+        {routeReady ? <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><path d={path} /></svg> : null}
+        <RouteMarker point={shopPoint} tone="shop" label="RETELA Shop" />
+        <RouteMarker point={destinationPoint} tone="customer" label="Customer Delivery Location" />
+      </> : null}
       <div className="retela-route-map-tools">
         <button type="button" onClick={() => setZoomOffset((value) => Math.min(3, value + 1))}>+</button>
         <button type="button" onClick={() => setZoomOffset((value) => Math.max(-3, value - 1))}>-</button>
@@ -237,13 +248,20 @@ function DeliveryRouteMap({ shop, destination, route }) {
 
 export function MeetingLocationMap({ customer, meeting, onSelect }) {
   const [zoomOffset, setZoomOffset] = useState(0);
+  const [tileState, setTileState] = useState("loading");
+  const [tileVersion, setTileVersion] = useState(0);
   const [route, setRoute] = useState(null);
   const [routeState, setRouteState] = useState("idle");
   const hasCustomer = customer?.latitude != null && customer?.longitude != null;
   const hasMeeting = meeting?.latitude != null && meeting?.longitude != null;
   const map = useMemo(() => buildRouteMapModel(customer, meeting || customer, route, zoomOffset), [customer, meeting, route, zoomOffset]);
   const routePoints = (route?.coordinates?.length ? route.coordinates : hasMeeting ? [customer, meeting] : [customer]).map((point) => projectPointOnMap(point, map));
+  const routeReady = Boolean(route?.coordinates?.length);
   const path = routePoints.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`).join(" ");
+  function retryTiles() {
+    setTileState("loading");
+    setTileVersion((value) => value + 1);
+  }
 
   useEffect(() => {
     if (!hasCustomer || !hasMeeting) {
@@ -278,10 +296,14 @@ export function MeetingLocationMap({ customer, meeting, onSelect }) {
 
   return (
     <div className="retela-route-map retela-meetup-map" onClick={selectFromMap} role={onSelect ? "button" : undefined} tabIndex={onSelect ? 0 : undefined} aria-label={onSelect ? "Select meetup location on map" : "Customer to meetup route map"}>
-      {map.tiles.map((tile) => <img key={`${tile.tileX}-${tile.tileY}-${map.zoom}`} src={`https://tile.openstreetmap.org/${map.zoom}/${tile.tileX}/${tile.tileY}.png`} alt="" loading="lazy" style={{ left: `calc(50% + ${(tile.x - map.offsetX) * 256}px)`, top: `calc(50% + ${(tile.y - map.offsetY) * 256}px)` }} />)}
-      <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><path d={path} /></svg>
-      {hasCustomer ? <RouteMarker point={projectPointOnMap(customer, map)} tone="customer" label="Customer Location" /> : null}
-      {hasMeeting ? <RouteMarker point={projectPointOnMap(meeting, map)} tone="meeting" label="Meeting Place" /> : null}
+      {tileState !== "error" && map.tiles.map((tile) => <img key={`${tile.tileX}-${tile.tileY}-${map.zoom}-${tileVersion}`} src={`https://tile.openstreetmap.org/${map.zoom}/${tile.tileX}/${tile.tileY}.png?v=${tileVersion}`} alt="" loading="lazy" onLoad={() => setTileState((state) => state === "loading" ? "ready" : state)} onError={() => { if (import.meta.env.DEV) console.warn("[map] tile load error"); setTileState("error"); }} style={{ left: `calc(50% + ${(tile.x - map.offsetX) * 256}px)`, top: `calc(50% + ${(tile.y - map.offsetY) * 256}px)` }} />)}
+      {tileState === "error" ? <div className="retela-map-status-overlay"><span>Map could not be loaded.</span><button type="button" onClick={retryTiles}>Retry</button></div> : null}
+      {tileState === "loading" ? <div className="retela-map-status-overlay is-loading"><Loader2 size={16} className="animate-spin" /> Loading map...</div> : null}
+      {tileState === "ready" ? <>
+        {routeReady ? <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><path d={path} /></svg> : null}
+        {hasCustomer ? <RouteMarker point={projectPointOnMap(customer, map)} tone="customer" label="Customer Location" /> : null}
+        {hasMeeting ? <RouteMarker point={projectPointOnMap(meeting, map)} tone="meeting" label="Meeting Place" /> : null}
+      </> : null}
       <div className="retela-route-map-tools" onClick={(event) => event.stopPropagation()}>
         <button type="button" onClick={() => setZoomOffset((value) => Math.min(3, value + 1))}>+</button>
         <button type="button" onClick={() => setZoomOffset((value) => Math.max(-3, value - 1))}>-</button>
