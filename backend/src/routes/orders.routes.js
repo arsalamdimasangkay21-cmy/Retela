@@ -661,9 +661,9 @@ router.patch("/:id/status", requireAuth, requireRole("admin"), asyncHandler(asyn
     }
   }
   await query("UPDATE orders SET status = :status WHERE id = :id", { id: req.params.id, status });
-  const title = status === "ready" ? "Ready to deliver" : status === "completed" ? "Order received" : "Order update";
+  const title = status === "ready" ? "Out for Delivery" : status === "completed" ? "Order received" : "Order update";
   const body = status === "ready"
-    ? "Your order is ready. The admin will confirm delivery or pickup details."
+    ? "Your order is out for delivery."
     : status === "completed"
       ? "Your order was marked received. Please send feedback from the Feedback page."
       : `Your order is now ${status}.`;

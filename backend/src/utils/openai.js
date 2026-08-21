@@ -6,6 +6,7 @@ import {
   detectChatIntent,
   findBestProductMatch,
   formatMoney,
+  formatOrderStatus,
   resolveReferencedProduct
 } from "./retelaAssistantContext.js";
 
@@ -116,7 +117,7 @@ export function generateLocalAssistantReply({ prompt, products = [], history = [
   if ([CHAT_INTENTS.ORDER_STATUS, CHAT_INTENTS.ORDER_TRACKING].includes(intent)) {
     if (!orders.length) return "I do not see a recent order on your account yet. You can browse available items, add them to cart, and checkout when ready.";
     const order = orders[0];
-    return `Your latest order is Order #${order.id}. Status: ${order.status}. Payment status: ${order.payment_status || "pending"}. Total: ${formatMoney(order.total_amount)}.`;
+    return `Your latest order is Order #${order.id}. Status: ${formatOrderStatus(order.status)}. Payment status: ${order.payment_status || "pending"}. Total: ${formatMoney(order.total_amount)}.`;
   }
 
   if (intent === CHAT_INTENTS.SHIPPING) {

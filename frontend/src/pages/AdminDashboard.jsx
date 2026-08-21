@@ -16,6 +16,7 @@ import ProductImage from "../components/ProductImage";
 import ProductQuickView from "../components/ProductQuickView";
 import { Button, Card, Field, StatCard } from "../components/ui";
 import { useAuth } from "../context/AuthContext";
+import { orderStatusLabel as sharedOrderStatusLabel } from "../utils/orderStatus";
 import { getProductImageValue, normalizeProductImageFields, resolveProductImageUrl } from "../utils/productImage";
 import AutomationsPage from "./AutomationsPage";
 import AdminSettingsPage from "./AdminSettingsPage";
@@ -3906,18 +3907,7 @@ function orderBadgeClass(status) {
 }
 
 function orderStatusLabel(status) {
-  const labels = {
-    pending: "Pending",
-    awaiting_payment: "Awaiting Payment",
-    paid: "Paid",
-    approved: "Accepted",
-    processing: "Processing",
-    ready: "Out to Deliver",
-    completed: "Completed",
-    cancelled: "Cancelled",
-    payment_failed: "Payment Failed"
-  };
-  return labels[status] || status;
+  return sharedOrderStatusLabel(status);
 }
 
 function ProductGallery({ products, filters, setFilters, optionValues, onAdd, onEdit, onDelete, deletingProductIds = [] }) {

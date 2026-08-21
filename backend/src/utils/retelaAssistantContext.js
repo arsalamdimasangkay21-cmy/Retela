@@ -207,12 +207,33 @@ function formatProductLine(product, { includeDescription = false } = {}) {
 function formatOrderLine(order) {
   return [
     `Order #${order.id}`,
-    `Status: ${order.status || "unavailable"}`,
+    `Status: ${formatOrderStatus(order.status)}`,
     `Payment: ${order.payment_status || "unavailable"}`,
     order.payment_method ? `Method: ${order.payment_method}` : null,
     `Total: ${formatMoney(order.total_amount)}`,
     order.created_at ? `Created: ${order.created_at}` : null
   ].filter(Boolean).join(" | ");
+}
+
+export function formatOrderStatus(status) {
+  const normalized = String(status || "").trim().toLowerCase().replace(/\s+/g, "_");
+  const labels = {
+    pending: "Pending",
+    awaiting_payment: "Awaiting Payment",
+    paid: "Paid",
+    approved: "Accepted",
+    processing: "Processing",
+    ready: "Out for Delivery",
+    out_for_delivery: "Out for Delivery",
+    completed: "Completed",
+    delivered: "Delivered",
+    cancelled: "Cancelled",
+    canceled: "Cancelled",
+    payment_failed: "Payment Failed",
+    returned: "Returned",
+    refunded: "Refunded"
+  };
+  return labels[normalized] || (normalized ? normalized.replace(/_/g, " ") : "Unavailable");
 }
 
 function shippingContext(settings = {}) {

@@ -24,6 +24,7 @@ import { osmTileUrl } from "../config/maps";
 import { useAuth } from "../context/AuthContext";
 import useBlockingLoader from "../hooks/useBlockingLoader";
 import { emitUserThemeChange, readUserTheme, saveUserTheme } from "../utils/userTheme";
+import { orderStatusLabel as sharedOrderStatusLabel } from "../utils/orderStatus";
 
 const assetUrl = (url) => resolveAssetUrl(url) || (!url ? "" : `${API_URL.replace(/\/api$/, "")}${url}`);
 const productCategories = ["T-Shirts", "Jackets", "Caps"];
@@ -3486,15 +3487,7 @@ function orderNumber(order) {
 }
 
 function customerOrderStatus(status) {
-  const normalized = normalizeOrderStatus(status);
-  if (normalized === "completed") return "Delivered";
-  if (normalized === "awaiting_payment") return "Awaiting Payment";
-  if (normalized === "payment_failed") return "Payment Failed";
-  if (normalized === "paid") return "Paid";
-  if (normalized === "processing") return "Processing";
-  if (normalized === "ready") return "Ready";
-  if (normalized === "cancelled" || normalized === "canceled") return "Cancelled";
-  return normalized ? normalized.charAt(0).toUpperCase() + normalized.slice(1).replace(/_/g, " ") : "Pending";
+  return sharedOrderStatusLabel(status);
 }
 
 function normalizeOrderStatus(status) {
