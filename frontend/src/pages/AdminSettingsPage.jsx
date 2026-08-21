@@ -539,7 +539,7 @@ export default function AdminSettingsPage({ onChange }) {
             <p className="mt-2 max-w-3xl text-sm leading-6 text-white/58">Configure RETELA system behavior, AI automation, payments, inventory alerts, reports, security, and database operations.</p>
           </div>
           <div className="flex flex-col gap-2 sm:flex-row">
-            <ActionButton type="secondary" icon={RotateCcw} loading={saving === "reset"} onClick={resetDefaults}>Reset to Default</ActionButton>
+            <ActionButton type="secondary" icon={RotateCcw} loading={saving === "reset"} onClick={resetDefaults}>Reset Defaults</ActionButton>
             <ActionButton icon={Save} loading={saving === "all"} onClick={() => saveSettings("all")}>Save All Changes</ActionButton>
           </div>
         </div>
@@ -614,10 +614,10 @@ export default function AdminSettingsPage({ onChange }) {
             <FileInput label="GCash QR Upload" file={files.gcashQr} preview={gcashQrPreview} onChange={(file) => updateFile("gcashQr", file)} />
             <SelectInput label="Shipping Fee Type" value={settings.payment.shippingFeeType || "fixed"} options={["fixed", "free"]} onChange={(value) => updateSetting("payment", "shippingFeeType", value)} />
             <NumberInput label="Fixed Shipping Fee" value={settings.payment.shippingFee ?? 0} onChange={(value) => updateSetting("payment", "shippingFee", value)} />
-            <div className="grid gap-3 md:col-span-2 md:grid-cols-3">
-              <ToggleSwitch label="COD Toggle" checked={settings.payment.codEnabled} onChange={(value) => updateSetting("payment", "codEnabled", value)} />
-              <ToggleSwitch label="Online Payment Toggle" checked={settings.payment.onlinePaymentEnabled} onChange={(value) => updateSetting("payment", "onlinePaymentEnabled", value)} />
-              <ToggleSwitch label="Payment Verification Automation" checked={settings.payment.paymentVerificationAutomation} onChange={(value) => updateSetting("payment", "paymentVerificationAutomation", value)} />
+            <div className="settings-toggle-grid md:col-span-2 md:grid-cols-3">
+              <ToggleSwitch label="COD" description="Cash on Delivery" checked={settings.payment.codEnabled} onChange={(value) => updateSetting("payment", "codEnabled", value)} />
+              <ToggleSwitch label="Online Payment" description="PayMongo / GCash" checked={settings.payment.onlinePaymentEnabled} onChange={(value) => updateSetting("payment", "onlinePaymentEnabled", value)} />
+              <ToggleSwitch label="Payment Verification" description="Automatic verification" checked={settings.payment.paymentVerificationAutomation} onChange={(value) => updateSetting("payment", "paymentVerificationAutomation", value)} />
             </div>
             <CouponManager coupons={settings.payment.coupons || []} onAdd={addCoupon} onRemove={removeCoupon} onChange={updateCoupon} />
             {errors["payment.methods"] ? <ErrorText className="md:col-span-2">{errors["payment.methods"]}</ErrorText> : null}
@@ -776,7 +776,7 @@ function SettingsCard({ section, saving, onSave, children, className = "" }) {
         </div>
         {onSave ? (
           <ActionButton size="sm" icon={Save} loading={saving === section} onClick={() => onSave(section)}>
-            Save
+            Save Changes
           </ActionButton>
         ) : null}
       </div>
@@ -850,7 +850,7 @@ function ClearDemoDataModal({ saving, onConfirm, onClose }) {
 }
 
 function ToggleGrid({ children }) {
-  return <div className="grid gap-3 md:grid-cols-2 2xl:grid-cols-3">{children}</div>;
+  return <div className="settings-toggle-grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3">{children}</div>;
 }
 
 function FieldShell({ label, error, children, className = "" }) {
@@ -1266,10 +1266,13 @@ function FileInput({ label, file, preview, onChange }) {
   );
 }
 
-function ToggleSwitch({ label, checked, onChange }) {
+function ToggleSwitch({ label, description, checked, onChange }) {
   return (
-    <button type="button" onClick={() => onChange(!checked)} className="group flex min-h-16 items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/[0.055] px-4 py-3 text-left transition hover:border-neonbrand/35 hover:bg-neonbrand/5" aria-pressed={checked}>
-      <span className="min-w-0 text-sm font-semibold text-white/80">{label}</span>
+    <button type="button" onClick={() => onChange(!checked)} className="settings-toggle-row group" aria-pressed={checked}>
+      <span className="min-w-0">
+        <span className="block text-sm font-semibold leading-5 text-white/85">{label}</span>
+        {description ? <span className="mt-0.5 block text-xs leading-4 text-white/45">{description}</span> : null}
+      </span>
       <span className={`relative h-7 w-12 shrink-0 rounded-full p-1 transition ${checked ? "bg-neonbrand shadow-[0_0_24px_rgba(56,255,136,0.22)]" : "bg-white/18"}`}>
         <span className={`block h-5 w-5 rounded-full transition ${checked ? "translate-x-5 bg-black" : "translate-x-0 bg-white"}`} />
       </span>
@@ -1323,9 +1326,9 @@ function ActionButton({ children, icon: Icon, onClick, loading, type = "primary"
     ? "gradient-btn"
     : "border border-white/10 bg-white/[0.06] text-white hover:border-neonbrand/45 hover:text-neonbrand";
   return (
-    <button type="button" disabled={loading} onClick={onClick} className={`${styleClass} inline-flex min-w-0 items-center justify-center gap-2 rounded-2xl font-bold transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-60 ${sizeClass}`}>
+    <button type="button" disabled={loading} onClick={onClick} className={`${styleClass} inline-flex min-w-[148px] shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-2xl font-bold transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-60 ${sizeClass}`}>
       {loading ? <Loader2 size={17} className="animate-spin" /> : Icon ? <Icon size={17} /> : null}
-      <span className="truncate">{children}</span>
+      <span>{loading ? "Saving..." : children}</span>
     </button>
   );
 }
@@ -1334,7 +1337,7 @@ function Toast({ type, message, onClose }) {
   const success = type === "success";
   return (
     <motion.div
-      className={`fixed bottom-5 right-5 z-[160] flex max-w-sm items-start gap-3 rounded-[24px] border p-4 text-white shadow-2xl backdrop-blur-2xl ${success ? "border-neonbrand/25 bg-black/85" : "border-rose-300/25 bg-rose-950/85"}`}
+      className={`fixed right-5 top-5 z-[160] flex max-w-[min(380px,calc(100vw-2rem))] items-start gap-3 rounded-2xl border p-3 text-white shadow-2xl backdrop-blur-2xl ${success ? "border-neonbrand/25 bg-black/85" : "border-rose-300/25 bg-rose-950/85"}`}
       initial={{ opacity: 0, y: 18, scale: 0.96 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
       exit={{ opacity: 0, y: 18, scale: 0.96 }}

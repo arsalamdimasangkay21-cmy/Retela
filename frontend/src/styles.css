@@ -10128,3 +10128,32 @@ button {
   background: rgba(251, 113, 133, 0.14) !important;
   color: #fecdd3 !important;
 }
+.settings-toggle-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.settings-toggle-row {
+  display: flex;
+  min-height: 62px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.055);
+  padding: 10px 12px;
+  text-align: left;
+  transition: border-color 160ms ease, background 160ms ease;
+}
+
+.settings-toggle-row:hover {
+  border-color: rgba(56, 255, 136, 0.35);
+  background: rgba(56, 255, 136, 0.05);
+}
+
+@media (max-width: 639px) {
+  .settings-toggle-row {
+    min-height: 58px;
+  }
+}

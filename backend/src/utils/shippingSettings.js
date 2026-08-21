@@ -1,7 +1,26 @@
-import { query, transaction } from "../config/db.js";
+import { ensureAutoIncrementId, query, transaction } from "../config/db.js";
 import { loadSystemSettings } from "./systemSettings.js";
 
 let shippingSettingsTableReady;
+
+async function repairShippingSettingsIdentity() {
+  const columns = await query("SHOW COLUMNS FROM shipping_settings");
+  const idColumn = columns.find((column) => column.Field === "id");
+  if (!idColumn) throw new Error("shipping_settings.id column is missing");
+
+  const indexes = await query("SHOW INDEX FROM shipping_settings");
+  const hasPrimaryKey = indexes.some((index) => index.Key_name === "PRIMARY" && index.Column_name === "id");
+  if (!hasPrimaryKey) {
+    const anyPrimaryKey = indexes.some((index) => index.Key_name === "PRIMARY");
+    if (!anyPrimaryKey) {
+      await query("ALTER TABLE shipping_settings ADD PRIMARY KEY (id)");
+    } else {
+      console.warn("[shipping-settings] Existing primary key does not use id; AUTO_INCREMENT repair skipped.");
+      return;
+    }
+  }
+  await ensureAutoIncrementId("shipping_settings");
+}
 
 export async function ensureShippingSettingsTable() {
   shippingSettingsTableReady ||= query(`
@@ -17,7 +36,9 @@ export async function ensureShippingSettingsTable() {
       INDEX idx_shipping_settings_active (is_active, updated_at),
       CONSTRAINT fk_shipping_settings_created_by FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
     )
-  `).catch((error) => {
+  `).then(async () => {
+    await repairShippingSettingsIdentity();
+  }).catch((error) => {
     shippingSettingsTableReady = undefined;
     throw error;
   });
@@ -72,14 +93,30 @@ export async function saveActiveShippingSettings(input, userId = null) {
   await ensureShippingSettingsTable();
 
   return transaction(async (run) => {
-    await run("UPDATE shipping_settings SET is_active = FALSE WHERE is_active = TRUE");
-    const result = await run(
-      `INSERT INTO shipping_settings (rate_name, fixed_fee, is_enabled, is_active, created_by)
-       VALUES (:rateName, :fixedFee, :enabled, TRUE, :userId)`,
-      { rateName: rateName || null, fixedFee, enabled, userId }
+    const activeRows = await run(
+      "SELECT id FROM shipping_settings WHERE is_active = TRUE ORDER BY updated_at DESC, id DESC LIMIT 1"
     );
+    const activeId = activeRows[0]?.id;
+    let result;
+    if (activeId) {
+      await run("UPDATE shipping_settings SET is_active = FALSE WHERE is_active = TRUE AND id <> :id", { id: activeId });
+      await run(
+        `UPDATE shipping_settings
+         SET rate_name = :rateName, fixed_fee = :fixedFee, is_enabled = :enabled, is_active = TRUE, created_by = :userId
+         WHERE id = :id`,
+        { id: activeId, rateName: rateName || null, fixedFee, enabled, userId }
+      );
+      result = { insertId: activeId };
+    } else {
+      await run("UPDATE shipping_settings SET is_active = FALSE WHERE is_active = TRUE");
+      result = await run(
+        `INSERT INTO shipping_settings (rate_name, fixed_fee, is_enabled, is_active, created_by)
+         VALUES (:rateName, :fixedFee, :enabled, TRUE, :userId)`,
+        { rateName: rateName || null, fixedFee, enabled, userId }
+      );
+    }
     return {
-      id: result.insertId,
+      id: Number(result.insertId || activeId),
       rateName,
       fixedFee,
       enabled,

@@ -221,14 +221,20 @@ router.put("/", upload.fields([
 ]), asyncHandler(async (req, res) => {
   const payload = applyUploadUrls(parseSettingsPayload(req), req.files);
   const openaiApiKey = String(payload.ai?.openaiApiKey || "").trim();
-  const saved = await saveSystemSettings(payload, { openaiApiKey: openaiApiKey || undefined });
+  let saved;
   if (payload.payment) {
-    await saveActiveShippingSettings({
-      rateName: payload.payment.shippingRateName || "Standard Shipping",
-      fixedFee: payload.payment.shippingFee,
-      enabled: payload.payment.shippingFeeEnabled ?? payload.payment.shippingFeeType !== "free"
-    }, req.user.id);
+    try {
+      await saveActiveShippingSettings({
+        rateName: payload.payment.shippingRateName || "Standard Shipping",
+        fixedFee: payload.payment.shippingFee,
+        enabled: payload.payment.shippingFeeEnabled ?? payload.payment.shippingFeeType !== "free"
+      }, req.user.id);
+    } catch (error) {
+      console.error("[settings] Shipping settings save failed", { code: error?.code, message: error?.message });
+      throw new HttpError(503, "Unable to save shipping settings. Please try again.");
+    }
   }
+  saved = await saveSystemSettings(payload, { openaiApiKey: openaiApiKey || undefined });
   const databaseStatus = await getDatabaseStatus();
   res.json({
     message: "Settings saved successfully",
