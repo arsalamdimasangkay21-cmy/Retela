@@ -7,6 +7,12 @@ function finiteCoordinate(value) {
   return Number.isFinite(number) ? number : null;
 }
 
+function validShopCoordinate(latitude, longitude) {
+  return latitude !== null && longitude !== null
+    && latitude >= 4 && latitude <= 22
+    && longitude >= 116 && longitude <= 127;
+}
+
 function orderDeliverySnapshot(order = {}) {
   return {
     address: String(order.delivery_address || order.location || "").trim(),
@@ -30,11 +36,13 @@ function deliveryMapUrl(snapshot) {
 function normalizeShopLocation(settings = {}) {
   const general = settings.general || {};
   const address = String(general.shopAddress || settings.shopAddress || "").trim();
+  const parsedLatitude = finiteCoordinate(general.shopLatitude ?? settings.shopLatitude);
+  const parsedLongitude = finiteCoordinate(general.shopLongitude ?? settings.shopLongitude);
   return {
     name: general.shopName || "Tela to Pera Thrift Shop",
     address,
-    latitude: finiteCoordinate(general.shopLatitude ?? settings.shopLatitude),
-    longitude: finiteCoordinate(general.shopLongitude ?? settings.shopLongitude)
+    latitude: validShopCoordinate(parsedLatitude, parsedLongitude) ? parsedLatitude : null,
+    longitude: validShopCoordinate(parsedLatitude, parsedLongitude) ? parsedLongitude : null
   };
 }
 

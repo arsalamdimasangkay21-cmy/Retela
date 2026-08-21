@@ -882,28 +882,66 @@ function TextInput({ label, value, onChange, type = "text", error, className = "
 const defaultShopMapCenter = { latitude: 7.1907, longitude: 124.5307 };
 
 function finiteCoordinate(value) {
-  const number = Number(value);
+  const number = Number.parseFloat(String(value ?? "").trim());
   return Number.isFinite(number) ? number : null;
+}
+
+function isValidShopCoordinate(latitude, longitude, countryCode = "ph") {
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return false;
+  if (String(countryCode || "").toLowerCase() === "ph") {
+    return latitude >= 4 && latitude <= 22 && longitude >= 116 && longitude <= 127;
+  }
+  return latitude >= -90 && latitude <= 90 && longitude >= -180 && longitude <= 180 && (Math.abs(latitude) > 0.5 || Math.abs(longitude) > 0.5);
+}
+
+function parseGeocoderResult(item) {
+  if (import.meta.env.DEV) {
+    console.log("[geocoder] raw result", { lat: item?.lat, lon: item?.lon, display_name: item?.display_name });
+  }
+  const latitude = Number.parseFloat(String(item?.lat ?? "").trim());
+  const longitude = Number.parseFloat(String(item?.lon ?? "").trim());
+  const countryCode = item?.address?.country_code || "ph";
+  if (!isValidShopCoordinate(latitude, longitude, countryCode)) return null;
+  if (import.meta.env.DEV) console.log("[geocoder] parsed", { latitude, longitude });
+  return { latitude, longitude };
 }
 
 function ShopLocationSetting({ value, onChange, error }) {
   const initialAddress = String(value.shopAddress || "");
-  const latitude = finiteCoordinate(value.shopLatitude);
-  const longitude = finiteCoordinate(value.shopLongitude);
+  const savedLatitude = finiteCoordinate(value.shopLatitude);
+  const savedLongitude = finiteCoordinate(value.shopLongitude);
+  const savedCoordinatesValid = savedLatitude === null && savedLongitude === null
+    ? true
+    : isValidShopCoordinate(savedLatitude, savedLongitude);
+  const latitude = savedCoordinatesValid ? savedLatitude : null;
+  const longitude = savedCoordinatesValid ? savedLongitude : null;
   const [query, setQuery] = useState(initialAddress);
   const [results, setResults] = useState([]);
   const [searching, setSearching] = useState(false);
   const [resolving, setResolving] = useState(false);
+  const [coordinateError, setCoordinateError] = useState("");
 
   useEffect(() => {
     setQuery(String(value.shopAddress || ""));
   }, [value.shopAddress]);
 
   function applyLocation({ address, latitude: nextLatitude, longitude: nextLongitude }) {
+    const parsedLatitude = finiteCoordinate(nextLatitude);
+    const parsedLongitude = finiteCoordinate(nextLongitude);
+    if (parsedLatitude !== null || parsedLongitude !== null) {
+      if (!isValidShopCoordinate(parsedLatitude, parsedLongitude)) {
+        setCoordinateError("Invalid map coordinates returned. Please select the location again.");
+        setResults([]);
+        setResolving(false);
+        return;
+      }
+      setCoordinateError("");
+      if (import.meta.env.DEV) console.log("[shop-location] saving", { latitude: parsedLatitude, longitude: parsedLongitude });
+    }
     onChange({
       shopAddress: String(address || value.shopAddress || "").trim(),
-      shopLatitude: finiteCoordinate(nextLatitude),
-      shopLongitude: finiteCoordinate(nextLongitude)
+      shopLatitude: parsedLatitude,
+      shopLongitude: parsedLongitude
     });
   }
 
@@ -916,12 +954,12 @@ function ShopLocationSetting({ value, onChange, error }) {
       const response = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=5&countrycodes=ph&q=${encodeURIComponent(text)}`);
       if (!response.ok) throw new Error("Search failed");
       const data = await response.json();
-      setResults((Array.isArray(data) ? data : []).map((item) => ({
-        id: item.place_id,
-        address: item.display_name,
-        latitude: Number(item.lat),
-        longitude: Number(item.lon)
-      })).filter((item) => item.address && Number.isFinite(item.latitude) && Number.isFinite(item.longitude)));
+      const parsedResults = (Array.isArray(data) ? data : []).map((item) => {
+        const coordinates = parseGeocoderResult(item);
+        return coordinates ? { id: item.place_id, address: item.display_name, ...coordinates } : null;
+      }).filter((item) => item?.address);
+      setResults(parsedResults);
+      setCoordinateError(parsedResults.length ? "" : "Invalid map coordinates returned. Please select the location again.");
     } catch {
       setResults([]);
     } finally {
@@ -930,15 +968,23 @@ function ShopLocationSetting({ value, onChange, error }) {
   }
 
   async function reverseGeocode(nextLatitude, nextLongitude) {
+    const latitudeValue = finiteCoordinate(nextLatitude);
+    const longitudeValue = finiteCoordinate(nextLongitude);
+    if (!isValidShopCoordinate(latitudeValue, longitudeValue)) {
+      setCoordinateError("Invalid map coordinates returned. Please select the location again.");
+      setResults([]);
+      return;
+    }
+    setCoordinateError("");
     setResolving(true);
     try {
       const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(nextLatitude)}&lon=${encodeURIComponent(nextLongitude)}&zoom=18&addressdetails=1`);
       const data = response.ok ? await response.json() : {};
       const address = String(data?.display_name || value.shopAddress || "").trim();
-      applyLocation({ address, latitude: nextLatitude, longitude: nextLongitude });
+      applyLocation({ address, latitude: latitudeValue, longitude: longitudeValue });
       if (address) setQuery(address);
     } catch {
-      applyLocation({ address: value.shopAddress || query, latitude: nextLatitude, longitude: nextLongitude });
+      applyLocation({ address: value.shopAddress || query, latitude: latitudeValue, longitude: longitudeValue });
     } finally {
       setResolving(false);
     }
@@ -1002,6 +1048,8 @@ function ShopLocationSetting({ value, onChange, error }) {
         <StatusPill label="Longitude" value={longitude !== null ? longitude.toFixed(6) : "Not set"} />
       </div>
       {error ? <ErrorText>{error}</ErrorText> : null}
+      {coordinateError ? <ErrorText>{coordinateError}</ErrorText> : null}
+      {!savedCoordinatesValid ? <ErrorText>Invalid map coordinates returned. Please select the location again.</ErrorText> : null}
       <button
         type="button"
         className="w-fit rounded-2xl border border-white/10 bg-white/[0.06] px-3 py-2 text-xs font-bold text-white/70 transition hover:border-rose-300/35 hover:text-rose-200"
