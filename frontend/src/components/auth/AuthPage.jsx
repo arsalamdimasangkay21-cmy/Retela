@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowRight, CheckCircle2, KeyRound, Loader2, Phone, RotateCcw, ShieldCheck, User, UserPlus } from "lucide-react";
+import { ArrowRight, CheckCircle2, KeyRound, Loader2, Mail, RotateCcw, ShieldCheck, User, UserPlus } from "lucide-react";
 import { api, cachedGet, getApiErrorMessage } from "../../api/client";
 import { logoFromSettings, RETELA_LOGO_URL } from "../../config/branding";
 import { useAuth } from "../../context/AuthContext";
@@ -84,14 +84,14 @@ export default function AuthPage() {
   const [registrationAgreementOpen, setRegistrationAgreementOpen] = useState(false);
   const [signupStep, setSignupStep] = useState("form");
   const [resetOpen, setResetOpen] = useState(false);
-  const [resetStep, setResetStep] = useState("phone");
+  const [resetStep, setResetStep] = useState("email");
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState("");
   const [loginForm, setLoginForm] = useState({ username: "", password: "" });
   const [captchaToken, setCaptchaToken] = useState("");
   const [captchaResetKey, setCaptchaResetKey] = useState(0);
   const [signupForm, setSignupForm] = useState({ username: "", email: "", phoneNumber: "", location: "", otp: "", password: "", confirmPassword: "" });
-  const [resetForm, setResetForm] = useState({ phoneNumber: "", otp: "", password: "", confirmPassword: "" });
+  const [resetForm, setResetForm] = useState({ email: "", otp: "", password: "", confirmPassword: "" });
   const [logoUrl, setLogoUrl] = useState(savedLogoUrl);
   const signupPasswordBlueprint = useMemo(() => getPasswordBlueprint(signupForm.password), [signupForm.password]);
   const signupPasswordStrength = useMemo(() => getPasswordStrength(signupPasswordBlueprint), [signupPasswordBlueprint]);
@@ -124,10 +124,6 @@ export default function AuthPage() {
       cancelled = true;
     };
   }, []);
-
-  function normalizePhoneInput(value) {
-    return value.replace(/\D/g, "").slice(0, 11);
-  }
 
   async function submitLogin(event) {
     event.preventDefault();
@@ -237,7 +233,7 @@ export default function AuthPage() {
     setMessage("");
     setLoading("reset-request");
     try {
-      const { data } = await api.post("/auth/password-reset/request", { phoneNumber: resetForm.phoneNumber });
+      const { data } = await api.post("/auth/password-reset/request", { email: resetForm.email });
       setResetStep("otp");
       setMessage(data.message);
     } catch (error) {
@@ -251,7 +247,7 @@ export default function AuthPage() {
     setMessage("");
     setLoading("reset-resend");
     try {
-      const { data } = await api.post("/auth/password-reset/request", { phoneNumber: resetForm.phoneNumber });
+      const { data } = await api.post("/auth/password-reset/resend", { email: resetForm.email });
       setMessage(data.message);
     } catch (error) {
       setMessage(getApiErrorMessage(error, "Could not send OTP again"));
@@ -266,7 +262,7 @@ export default function AuthPage() {
     setLoading("reset-verify");
     try {
       const { data } = await api.post("/auth/password-reset/verify", {
-        phoneNumber: resetForm.phoneNumber,
+        email: resetForm.email,
         otp: resetForm.otp
       });
       setResetStep("password");
@@ -292,15 +288,15 @@ export default function AuthPage() {
     setLoading("reset-complete");
     try {
       const { data } = await api.post("/auth/password-reset/complete", {
-        phoneNumber: resetForm.phoneNumber,
+        email: resetForm.email,
         password: resetForm.password
       });
       setMessage(data.message);
       setResetOpen(false);
-      setResetStep("phone");
+      setResetStep("email");
       setSignupOpen(false);
-      setLoginForm({ ...loginForm, username: resetForm.phoneNumber, password: "" });
-      setResetForm({ phoneNumber: "", otp: "", password: "", confirmPassword: "" });
+      setLoginForm({ ...loginForm, username: resetForm.email, password: "" });
+      setResetForm({ email: "", otp: "", password: "", confirmPassword: "" });
     } catch (error) {
       setMessage(getApiErrorMessage(error, "Could not change password"));
     } finally {
@@ -337,14 +333,14 @@ export default function AuthPage() {
     setRegistrationAgreementOpen(false);
     setResetOpen(false);
     setSignupStep("form");
-    setResetStep("phone");
+    setResetStep("email");
     setMessage("");
   }
 
   function openReset() {
     setResetOpen(true);
     setSignupOpen(false);
-    setResetStep("phone");
+    setResetStep("email");
     setMessage("");
   }
 
@@ -404,13 +400,13 @@ export default function AuthPage() {
             ) : null
           ) : null}
 
-          {resetOpen && resetStep === "phone" ? (
+          {resetOpen && resetStep === "email" ? (
             <form name="retela-password-reset-request-form" data-feature="auth-password-reset-request" onSubmit={requestPasswordReset} className="mx-auto flex h-full max-w-sm flex-col justify-center gap-4">
               <div>
                 <p className="font-display text-sm font-semibold text-bluebrand">Password reset</p>
-                <h2 className="mt-2 font-display text-3xl font-bold">Verify phone</h2>
+                <h2 className="mt-2 font-display text-3xl font-bold">Verify email</h2>
               </div>
-              <Field id="reset-phone-number" name="phoneNumber" autoComplete="tel" icon={Phone} placeholder="Phone number" value={resetForm.phoneNumber} onChange={(e) => setResetForm({ ...resetForm, phoneNumber: e.target.value })} />
+              <Field id="reset-email" name="email" type="email" autoComplete="email" icon={Mail} placeholder="Email address" value={resetForm.email} onChange={(e) => setResetForm({ ...resetForm, email: e.target.value })} />
               <Button type="submit" disabled={loading === "reset-request"}>{loading === "reset-request" ? <><Spinner /> Sending OTP</> : "Send OTP"}</Button>
               <button type="button" className="text-sm font-semibold text-bluebrand" onClick={closeSignup}>Back to Login</button>
               {message ? <p className="rounded-xl bg-blue-50 p-3 text-sm text-blue-700">{message}</p> : null}
@@ -429,7 +425,7 @@ export default function AuthPage() {
               <button type="button" className="inline-flex items-center justify-center gap-2 text-sm font-semibold text-bluebrand disabled:opacity-60" onClick={resendPasswordReset} disabled={loading === "reset-resend"}>
                 {loading === "reset-resend" ? <Spinner /> : <RotateCcw size={15} />} Send again
               </button>
-              <button type="button" className="text-sm font-semibold text-slate-500" onClick={() => setResetStep("phone")}>Change phone number</button>
+              <button type="button" className="text-sm font-semibold text-slate-500" onClick={() => setResetStep("email")}>Change email address</button>
               {message ? <p className="rounded-xl bg-blue-50 p-3 text-sm text-blue-700">{message}</p> : null}
             </form>
           ) : null}
@@ -437,13 +433,13 @@ export default function AuthPage() {
           {resetOpen && resetStep === "password" ? (
             <form name="retela-password-reset-complete-form" data-feature="auth-password-reset-complete" onSubmit={completePasswordReset} className="mx-auto flex h-full max-w-sm flex-col justify-center gap-4">
               <div>
-                <p className="font-display text-sm font-semibold text-bluebrand">Phone verified</p>
-                <h2 className="mt-2 font-display text-3xl font-bold">New password</h2>
+                <p className="font-display text-sm font-semibold text-bluebrand">Email verified</p>
+                <h2 className="mt-2 font-display text-3xl font-bold">Create new password</h2>
               </div>
               <Field id="reset-new-password" name="newPassword" autoComplete="new-password" icon={KeyRound} type="password" placeholder="New password" value={resetForm.password} onChange={(e) => setResetForm({ ...resetForm, password: e.target.value })} />
               <PasswordBlueprint blueprint={resetPasswordBlueprint} strength={resetPasswordStrength} />
               <Field id="reset-confirm-password" name="confirmNewPassword" autoComplete="new-password" icon={KeyRound} type="password" placeholder="Confirm new password" value={resetForm.confirmPassword} onChange={(e) => setResetForm({ ...resetForm, confirmPassword: e.target.value })} />
-              <Button type="submit" disabled={loading === "reset-complete"}>{loading === "reset-complete" ? <><Spinner /> Changing password</> : "Change password"}</Button>
+              <Button type="submit" disabled={loading === "reset-complete"}>{loading === "reset-complete" ? <><Spinner /> Resetting password</> : "Reset password"}</Button>
               {message ? <p className="rounded-xl bg-blue-50 p-3 text-sm text-blue-700">{message}</p> : null}
             </form>
           ) : null}

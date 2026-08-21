@@ -6,7 +6,7 @@ import { comparePassword, createOtp, hashPassword, signToken } from "../utils/au
 import { sendOtpEmail } from "../utils/email.js";
 import { sendSms } from "../utils/sms.js";
 import { registrationUpload } from "../middleware/upload.js";
-import { checkRegistrationField, completeRegistration, resendRegistrationOtp, sendRegistrationOtp, validateRegistration } from "../controllers/registration.controller.js";
+import { checkRegistrationField, completeRegistration, ensureVerificationTables, resendRegistrationOtp, sendRegistrationOtp, validateRegistration } from "../controllers/registration.controller.js";
 
 const router = Router();
 const adminUsername = "AdministratorRetela";
@@ -422,91 +422,82 @@ router.post("/resend-otp", asyncHandler(async (req, res) => {
   res.json({ message: "OTP sent to your email address." });
 }));
 
-router.post("/password-reset/request", asyncHandler(async (req, res) => {
-  await ensurePasswordResetColumns();
-  const schema = z.object({ phoneNumber: z.string().trim().min(7).max(20) });
-  const { phoneNumber: rawPhoneNumber } = schema.parse(req.body);
-  const phoneNumber = normalizePhoneNumber(rawPhoneNumber);
-  const users = await query(
-    "SELECT id, username FROM users WHERE phone_number = :phoneNumber",
-    { phoneNumber }
+const passwordResetOtpPurpose = "password_reset";
+
+async function issuePasswordResetOtp(email) {
+  await ensureVerificationTables();
+  const users = await query("SELECT id FROM users WHERE email = :email LIMIT 1", { email });
+  if (!users.length) return false;
+  const latest = await query(
+    `SELECT id, resend_available_at FROM otp_codes
+     WHERE contact = :email AND purpose = :purpose AND consumed_at IS NULL
+     ORDER BY id DESC LIMIT 1`,
+    { email, purpose: passwordResetOtpPurpose }
   );
-  if (!users.length) throw new HttpError(404, "No account uses that phone number");
+  if (latest[0] && new Date(latest[0].resend_available_at) > new Date()) throw new HttpError(429, "Please wait 60 seconds before requesting another OTP");
+  if (latest[0]) await query("DELETE FROM otp_codes WHERE id = :id", { id: latest[0].id });
 
   const otp = createOtp();
-  const otpExpiresAt = getOtpExpiry();
-  await query(
-    `UPDATE users
-     SET password_reset_otp_code = :otp,
-         password_reset_otp_expires_at = :otpExpiresAt,
-         password_reset_verified_until = NULL
-     WHERE id = :id`,
-    { id: users[0].id, otp, otpExpiresAt }
-  );
-  const sent = await sendSms(formatSmsPhoneNumber(phoneNumber), `Your Retela password reset code is ${otp}. It expires in ${process.env.OTP_TTL_MINUTES || 10} minutes.`);
+  const otpId = (await query(
+    `INSERT INTO otp_codes (contact, purpose, otp_code, expires_at, resend_available_at, max_attempts, max_resends)
+     VALUES (:email, :purpose, :otp, :expiresAt, DATE_ADD(NOW(), INTERVAL 60 SECOND), 5, 3)`,
+    { email, purpose: passwordResetOtpPurpose, otp: await hashPassword(otp), expiresAt: getOtpExpiry() }
+  )).insertId;
+  try {
+    await sendOtpEmail(email, otp);
+  } catch {
+    await query("DELETE FROM otp_codes WHERE id = :id", { id: otpId }).catch(() => {});
+    throw new HttpError(500, "Unable to send password reset code. Please try again.");
+  }
+  return true;
+}
 
-  res.json({ message: sent ? "OTP sent to your phone number." : `SMS is not configured. Use OTP ${otp} to continue.` });
+const passwordResetEmailSchema = z.object({ email: z.string().trim().email().max(160) });
+
+router.post("/password-reset/request", asyncHandler(async (req, res) => {
+  const { email: rawEmail } = passwordResetEmailSchema.parse(req.body);
+  await issuePasswordResetOtp(rawEmail.toLowerCase());
+  res.json({ message: "If an account uses that email, an OTP was sent to your email address." });
+}));
+
+router.post("/password-reset/resend", asyncHandler(async (req, res) => {
+  const { email: rawEmail } = passwordResetEmailSchema.parse(req.body);
+  await issuePasswordResetOtp(rawEmail.toLowerCase());
+  res.json({ message: "If an account uses that email, a new OTP was sent to your email address." });
 }));
 
 router.post("/password-reset/verify", asyncHandler(async (req, res) => {
   await ensurePasswordResetColumns();
-  const schema = z.object({
-    phoneNumber: z.string().trim().min(7).max(20),
-    otp: z.string().trim().length(6)
-  });
-  const { phoneNumber: rawPhoneNumber, otp } = schema.parse(req.body);
-  const phoneNumber = normalizePhoneNumber(rawPhoneNumber);
-  const users = await query(
-    `SELECT id, password_reset_otp_code, password_reset_otp_expires_at
-     FROM users WHERE phone_number = :phoneNumber`,
-    { phoneNumber }
+  const schema = passwordResetEmailSchema.extend({ otp: z.string().trim().regex(/^\d{6}$/) });
+  const { email: rawEmail, otp } = schema.parse(req.body);
+  const email = rawEmail.toLowerCase();
+  const rows = await query(
+    `SELECT id, otp_code, expires_at, attempts, max_attempts FROM otp_codes
+     WHERE contact = :email AND purpose = :purpose AND consumed_at IS NULL
+     ORDER BY id DESC LIMIT 1`,
+    { email, purpose: passwordResetOtpPurpose }
   );
-  if (!users.length) throw new HttpError(404, "Account not found");
-  const user = users[0];
-  if (user.password_reset_otp_code !== otp || !user.password_reset_otp_expires_at || new Date(user.password_reset_otp_expires_at) < new Date()) {
+  const pending = rows[0];
+  if (!pending || Number(pending.attempts || 0) >= Number(pending.max_attempts || 5) || new Date(pending.expires_at) < new Date()) throw new HttpError(400, "Invalid or expired OTP");
+  if (!(await comparePassword(otp, pending.otp_code))) {
+    await query("UPDATE otp_codes SET attempts = attempts + 1 WHERE id = :id", { id: pending.id });
     throw new HttpError(400, "Invalid or expired OTP");
   }
-  await query(
-    `UPDATE users
-     SET password_reset_otp_code = NULL,
-         password_reset_otp_expires_at = NULL,
-         password_reset_verified_until = DATE_ADD(NOW(), INTERVAL 10 MINUTE)
-     WHERE id = :id`,
-    { id: user.id }
-  );
-  res.json({ message: "Phone verified. You can now change your password." });
+  await query("UPDATE otp_codes SET consumed_at = NOW(), attempts = attempts + 1 WHERE id = :id", { id: pending.id });
+  await query("UPDATE users SET password_reset_verified_until = DATE_ADD(NOW(), INTERVAL 10 MINUTE) WHERE email = :email", { email });
+  res.json({ message: "Email verified. You can now create a new password." });
 }));
 
 router.post("/password-reset/complete", asyncHandler(async (req, res) => {
   await ensurePasswordResetColumns();
-  const schema = z.object({
-    phoneNumber: z.string().trim().min(7).max(20),
-    password: z.string().min(8)
-  });
-  const { phoneNumber: rawPhoneNumber, password } = schema.parse(req.body);
-  const phoneNumber = normalizePhoneNumber(rawPhoneNumber);
-  const users = await query(
-    `SELECT id, password_reset_verified_until
-     FROM users WHERE phone_number = :phoneNumber`,
-    { phoneNumber }
-  );
-  if (!users.length) throw new HttpError(404, "Account not found");
-  if (!users[0].password_reset_verified_until || new Date(users[0].password_reset_verified_until) < new Date()) {
-    throw new HttpError(400, "Verify the OTP before changing your password");
-  }
-  if (!isStrongPassword(password)) {
-    throw new HttpError(400, "Use a stronger password with 8+ characters, uppercase, lowercase, number, and symbol");
-  }
-
-  const passwordHash = await hashPassword(password);
-  await query(
-    `UPDATE users
-     SET password_hash = :passwordHash,
-         password_reset_verified_until = NULL
-     WHERE id = :id`,
-    { id: users[0].id, passwordHash }
-  );
-  res.json({ message: "Password changed. You can log in now." });
+  const schema = passwordResetEmailSchema.extend({ password: z.string().min(8) });
+  const { email: rawEmail, password } = schema.parse(req.body);
+  const email = rawEmail.toLowerCase();
+  const users = await query("SELECT id, password_reset_verified_until FROM users WHERE email = :email LIMIT 1", { email });
+  if (!users.length || !users[0].password_reset_verified_until || new Date(users[0].password_reset_verified_until) < new Date()) throw new HttpError(400, "Verify the OTP before changing your password");
+  if (!isStrongPassword(password)) throw new HttpError(400, "Use a stronger password with 8+ characters, uppercase, lowercase, number, and symbol");
+  await query("UPDATE users SET password_hash = :passwordHash, password_reset_verified_until = NULL WHERE id = :id", { id: users[0].id, passwordHash: await hashPassword(password) });
+  res.json({ message: "Password reset successfully. You can log in now." });
 }));
 
 router.post("/login", asyncHandler(async (req, res) => {
