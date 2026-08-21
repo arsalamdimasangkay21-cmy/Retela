@@ -33,7 +33,7 @@ async function ensurePosSchema() {
     await ensureProductInventoryColumns();
     await safeModifyColumn("users", "role", "role enum update", "ALTER TABLE users MODIFY role ENUM('admin','staff','customer') NOT NULL DEFAULT 'customer'");
     await safeModifyColumn("orders", "user_id", "user_id nullable update", "ALTER TABLE orders MODIFY user_id INT NULL");
-    await safeModifyColumn("orders", "payment_method", "payment_method enum update", "ALTER TABLE orders MODIFY payment_method ENUM('cod','cash','gcash','debit','credit','maya') NOT NULL DEFAULT 'cod'");
+    await safeModifyColumn("orders", "payment_method", "payment_method enum update", "ALTER TABLE orders MODIFY payment_method ENUM('cod','cash','gcash','qrph','debit','credit','maya') NOT NULL DEFAULT 'cod'");
 
     const rows = await query(
       `SELECT COLUMN_NAME

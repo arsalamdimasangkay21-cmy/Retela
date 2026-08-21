@@ -118,7 +118,7 @@ async function ensureOrderColumns() {
     const columns = new Set(rows.map((row) => row.COLUMN_NAME));
     await safeModifyColumn("orders", "status", "status enum update", "ALTER TABLE orders MODIFY status ENUM('pending','awaiting_payment','paid','approved','processing','ready','completed','cancelled','payment_failed') NOT NULL DEFAULT 'pending'");
     await safeModifyColumn("orders", "user_id", "user_id nullable update", "ALTER TABLE orders MODIFY user_id INT NULL");
-    await safeModifyColumn("orders", "payment_method", "payment_method enum update", "ALTER TABLE orders MODIFY payment_method ENUM('cod','cash','gcash','debit','credit','maya') NOT NULL DEFAULT 'cod'");
+    await safeModifyColumn("orders", "payment_method", "payment_method enum update", "ALTER TABLE orders MODIFY payment_method ENUM('cod','cash','gcash','qrph','debit','credit','maya') NOT NULL DEFAULT 'cod'");
     if (!columns.has("order_channel")) await query("ALTER TABLE orders ADD COLUMN order_channel ENUM('online','pos') NOT NULL DEFAULT 'online' AFTER user_id");
     if (!columns.has("tracking_number")) {
       await query("ALTER TABLE orders ADD COLUMN tracking_number VARCHAR(120) NULL AFTER payment_method");
@@ -622,7 +622,7 @@ router.post("/", requireAuth, requireApproved, asyncHandler(async (req, res) => 
   await ensureCartTable();
   await ensureProductInventoryColumns();
   const schema = z.object({
-    payment_method: z.enum(["cod", "gcash", "debit", "credit", "maya"]).optional().default("cod"),
+    payment_method: z.enum(["cod", "gcash", "qrph", "debit", "credit", "maya"]).optional().default("cod"),
     fulfillment_method: z.enum(["delivery", "pickup"]).optional().default("delivery"),
     coupon_code: z.string().trim().max(40).optional().default(""),
     delivery_address: z.string().trim().max(500).optional().default(""),

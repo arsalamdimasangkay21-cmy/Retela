@@ -3043,6 +3043,7 @@ function findProductByBarcode(products, value) {
 function paymentLabel(method) {
   if (method === "cash") return "Cash";
   if (method === "gcash") return "GCash";
+  if (method === "qrph") return "GCash / QR Ph";
   if (method === "debit") return "Debit Card";
   if (method === "credit") return "Credit Card";
   if (method === "maya") return "Maya";

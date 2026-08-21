@@ -195,6 +195,7 @@ export default function CustomerDashboard({ active, onChange }) {
   const [paymentDetails, setPaymentDetails] = useState({ gcashNumber: "", debitNumber: "", creditNumber: "", mayaNumber: "" });
   const [paymentError, setPaymentError] = useState("");
   const [redirectingPayment, setRedirectingPayment] = useState(null);
+  const [qrPayment, setQrPayment] = useState(null);
   const [fulfillmentMethod, setFulfillmentMethod] = useState("delivery");
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [filters, setFilters] = useState(defaultCustomerFilters);
@@ -602,8 +603,8 @@ export default function CustomerDashboard({ active, onChange }) {
     }
     const stockOk = await recheckCartStock({ productIds: selectedCartIds });
     if (!stockOk) return;
-    const billingPhone = paymentMethod === "cod" ? "" : (paymentDetails[paymentNumberKey(paymentMethod)] || "").trim();
-    if (paymentMethod !== "cod" && !isValidPaymentNumber(billingPhone)) {
+    const billingPhone = paymentMethod === "cod" || paymentMethod === "qrph" ? "" : (paymentDetails[paymentNumberKey(paymentMethod)] || "").trim();
+    if (paymentMethod !== "cod" && paymentMethod !== "qrph" && !isValidPaymentNumber(billingPhone)) {
       const message = `Enter a valid ${paymentNumberLabels[paymentMethod].toLowerCase()}.`;
       setPaymentError(message);
       notifyCart(message, "error");
@@ -639,6 +640,12 @@ export default function CustomerDashboard({ active, onChange }) {
       setAppliedCoupon(null);
       setCouponCode("");
       if (paymentMethod !== "cod") {
+        if (paymentMethod === "qrph") {
+          const qrResponse = await api.post("/payments/paymongo/qrph/create", { orderId: data.id });
+          setQrPayment({ ...qrResponse.data, orderId: data.id, amount: Number(data.total_amount || cartTotal) });
+          await load(filtersRef.current, { force: true });
+          return;
+        }
         console.log("Selected payment method:", paymentMethod);
         console.log("Starting GCash checkout");
         setRedirectingPayment(paymentMethod);
@@ -831,6 +838,18 @@ export default function CustomerDashboard({ active, onChange }) {
             onClose={() => setCheckoutSummaryOpen(false)}
           />
         ) : null}
+        {qrPayment ? (
+          <QrPhPaymentScreen
+            payment={qrPayment}
+            onClose={() => setQrPayment(null)}
+            onViewOrder={() => { setQrPayment(null); onChange("Orders"); }}
+            onPaid={() => load(filtersRef.current, { force: true })}
+            onRegenerate={async () => {
+              const { data } = await api.post("/payments/paymongo/qrph/create", { orderId: qrPayment.orderId });
+              setQrPayment({ ...data, orderId: qrPayment.orderId, amount: Number(qrPayment.amount || data.total_amount || 0) });
+            }}
+          />
+        ) : null}
         {locationSelectorOpen ? (
           <DeliveryLocationSelector
             initialLocation={deliveryLocation || deliveryLocationFromProfile(profile)}
@@ -886,7 +905,7 @@ export default function CustomerDashboard({ active, onChange }) {
             <div className="grid gap-3 rounded-2xl border border-white/10 bg-white/[0.045] p-3">
               <p className="text-xs font-bold uppercase tracking-[0.16em] text-white/45">Payment Method</p>
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                {[["cod", "COD"], ["gcash", "GCash"], ["debit", "Debit"], ["credit", "Credit"], ["maya", "Maya"]].map(([value, label]) => (
+                {[["cod", "COD"], ["qrph", "GCash / QR Ph"], ["debit", "Debit"], ["credit", "Credit"], ["maya", "Maya"]].map(([value, label]) => (
                   <button key={value} type="button" onClick={() => selectPaymentMethod(value)} className={`inline-flex items-center justify-center gap-1 rounded-xl px-2 py-2 text-xs font-bold transition ${paymentMethod === value ? "bg-neonbrand text-black" : "bg-white/[0.06] text-white/65 hover:text-neonbrand"}`}>
                     {value === "debit" ? <CreditCard size={14} /> : <WalletCards size={14} />}{label}
                   </button>
@@ -929,7 +948,8 @@ export default function CustomerDashboard({ active, onChange }) {
       returnRequests={returnRequests}
       deliverySafetyPolicy={deliverySafetyPolicyFromShop(shopInfo)}
       onNavigate={onChange}
-      onMeetupConfirmation={confirmMeetup}
+        onMeetupConfirmation={confirmMeetup}
+        onQrPayment={(payment) => { setQrPayment(payment); onChange("Cart"); }}
       onOrderCancelled={(updatedOrder) => {
         setOrders((current) => current.map((order) => Number(order.id) === Number(updatedOrder.id) ? { ...order, ...updatedOrder } : order));
         clearGetCache("/orders");
@@ -1091,7 +1111,7 @@ function CartPage({
         <div className="mt-4 grid gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-3">
           <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">Payment Method</p>
           <div className="payment-methods grid grid-cols-2 gap-2">
-            {[["cod", "COD"], ["gcash", "GCash"], ["debit", "Debit"], ["credit", "Credit"], ["maya", "Maya"]].map(([value, label]) => (
+            {[["cod", "COD"], ["qrph", "GCash / QR Ph"], ["debit", "Debit"], ["credit", "Credit"], ["maya", "Maya"]].map(([value, label]) => (
               <button key={value} type="button" onClick={() => selectPaymentMethod(value)} className={`payment-method-option inline-flex items-center justify-center gap-1 rounded-xl px-2 py-2 text-xs font-bold transition ${paymentMethod === value ? "bg-emerald-600 text-white" : "bg-white text-slate-600 hover:text-emerald-700"}`}>
                 {value === "debit" ? <CreditCard size={14} /> : <WalletCards size={14} />}{label}
               </button>
@@ -2071,6 +2091,129 @@ function CheckoutSummaryModal({ items, pricing, paymentMethod, paymentDetails, p
   );
 }
 
+function QrPhPaymentScreen({ payment, onClose, onViewOrder, onPaid, onRegenerate }) {
+  const orderId = payment?.orderId || payment?.id;
+  const [status, setStatus] = useState(String(payment?.payment_status || "awaiting_payment").toLowerCase());
+  const [secondsRemaining, setSecondsRemaining] = useState(() => {
+    const expires = payment?.expiresAt ? new Date(payment.expiresAt).getTime() : Date.now() + 30 * 60 * 1000;
+    return Math.max(0, Math.floor((expires - Date.now()) / 1000));
+  });
+  const [error, setError] = useState("");
+  const [regenerating, setRegenerating] = useState(false);
+  const notifiedPaid = useRef(false);
+  const qrImage = payment?.qrImage || payment?.qr_image || payment?.order?.qr_code_url || "";
+  const amount = Number(payment?.amount || payment?.total_amount || payment?.order?.total_amount || 0);
+  const expired = secondsRemaining <= 0 && status !== "paid";
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setSecondsRemaining((value) => Math.max(0, value - 1)), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    if (!orderId || ["paid", "failed", "cancelled"].includes(status) || expired) return undefined;
+    let active = true;
+    const checkStatus = async () => {
+      try {
+        const { data } = await api.get(`/payments/orders/${orderId}/status`);
+        if (!active) return;
+        const nextStatus = String(data?.payment_status || data?.order?.payment_status || "awaiting_payment").toLowerCase();
+        setStatus(nextStatus);
+        setError("");
+        if (nextStatus === "paid" && !notifiedPaid.current) {
+          notifiedPaid.current = true;
+          onPaid?.();
+        }
+      } catch (requestError) {
+        if (active) setError(requestError?.response?.data?.message || "Payment status is temporarily unavailable.");
+      }
+    };
+    checkStatus();
+    const timer = window.setInterval(checkStatus, 4000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [expired, onPaid, orderId, status]);
+
+  const timeLabel = `${String(Math.floor(secondsRemaining / 60)).padStart(2, "0")}:${String(secondsRemaining % 60).padStart(2, "0")}`;
+  const paid = status === "paid";
+  const failed = ["failed", "cancelled"].includes(status);
+
+  return createPortal(
+    <motion.div className="fixed inset-0 z-[260] grid place-items-center overflow-y-auto bg-black/70 p-4 backdrop-blur-xl" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+      <motion.section className="w-full max-w-lg rounded-[28px] border border-neonbrand/25 bg-slate-950 p-5 text-white shadow-2xl sm:p-7" initial={{ opacity: 0, y: 18, scale: 0.97 }} animate={{ opacity: 1, y: 0, scale: 1 }}>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.18em] text-neonbrand/75">Pay with GCash / QR Ph</p>
+            <h2 className="mt-2 font-display text-2xl font-bold">Order #{orderId}</h2>
+          </div>
+          <button type="button" onClick={onClose} className="rounded-xl border border-white/10 px-3 py-2 text-sm font-bold text-white/65 hover:text-neonbrand">Close</button>
+        </div>
+        <div className="mt-5 rounded-2xl border border-neonbrand/20 bg-neonbrand/10 p-4 text-center">
+          <p className="text-xs font-bold uppercase tracking-[0.16em] text-white/55">Amount to Pay</p>
+          <p className="mt-1 font-display text-3xl font-black text-neonbrand">PHP {amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+        </div>
+        {paid ? (
+          <div className="mt-5 rounded-2xl border border-emerald-300/30 bg-emerald-400/10 p-5 text-center">
+            <CheckCircle2 className="mx-auto text-neonbrand" size={42} />
+            <h3 className="mt-3 font-display text-2xl font-bold">Payment Successful</h3>
+            <p className="mt-1 text-sm text-white/65">GCash / QR Ph · Paid</p>
+            <button type="button" onClick={onViewOrder} className="mt-4 inline-flex items-center justify-center rounded-xl bg-neonbrand px-4 py-3 text-sm font-black text-black">View Order</button>
+          </div>
+        ) : failed ? (
+          <div className="mt-5 rounded-2xl border border-rose-300/30 bg-rose-400/10 p-5 text-center">
+            <h3 className="font-display text-xl font-bold">Payment could not be completed</h3>
+            <p className="mt-2 text-sm text-white/65">You can close this screen and try the payment again from Orders.</p>
+          </div>
+        ) : expired ? (
+          <div className="mt-5 rounded-2xl border border-amber-300/30 bg-amber-400/10 p-5 text-center">
+            <h3 className="font-display text-xl font-bold">Payment QR expired</h3>
+            <p className="mt-2 text-sm text-white/65">Generate a new QR when you are ready to pay.</p>
+            <button
+              type="button"
+              disabled={regenerating}
+              onClick={async () => {
+                setRegenerating(true);
+                setError("");
+                try {
+                  await onRegenerate?.();
+                } catch (regenerateError) {
+                  setError(regenerateError?.response?.data?.message || "Unable to generate a new payment QR.");
+                } finally {
+                  setRegenerating(false);
+                }
+              }}
+              className="mt-4 inline-flex items-center justify-center gap-2 rounded-xl bg-neonbrand px-4 py-3 text-sm font-black text-black disabled:opacity-60"
+            >
+              {regenerating ? <Loader2 size={16} className="animate-spin" /> : null}
+              {regenerating ? "Generating..." : "Generate New QR"}
+            </button>
+          </div>
+        ) : (
+          <>
+            <div className="mt-5 grid place-items-center rounded-2xl bg-white p-4">
+              {qrImage ? <img src={qrImage} alt="RETELA QR Ph payment code" className="h-64 w-64 max-w-full object-contain" /> : <Loader2 className="animate-spin text-emerald-700" size={32} />}
+            </div>
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-2 text-sm">
+              <span className="font-bold text-neonbrand">Waiting for payment...</span>
+              <span className="text-white/65">QR expires in {timeLabel}</span>
+            </div>
+            {qrImage ? <a href={qrImage} download={`RETELA-ORDER-${orderId}-QR.png`} className="mt-3 inline-flex w-full items-center justify-center rounded-xl border border-neonbrand/30 bg-neonbrand/10 px-4 py-3 text-sm font-bold text-neonbrand hover:bg-neonbrand hover:text-black">Save QR to Phone</a> : null}
+            <ol className="mt-4 grid gap-1 text-sm leading-6 text-white/65">
+              <li>1. Save the QR image.</li>
+              <li>2. Open GCash, Maya, or another QR Ph app and scan/upload it.</li>
+              <li>3. Confirm the exact amount, then return to RETELA.</li>
+            </ol>
+          </>
+        )}
+        {error ? <p className="mt-3 text-xs font-semibold text-amber-200">{error}</p> : null}
+      </motion.section>
+    </motion.div>,
+    document.body
+  );
+}
+
 function SummaryLine({ label, value, highlight = false, strong = false }) {
   return (
     <div className={`retela-summary-line flex items-center justify-between gap-4 ${strong ? "border-t border-white/10 pt-3" : ""}`}>
@@ -2387,7 +2530,7 @@ function formatNotificationDate(value) {
   return date.toLocaleString(undefined, { month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
-function Orders({ rows, profile, reviews = [], returnRequests = [], deliverySafetyPolicy, onNavigate, onOrderCancelled, onMeetupConfirmation }) {
+function Orders({ rows, profile, reviews = [], returnRequests = [], deliverySafetyPolicy, onNavigate, onOrderCancelled, onMeetupConfirmation, onQrPayment }) {
   const flow = ["pending", "awaiting_payment", "paid", "processing", "completed"];
   const [selectedOrderId, setSelectedOrderId] = useState(null);
   const [selectedOrder, setSelectedOrder] = useState(null);
@@ -2406,6 +2549,18 @@ function Orders({ rows, profile, reviews = [], returnRequests = [], deliverySafe
   async function payOrder(order, event) {
     event?.stopPropagation();
     if (!order || order.payment_method === "cod" || payingOrderId || isOrderCancelled(order)) return;
+    if (order.payment_method === "qrph") {
+      setPayingOrderId(order.id);
+      try {
+        const { data } = await api.post("/payments/paymongo/qrph/create", { orderId: order.id });
+        onQrPayment?.({ ...data, orderId: order.id, amount: Number(order.total_amount || 0) });
+      } catch (error) {
+        dispatchCustomerToast({ type: "error", message: error?.response?.data?.message || "Unable to create the QR payment." });
+      } finally {
+        setPayingOrderId(null);
+      }
+      return;
+    }
     const billingPhone = profile?.phone_number || order.phone_number || "";
     if (!isValidPaymentNumber(billingPhone)) {
       dispatchCustomerToast({ type: "error", message: `Add a valid ${paymentNumberLabels[order.payment_method].toLowerCase()} in your Profile before paying.` });
@@ -2756,6 +2911,7 @@ function OrderMeta({ label, value }) {
 
 function paymentLabel(method) {
   if (method === "gcash") return "GCash";
+  if (method === "qrph") return "GCash / QR Ph";
   if (method === "debit") return "Debit Card";
   if (method === "credit") return "Credit Card";
   if (method === "maya") return "Maya";

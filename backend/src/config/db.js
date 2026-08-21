@@ -682,7 +682,7 @@ async function ensureCoreTables() {
       user_id INT NULL,
       order_channel ENUM('online','pos') NOT NULL DEFAULT 'online',
       status ENUM('pending','awaiting_payment','paid','approved','processing','ready','completed','cancelled','payment_failed') NOT NULL DEFAULT 'pending',
-      payment_method ENUM('cod','cash','gcash','debit','credit','maya') NOT NULL DEFAULT 'cod',
+      payment_method ENUM('cod','cash','gcash','qrph','debit','credit','maya') NOT NULL DEFAULT 'cod',
       payment_status ENUM('unpaid','awaiting_payment','paid','failed','cancelled','refunded') NOT NULL DEFAULT 'unpaid',
       payment_reference VARCHAR(160) NULL,
       transaction_id VARCHAR(160) NULL,
@@ -690,6 +690,10 @@ async function ensureCoreTables() {
       payment_provider VARCHAR(40) NULL,
       checkout_session_id VARCHAR(160) NULL,
       checkout_url TEXT NULL,
+      payment_intent_id VARCHAR(160) NULL,
+      payment_method_id VARCHAR(160) NULL,
+      qr_code_url LONGTEXT NULL,
+      payment_expires_at DATETIME NULL,
       tracking_number VARCHAR(120) NULL,
       fulfillment_method ENUM('delivery','pickup') NOT NULL DEFAULT 'delivery',
       delivery_address VARCHAR(500) NULL,
@@ -715,7 +719,7 @@ async function ensureCoreTables() {
   `);
   await ensureAutoIncrementId("orders");
   await safeModifyColumn("orders", "status", "status enum update", "ALTER TABLE orders MODIFY status ENUM('pending','awaiting_payment','paid','approved','processing','ready','completed','cancelled','payment_failed') NOT NULL DEFAULT 'pending'");
-  await safeModifyColumn("orders", "payment_method", "payment_method enum update", "ALTER TABLE orders MODIFY payment_method ENUM('cod','cash','gcash','debit','credit','maya') NOT NULL DEFAULT 'cod'");
+  await safeModifyColumn("orders", "payment_method", "payment_method enum update", "ALTER TABLE orders MODIFY payment_method ENUM('cod','cash','gcash','qrph','debit','credit','maya') NOT NULL DEFAULT 'cod'");
   await ensureColumn("orders", "order_channel", "order_channel ENUM('online','pos') NOT NULL DEFAULT 'online' AFTER user_id");
   await ensureColumn("orders", "payment_status", "payment_status ENUM('unpaid','awaiting_payment','paid','failed','cancelled','refunded') NOT NULL DEFAULT 'unpaid' AFTER payment_method");
   await ensureColumn("orders", "payment_reference", "payment_reference VARCHAR(160) NULL AFTER payment_status");
@@ -724,6 +728,10 @@ async function ensureCoreTables() {
   await ensureColumn("orders", "payment_provider", "payment_provider VARCHAR(40) NULL AFTER paid_at");
   await ensureColumn("orders", "checkout_session_id", "checkout_session_id VARCHAR(160) NULL AFTER payment_provider");
   await ensureColumn("orders", "checkout_url", "checkout_url TEXT NULL AFTER checkout_session_id");
+  await ensureColumn("orders", "payment_intent_id", "payment_intent_id VARCHAR(160) NULL AFTER checkout_session_id");
+  await ensureColumn("orders", "payment_method_id", "payment_method_id VARCHAR(160) NULL AFTER payment_intent_id");
+  await ensureColumn("orders", "qr_code_url", "qr_code_url LONGTEXT NULL AFTER checkout_url");
+  await ensureColumn("orders", "payment_expires_at", "payment_expires_at DATETIME NULL AFTER qr_code_url");
   await ensureColumn("orders", "tracking_number", "tracking_number VARCHAR(120) NULL AFTER checkout_url");
   await ensureColumn("orders", "fulfillment_method", "fulfillment_method ENUM('delivery','pickup') NOT NULL DEFAULT 'delivery' AFTER tracking_number");
   await ensureColumn("orders", "delivery_address", "delivery_address VARCHAR(500) NULL AFTER fulfillment_method");

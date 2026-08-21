@@ -70,7 +70,7 @@ export function createApp(io) {
   app.options("*", cors(corsOptions));
 
   app.use(
-    "/api/payments/webhook",
+    ["/api/payments/webhook", "/api/payments/paymongo/webhook"],
     express.raw({ type: "application/json" })
   );
 
