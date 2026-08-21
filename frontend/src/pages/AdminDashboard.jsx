@@ -4124,6 +4124,7 @@ function registrationStatusLabel(status) {
 
 function AdminLocations({ users }) {
   const [selectedLocation, setSelectedLocation] = useState("all");
+  const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [search, setSearch] = useState("");
   const [routeError, setRouteError] = useState(false);
 
@@ -4159,7 +4160,7 @@ function AdminLocations({ users }) {
     });
   }, [customers, search, selectedLocation]);
 
-  const selectedOrigin = selectedLocation === "all" ? "" : selectedLocation;
+  const selectedOrigin = selectedCustomer?.location || "";
   const hasSelectedOrigin = Boolean(normalizeLocationText(selectedOrigin));
   const directionsMapUrl = hasSelectedOrigin && GOOGLE_MAPS_API_KEY
     ? `https://www.google.com/maps/embed/v1/directions?key=${GOOGLE_MAPS_API_KEY}&origin=${encodeURIComponent(selectedOrigin)}&destination=${encodeURIComponent(SHOP_LOCATION)}&mode=driving`
@@ -4175,7 +4176,7 @@ function AdminLocations({ users }) {
 
   useEffect(() => {
     setRouteError(false);
-  }, [selectedLocation]);
+  }, [selectedCustomer]);
 
   return (
     <div className="grid gap-5">
@@ -4230,7 +4231,12 @@ function AdminLocations({ users }) {
           </div>
           <div className="max-h-[520px] overflow-y-auto">
             {filteredCustomers.length ? filteredCustomers.map((customer) => (
-              <button key={customer.id} type="button" onClick={() => customer.location ? setSelectedLocation(customer.location) : null} className="grid w-full gap-2 border-b border-white/7 px-5 py-4 text-left transition hover:bg-white/[0.045]">
+              <button
+                key={customer.id}
+                type="button"
+                onClick={() => setSelectedCustomer(customer)}
+                className={`grid w-full gap-2 border-b border-white/7 px-5 py-4 text-left transition hover:bg-white/[0.045] ${selectedCustomer?.id === customer.id ? "border-l-2 border-l-neonbrand bg-neonbrand/[0.09]" : ""}`}
+              >
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <strong className="text-white">{customer.username}</strong>
                   <span className="rounded-full border border-white/10 bg-white/[0.06] px-3 py-1 text-xs font-bold text-white/55">{registrationStatusLabel(customer.status)}</span>
