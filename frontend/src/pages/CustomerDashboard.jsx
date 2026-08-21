@@ -15,7 +15,7 @@ import ConfirmDialog from "../components/ConfirmDialog";
 import { dispatchCustomerToast } from "../components/CustomerToastStack";
 import FaceVerification from "../components/FaceVerification";
 import NotificationPreviewPanel from "../components/NotificationPreviewPanel";
-import OrderDeliveryInfo from "../components/OrderDeliveryInfo";
+import OrderDeliveryInfo, { MeetingLocationMap } from "../components/OrderDeliveryInfo";
 import ProductImage from "../components/ProductImage";
 import ProductQuickView from "../components/ProductQuickView";
 import { Button, Card, Field } from "../components/ui";
@@ -2612,6 +2612,12 @@ function CustomerOrderModal({ loading, selectedOrder, displayNumber, deliverySaf
                     <p className="retela-modal-eyebrow">Meetup Date &amp; Time</p>
                     <p>{order.meetup_date ? formatMeetupDate(order.meetup_date) : "Meetup date will be provided by the shop."}{order.meetup_time ? ` • ${formatMeetupTime(order.meetup_time)}` : ""}</p>
                   </div>
+                  {order.delivery_latitude != null && order.delivery_longitude != null && order.meeting_latitude != null && order.meeting_longitude != null ? (
+                    <MeetingLocationMap
+                      customer={{ latitude: Number(order.delivery_latitude), longitude: Number(order.delivery_longitude) }}
+                      meeting={{ latitude: Number(order.meeting_latitude), longitude: Number(order.meeting_longitude) }}
+                    />
+                  ) : null}
                 </section> : null}
                 <DeliverySafetyPolicyCard policy={deliverySafetyPolicy} />
                 <div className="grid gap-2">

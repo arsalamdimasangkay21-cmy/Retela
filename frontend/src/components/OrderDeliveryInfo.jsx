@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { createPortal } from "react-dom";
-import { Loader2, MapPin, X } from "lucide-react";
+import { Loader2, MapPin } from "lucide-react";
 import { cachedGet } from "../api/client";
 
 function finiteCoordinate(value) {
@@ -39,11 +38,9 @@ function normalizeShopLocation(settings = {}) {
   };
 }
 
-export default function OrderDeliveryInfo({ order, title = "Delivery Information", mapLabel = "View Location", routeEnabled = false }) {
+export default function OrderDeliveryInfo({ order, title = "Delivery Information", mapLabel = "View Location", routeEnabled = true }) {
   const snapshot = orderDeliverySnapshot(order);
   const mapUrl = deliveryMapUrl(snapshot);
-  const [routeOpen, setRouteOpen] = useState(false);
-
   return (
     <section className="order-delivery-info-card">
       <div className="order-delivery-info-heading">
@@ -71,21 +68,16 @@ export default function OrderDeliveryInfo({ order, title = "Delivery Information
           </div>
         ) : null}
       </div>
-      {routeEnabled ? (
-        <button className="order-delivery-map-button" type="button" onClick={() => setRouteOpen(true)}>
-          <MapPin size={15} /> {mapLabel}
-        </button>
-      ) : mapUrl ? (
+      {routeEnabled ? <InlineDeliveryRoute order={order} snapshot={snapshot} /> : mapUrl ? (
         <a className="order-delivery-map-button" href={mapUrl} target="_blank" rel="noreferrer">
           <MapPin size={15} /> {mapLabel}
         </a>
       ) : null}
-      {routeOpen ? <DeliveryRouteModal order={order} snapshot={snapshot} onClose={() => setRouteOpen(false)} /> : null}
     </section>
   );
 }
 
-function DeliveryRouteModal({ order, snapshot, onClose }) {
+function InlineDeliveryRoute({ order, snapshot }) {
   const [settings, setSettings] = useState(null);
   const [route, setRoute] = useState(null);
   const [loadingSettings, setLoadingSettings] = useState(true);
@@ -98,7 +90,7 @@ function DeliveryRouteModal({ order, snapshot, onClose }) {
 
   useEffect(() => {
     let active = true;
-    cachedGet("/settings", {}, { cacheMs: 10000, retries: 1 })
+    cachedGet("/settings/public", {}, { cacheMs: 10000, retries: 1 })
       .then(({ data }) => {
         if (active) setSettings(data || {});
       })
@@ -141,19 +133,7 @@ function DeliveryRouteModal({ order, snapshot, onClose }) {
     return () => controller.abort();
   }, [hasDestinationCoordinates, hasShopCoordinates, loadingSettings, shop.latitude, shop.longitude, snapshot.latitude, snapshot.longitude]);
 
-  return createPortal(
-    <div className="retela-route-modal-backdrop" onMouseDown={onClose}>
-      <div className="retela-route-modal" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="retela-route-title">
-        <div className="retela-route-header">
-          <div>
-            <p>Delivery Route</p>
-            <h3 id="retela-route-title">Order #{order?.id || ""} Delivery Route</h3>
-          </div>
-          <button type="button" onClick={onClose} aria-label="Close delivery route">
-            <X size={18} />
-          </button>
-        </div>
-
+  return <div className="retela-inline-route">
         <div className="retela-route-summary">
           <RouteInfoBlock label="From" value={shop.name || "Tela to Pera Thrift Shop"} detail={shop.address || "Exact RETELA shop location has not been configured yet."} />
           <RouteInfoBlock label="To" value="Customer Delivery Location" detail={snapshot.address || "No exact delivery location was saved for this order."} />
@@ -190,13 +170,7 @@ function DeliveryRouteModal({ order, snapshot, onClose }) {
           </>
         )}
 
-        <div className="retela-route-footer">
-          <button type="button" onClick={onClose}>Close</button>
-        </div>
-      </div>
-    </div>,
-    document.body
-  );
+      </div>;
 }
 
 function RouteInfoBlock({ label, value, detail }) {
@@ -249,6 +223,63 @@ function DeliveryRouteMap({ shop, destination, route }) {
         <button type="button" onClick={() => setZoomOffset((value) => Math.min(3, value + 1))}>+</button>
         <button type="button" onClick={() => setZoomOffset((value) => Math.max(-3, value - 1))}>-</button>
       </div>
+    </div>
+  );
+}
+
+export function MeetingLocationMap({ customer, meeting, onSelect }) {
+  const [zoomOffset, setZoomOffset] = useState(0);
+  const [route, setRoute] = useState(null);
+  const [routeState, setRouteState] = useState("idle");
+  const hasCustomer = customer?.latitude != null && customer?.longitude != null;
+  const hasMeeting = meeting?.latitude != null && meeting?.longitude != null;
+  const map = useMemo(() => buildRouteMapModel(customer, meeting || customer, route, zoomOffset), [customer, meeting, route, zoomOffset]);
+  const routePoints = (route?.coordinates?.length ? route.coordinates : hasMeeting ? [customer, meeting] : [customer]).map((point) => projectPointOnMap(point, map));
+  const path = routePoints.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`).join(" ");
+
+  useEffect(() => {
+    if (!hasCustomer || !hasMeeting) {
+      setRoute(null);
+      setRouteState("idle");
+      return undefined;
+    }
+    const controller = new AbortController();
+    setRouteState("loading");
+    fetch(`https://router.project-osrm.org/route/v1/driving/${customer.longitude},${customer.latitude};${meeting.longitude},${meeting.latitude}?overview=full&geometries=geojson`, { signal: controller.signal })
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error("Route unavailable")))
+      .then((data) => {
+        const routeData = Array.isArray(data?.routes) ? data.routes[0] : null;
+        if (!routeData) throw new Error("Route unavailable");
+        setRoute({ coordinates: (routeData.geometry?.coordinates || []).map(([longitude, latitude]) => ({ latitude, longitude })), distanceMeters: Number(routeData.distance || 0), durationSeconds: Number(routeData.duration || 0) });
+        setRouteState("ready");
+      })
+      .catch((error) => {
+        if (error?.name !== "AbortError") setRouteState("error");
+      });
+    return () => controller.abort();
+  }, [customer?.latitude, customer?.longitude, hasCustomer, hasMeeting, meeting?.latitude, meeting?.longitude]);
+
+  function selectFromMap(event) {
+    if (!onSelect || !hasCustomer) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const x = ((event.clientX - rect.left) / rect.width) * 100;
+    const y = ((event.clientY - rect.top) / rect.height) * 100;
+    const point = tileToCoordinates(map.center.x + (x - 50) / 100, map.center.y + (y - 50) / 100, map.zoom);
+    onSelect(point);
+  }
+
+  return (
+    <div className="retela-route-map retela-meetup-map" onClick={selectFromMap} role={onSelect ? "button" : undefined} tabIndex={onSelect ? 0 : undefined} aria-label={onSelect ? "Select meetup location on map" : "Customer to meetup route map"}>
+      {map.tiles.map((tile) => <img key={`${tile.tileX}-${tile.tileY}-${map.zoom}`} src={`https://tile.openstreetmap.org/${map.zoom}/${tile.tileX}/${tile.tileY}.png`} alt="" loading="lazy" style={{ left: `calc(50% + ${(tile.x - map.offsetX) * 256}px)`, top: `calc(50% + ${(tile.y - map.offsetY) * 256}px)` }} />)}
+      <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><path d={path} /></svg>
+      {hasCustomer ? <RouteMarker point={projectPointOnMap(customer, map)} tone="customer" label="Customer Location" /> : null}
+      {hasMeeting ? <RouteMarker point={projectPointOnMap(meeting, map)} tone="meeting" label="Meeting Place" /> : null}
+      <div className="retela-route-map-tools" onClick={(event) => event.stopPropagation()}>
+        <button type="button" onClick={() => setZoomOffset((value) => Math.min(3, value + 1))}>+</button>
+        <button type="button" onClick={() => setZoomOffset((value) => Math.max(-3, value - 1))}>-</button>
+      </div>
+      {onSelect ? <span className="retela-meetup-map-hint">Tap the map to select a meeting point</span> : null}
+      {hasMeeting && routeState === "error" ? <span className="retela-route-map-error">Unable to load route map.</span> : null}
     </div>
   );
 }
@@ -314,4 +345,12 @@ function projectPointOnMap(point, map) {
     x: 50 + (tile.x - map.center.x) * 100,
     y: 50 + (tile.y - map.center.y) * 100
   };
+}
+
+function tileToCoordinates(x, y, zoom) {
+  const scale = 2 ** zoom;
+  const longitude = (x / scale) * 360 - 180;
+  const n = Math.PI - (2 * Math.PI * y) / scale;
+  const latitude = (180 / Math.PI) * Math.atan(Math.sinh(n));
+  return { latitude, longitude };
 }

@@ -113,7 +113,7 @@ async function ensureOrderColumns() {
        FROM INFORMATION_SCHEMA.COLUMNS
        WHERE TABLE_SCHEMA = DATABASE()
          AND TABLE_NAME = 'orders'
-         AND COLUMN_NAME IN ('tracking_number', 'fulfillment_method', 'delivery_address', 'delivery_latitude', 'delivery_longitude', 'delivery_landmark', 'delivery_notes', 'meeting_place', 'meetup_date', 'meetup_time', 'subtotal_amount', 'coupon_discount', 'sale_discount', 'shipping_fee', 'coupon_code', 'payment_status', 'payment_reference', 'transaction_id', 'paid_at', 'payment_provider', 'checkout_session_id', 'checkout_url', 'order_channel', 'cash_received', 'change_amount', 'pos_cashier_id')`
+         AND COLUMN_NAME IN ('tracking_number', 'fulfillment_method', 'delivery_address', 'delivery_latitude', 'delivery_longitude', 'delivery_landmark', 'delivery_notes', 'meeting_place', 'meeting_latitude', 'meeting_longitude', 'meetup_date', 'meetup_time', 'subtotal_amount', 'coupon_discount', 'sale_discount', 'shipping_fee', 'coupon_code', 'payment_status', 'payment_reference', 'transaction_id', 'paid_at', 'payment_provider', 'checkout_session_id', 'checkout_url', 'order_channel', 'cash_received', 'change_amount', 'pos_cashier_id')`
     );
     const columns = new Set(rows.map((row) => row.COLUMN_NAME));
     await safeModifyColumn("orders", "status", "status enum update", "ALTER TABLE orders MODIFY status ENUM('pending','awaiting_payment','paid','approved','processing','ready','completed','cancelled','payment_failed') NOT NULL DEFAULT 'pending'");
@@ -132,6 +132,8 @@ async function ensureOrderColumns() {
     if (!columns.has("delivery_landmark")) await query("ALTER TABLE orders ADD COLUMN delivery_landmark VARCHAR(255) NULL AFTER delivery_longitude");
     if (!columns.has("delivery_notes")) await query("ALTER TABLE orders ADD COLUMN delivery_notes TEXT NULL AFTER delivery_landmark");
     if (!columns.has("meeting_place")) await query("ALTER TABLE orders ADD COLUMN meeting_place VARCHAR(500) NULL AFTER delivery_notes");
+    if (!columns.has("meeting_latitude")) await query("ALTER TABLE orders ADD COLUMN meeting_latitude DECIMAL(10,7) NULL AFTER meeting_place");
+    if (!columns.has("meeting_longitude")) await query("ALTER TABLE orders ADD COLUMN meeting_longitude DECIMAL(10,7) NULL AFTER meeting_latitude");
     if (!columns.has("meetup_date")) await query("ALTER TABLE orders ADD COLUMN meetup_date DATE NULL AFTER meeting_place");
     if (!columns.has("meetup_time")) await query("ALTER TABLE orders ADD COLUMN meetup_time TIME NULL AFTER meetup_date");
     if (!columns.has("subtotal_amount")) await query("ALTER TABLE orders ADD COLUMN subtotal_amount DECIMAL(10,2) NOT NULL DEFAULT 0 AFTER fulfillment_method");
@@ -180,6 +182,8 @@ router.get("/", requireAuth, requireApproved, asyncHandler(async (req, res) => {
     o.delivery_landmark,
     o.delivery_notes,
     o.meeting_place,
+    o.meeting_latitude,
+    o.meeting_longitude,
     o.meetup_date,
     o.meetup_time,
     o.subtotal_amount,
@@ -240,6 +244,8 @@ GROUP BY
     o.delivery_landmark,
     o.delivery_notes,
     o.meeting_place,
+    o.meeting_latitude,
+    o.meeting_longitude,
     o.meetup_date,
     o.meetup_time,
     o.subtotal_amount,
@@ -265,7 +271,7 @@ router.get("/:id/items", requireAuth, requireApproved, asyncHandler(async (req, 
     `SELECT o.id, o.user_id, o.order_channel, o.status, o.payment_method, o.payment_status, o.payment_reference,
        o.transaction_id, o.paid_at, o.cash_received, o.change_amount,
        o.tracking_number, o.fulfillment_method, o.delivery_address, o.delivery_latitude,
-       o.delivery_longitude, o.delivery_landmark, o.delivery_notes, o.meeting_place, o.meetup_date, o.meetup_time, o.subtotal_amount, o.coupon_discount,
+       o.delivery_longitude, o.delivery_landmark, o.delivery_notes, o.meeting_place, o.meeting_latitude, o.meeting_longitude, o.meetup_date, o.meetup_time, o.subtotal_amount, o.coupon_discount,
        o.sale_discount, o.shipping_fee, o.coupon_code, o.total_amount, o.checkout_url, o.created_at,
        u.username, u.location, u.phone_number
      FROM orders o
@@ -682,10 +688,19 @@ router.patch("/:id/meeting-place", requireAuth, requireRole("admin"), asyncHandl
   await ensureOrderColumns();
   const schema = z.object({
     meetingPlace: z.string().trim().max(500).optional().default(""),
+    meetingLatitude: nullableCoordinate(-90, 90),
+    meetingLongitude: nullableCoordinate(-180, 180),
     meetupDate: z.string().trim().regex(/^$|^\d{4}-\d{2}-\d{2}$/).optional().default(""),
     meetupTime: z.string().trim().regex(/^$|^\d{2}:\d{2}$/).optional().default("")
   });
   const input = schema.parse(req.body);
+  if (input.meetupDate && Number.isNaN(new Date(`${input.meetupDate}T00:00:00Z`).getTime())) {
+    throw new HttpError(400, "Meetup date is invalid.");
+  }
+  if (input.meetupTime) {
+    const [hours, minutes] = input.meetupTime.split(":").map(Number);
+    if (hours > 23 || minutes > 59) throw new HttpError(400, "Meetup time is invalid.");
+  }
   const orderId = Number(req.params.id);
   if (!Number.isInteger(orderId) || orderId <= 0) throw new HttpError(400, "A valid order ID is required");
   const orders = await query("SELECT orders.id, orders.user_id, orders.order_channel, orders.fulfillment_method, orders.delivery_address, users.location FROM orders LEFT JOIN users ON users.id = orders.user_id WHERE orders.id = :id", { id: orderId });
@@ -695,9 +710,14 @@ router.patch("/:id/meeting-place", requireAuth, requireRole("admin"), asyncHandl
     throw new HttpError(403, "Meeting place and meetup schedule are only available for customers within the shop municipality.");
   }
   const meetingPlace = input.meetingPlace || null;
+  if ((input.meetingLatitude == null) !== (input.meetingLongitude == null)) {
+    throw new HttpError(400, "Meeting latitude and longitude must be provided together.");
+  }
+  const meetingLatitude = input.meetingLatitude ?? null;
+  const meetingLongitude = input.meetingLongitude ?? null;
   const meetupDate = input.meetupDate || null;
   const meetupTime = input.meetupTime || null;
-  await query("UPDATE orders SET meeting_place = :meetingPlace, meetup_date = :meetupDate, meetup_time = :meetupTime WHERE id = :id", { id: orderId, meetingPlace, meetupDate, meetupTime });
+  await query("UPDATE orders SET meeting_place = :meetingPlace, meeting_latitude = :meetingLatitude, meeting_longitude = :meetingLongitude, meetup_date = :meetupDate, meetup_time = :meetupTime WHERE id = :id", { id: orderId, meetingPlace, meetingLatitude, meetingLongitude, meetupDate, meetupTime });
   if (orders[0].user_id) {
     await query(
       "INSERT INTO notifications (user_id, type, title, body) VALUES (:userId, 'order', 'Meeting place updated', :body)",
@@ -708,15 +728,15 @@ router.patch("/:id/meeting-place", requireAuth, requireRole("admin"), asyncHandl
           : `Meeting place for Order #${orderId} was cleared.`
       }
     );
-    req.app.get("io")?.to(`user:${orders[0].user_id}`).emit("order:update", { id: orderId, meeting_place: meetingPlace, meetup_date: meetupDate, meetup_time: meetupTime });
+    req.app.get("io")?.to(`user:${orders[0].user_id}`).emit("order:update", { id: orderId, meeting_place: meetingPlace, meeting_latitude: meetingLatitude, meeting_longitude: meetingLongitude, meetup_date: meetupDate, meetup_time: meetupTime });
     req.app.get("io")?.to(`user:${orders[0].user_id}`).emit("notification:new", {
       type: "order",
       title: "Meeting place updated",
       body: meetingPlace ? `Meeting place for Order #${orderId}: ${meetingPlace}` : `Meeting place for Order #${orderId} was cleared.`
     });
   }
-  req.app.get("io")?.to("admin").emit("order:update", { id: orderId, meeting_place: meetingPlace, meetup_date: meetupDate, meetup_time: meetupTime });
-  res.json({ message: "Meetup details saved", meeting_place: meetingPlace, meetup_date: meetupDate, meetup_time: meetupTime });
+  req.app.get("io")?.to("admin").emit("order:update", { id: orderId, meeting_place: meetingPlace, meeting_latitude: meetingLatitude, meeting_longitude: meetingLongitude, meetup_date: meetupDate, meetup_time: meetupTime });
+  res.json({ message: "Meetup details saved", meeting_place: meetingPlace, meeting_latitude: meetingLatitude, meeting_longitude: meetingLongitude, meetup_date: meetupDate, meetup_time: meetupTime });
 }));
 
 export default router;
