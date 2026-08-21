@@ -36,6 +36,7 @@ export default function ProductQuickView({
     setActiveIndex(0);
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
+    document.body.classList.add("retela-modal-open");
     function handleKeyDown(event) {
       if (event.key === "Escape") onClose?.();
       if (event.key === "ArrowRight" && hasMultipleImages) setActiveIndex((value) => (value + 1) % images.length);
@@ -44,6 +45,7 @@ export default function ProductQuickView({
     window.addEventListener("keydown", handleKeyDown);
     return () => {
       document.body.style.overflow = previousOverflow;
+      document.body.classList.remove("retela-modal-open");
       window.removeEventListener("keydown", handleKeyDown);
     };
   }, [hasMultipleImages, images.length, isOpen, onClose]);

@@ -6,7 +6,7 @@ import { requireApproved, requireAuth } from "../middleware/auth.js";
 import { loadSystemSettings } from "../utils/systemSettings.js";
 import { shippingSummary } from "../utils/shippingSettings.js";
 import { generateAIResponse } from "../utils/aiProvider.js";
-import { ensureProductInventoryColumns, nonDeletedProductWhere } from "../utils/productInventory.js";
+import { availableProductWhere, ensureProductInventoryColumns } from "../utils/productInventory.js";
 import { productImageExpression } from "../utils/productImages.js";
 import { createAdminNotification } from "../utils/adminNotifications.js";
 import { CHAT_INTENTS, detectChatIntent, findBestProductMatch, resolveReferencedProduct } from "../utils/retelaAssistantContext.js";
@@ -598,7 +598,7 @@ router.get("/:conversationId/suggestions", requireAuth, asyncHandler(async (req,
   const products = await query(
     `SELECT name, brand, category, size, stock, description
      FROM products
-     WHERE ${nonDeletedProductWhere()}
+     WHERE ${availableProductWhere()}
      ORDER BY created_at DESC
      LIMIT 200`
   );
@@ -818,7 +818,7 @@ router.post("/ai", requireAuth, requireApproved, asyncHandler(async (req, res) =
     const products = await query(
       `SELECT id, name, brand, category, gender, size, color, price, stock, \`condition\`, description, ${productImageExpression("products")} AS image_url
        FROM products
-       WHERE ${nonDeletedProductWhere()}
+       WHERE ${availableProductWhere()}
        ORDER BY created_at DESC
        LIMIT 200`
     );

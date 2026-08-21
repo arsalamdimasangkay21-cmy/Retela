@@ -144,8 +144,10 @@ export function FloatingCustomerAssistant({ hidden = false }) {
   }, [messages.length, open]);
 
   useEffect(() => {
-    function openAssistant() {
+    function openAssistant(event) {
       setOpen(true);
+      const context = String(event?.detail?.context || "").trim();
+      if (context) setPrompt(context);
     }
     function closeAssistant() {
       setOpen(false);

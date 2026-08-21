@@ -6270,6 +6270,84 @@ button {
   color: #166534 !important;
 }
 
+.retela-meeting-place-card,
+.retela-delivery-safety-card,
+.admin-meeting-place-card,
+.admin-delivery-safety-card {
+  display: grid;
+  min-width: 0;
+  gap: 12px;
+  border: 1px solid #dfe9e3;
+  border-radius: 18px;
+  background: #f8fbf9;
+  padding: 14px;
+}
+
+.retela-meeting-place-card h4,
+.admin-meeting-place-card h4 {
+  color: #17211b;
+  font-size: 0.98rem;
+  font-weight: 850;
+}
+
+.retela-meeting-place-card p,
+.retela-delivery-safety-card p,
+.admin-delivery-safety-card p {
+  color: #52645a;
+}
+
+.retela-meeting-place-card > p {
+  overflow-wrap: anywhere;
+  color: #17211b;
+  font-size: 0.94rem;
+  font-weight: 800;
+  line-height: 1.55;
+}
+
+.retela-meeting-place-action {
+  display: inline-flex;
+  width: fit-content;
+  min-height: 40px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid #bbf7d0;
+  border-radius: 14px;
+  background: #ecfdf5;
+  padding: 9px 12px;
+  color: #166534;
+  font-size: 0.8rem;
+  font-weight: 850;
+}
+
+.retela-delivery-safety-card {
+  margin-top: 14px;
+}
+
+.retela-delivery-safety-card.is-compact {
+  padding: 12px;
+}
+
+.retela-delivery-safety-icon {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
+  place-items: center;
+  border: 1px solid #bbf7d0;
+  border-radius: 13px;
+  background: #ecfdf5;
+  color: #166534;
+}
+
+.admin-order-details-modal .retela-modal-body {
+  overflow-wrap: anywhere;
+}
+
+.admin-order-details-modal .retela-modal-footer > div {
+  min-width: 0;
+}
+
 @media (max-width: 640px) {
   .retela-route-modal-backdrop {
     align-items: end;
@@ -8344,6 +8422,123 @@ button {
   .retela-modal-detail-grid.two-col {
     grid-template-columns: 1fr;
   }
+
+  body.retela-modal-open .customer-layout-shell .retela-mobile-menu-button,
+  body.retela-modal-open .retela-mobile-menu-button,
+  body.retela-modal-open .ai-chat-shell {
+    display: none !important;
+  }
+
+  .product-quick-view-backdrop,
+  .retela-product-details-backdrop,
+  .retela-modal-backdrop {
+    align-items: center !important;
+    padding: max(12px, env(safe-area-inset-top)) 12px max(12px, env(safe-area-inset-bottom)) !important;
+  }
+
+  .product-quick-view-sheet,
+  .retela-product-details-modal {
+    width: calc(100vw - 24px) !important;
+    max-width: calc(100vw - 24px) !important;
+    max-height: calc(100dvh - 24px - env(safe-area-inset-top) - env(safe-area-inset-bottom)) !important;
+    border-radius: 18px !important;
+  }
+
+  .product-quick-view-header,
+  .product-quick-view-actions,
+  .retela-product-details-modal > div:first-child,
+  .retela-product-action-row {
+    position: sticky;
+    z-index: 12;
+    flex: 0 0 auto;
+  }
+
+  .product-quick-view-header,
+  .retela-product-details-modal > div:first-child {
+    top: 0;
+  }
+
+  .product-quick-view-actions,
+  .retela-product-action-row {
+    bottom: 0;
+    padding-bottom: calc(12px + env(safe-area-inset-bottom)) !important;
+  }
+
+  .product-quick-view-image-stage {
+    min-height: 0;
+    padding: 10px;
+  }
+
+  .product-quick-view-image,
+  .retela-product-details-image {
+    max-height: 44dvh !important;
+  }
+
+  .product-quick-view-image-placeholder,
+  .retela-product-image-frame,
+  .retela-product-image-frame > div {
+    min-height: 190px !important;
+  }
+
+  .retela-product-details-grid {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 14px !important;
+    gap: 12px !important;
+  }
+
+  .retela-product-details-modal h3,
+  .retela-product-details-modal h4 {
+    font-size: 1.18rem !important;
+    line-height: 1.18 !important;
+  }
+
+  .retela-product-action-row {
+    border-top: 1px solid #e5eee8;
+    background: rgba(255, 255, 255, 0.96);
+  }
+
+  .admin-order-details-modal {
+    width: calc(100vw - 24px) !important;
+    max-width: calc(100vw - 24px) !important;
+    max-height: calc(100dvh - 24px - env(safe-area-inset-top) - env(safe-area-inset-bottom)) !important;
+    border-radius: 18px !important;
+  }
+
+  .admin-order-details-modal .retela-modal-header {
+    position: sticky;
+    top: 0;
+    z-index: 12;
+    padding: 14px 16px;
+  }
+
+  .admin-order-details-modal .retela-modal-body {
+    padding: 14px 16px;
+    gap: 12px;
+  }
+
+  .admin-order-details-modal .retela-modal-footer {
+    position: sticky;
+    bottom: 0;
+    z-index: 12;
+    padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+  }
+
+  .admin-order-details-modal .retela-modal-footer > div {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .admin-order-details-modal .retela-modal-footer button {
+    min-height: 42px;
+    width: 100%;
+    margin-left: 0 !important;
+    padding-left: 10px;
+    padding-right: 10px;
+    white-space: normal;
+  }
 }
 
 /* Customer-only theme alignment with the admin sidebar visual language. */
@@ -9146,8 +9341,16 @@ button {
 
 .retela-dark .retela-delivery-location-card,
 .retela-dark .order-delivery-info-card,
+.retela-dark .retela-meeting-place-card,
+.retela-dark .retela-delivery-safety-card,
+.retela-dark .admin-meeting-place-card,
+.retela-dark .admin-delivery-safety-card,
 .premium-shell.retela-dark-shell .retela-delivery-location-card,
-.premium-shell.retela-dark-shell .order-delivery-info-card {
+.premium-shell.retela-dark-shell .order-delivery-info-card,
+.premium-shell.retela-dark-shell .retela-meeting-place-card,
+.premium-shell.retela-dark-shell .retela-delivery-safety-card,
+.premium-shell.retela-dark-shell .admin-meeting-place-card,
+.premium-shell.retela-dark-shell .admin-delivery-safety-card {
   border-color: var(--retela-border-dark) !important;
   background: rgba(15, 26, 21, 0.72) !important;
   color: var(--retela-text-dark) !important;
@@ -9171,14 +9374,23 @@ button {
 .retela-dark .retela-delivery-location-card strong,
 .retela-dark .order-delivery-info-heading h4,
 .retela-dark .order-delivery-info-row strong,
+.retela-dark .retela-meeting-place-card h4,
+.retela-dark .retela-meeting-place-card > p,
+.retela-dark .admin-meeting-place-card h4,
 .premium-shell.retela-dark-shell .retela-delivery-location-card strong,
 .premium-shell.retela-dark-shell .order-delivery-info-heading h4,
-.premium-shell.retela-dark-shell .order-delivery-info-row strong {
+.premium-shell.retela-dark-shell .order-delivery-info-row strong,
+.premium-shell.retela-dark-shell .retela-meeting-place-card h4,
+.premium-shell.retela-dark-shell .retela-meeting-place-card > p,
+.premium-shell.retela-dark-shell .admin-meeting-place-card h4 {
   color: var(--retela-text-dark) !important;
 }
 
 .retela-dark .retela-delivery-location-card span,
 .retela-dark .order-delivery-info-row span,
+.retela-dark .retela-meeting-place-card p,
+.retela-dark .retela-delivery-safety-card p,
+.retela-dark .admin-delivery-safety-card p,
 .premium-shell.retela-dark-shell .retela-delivery-location-card span,
 .premium-shell.retela-dark-shell .order-delivery-info-row span {
   color: var(--retela-text-muted-dark) !important;
@@ -9186,15 +9398,21 @@ button {
 
 .retela-dark .retela-delivery-location-eyebrow,
 .retela-dark .order-delivery-info-heading p,
+.retela-dark .retela-delivery-safety-card .retela-modal-eyebrow,
+.retela-dark .retela-meeting-place-card .retela-modal-eyebrow,
 .premium-shell.retela-dark-shell .retela-delivery-location-eyebrow,
-.premium-shell.retela-dark-shell .order-delivery-info-heading p {
+.premium-shell.retela-dark-shell .order-delivery-info-heading p,
+.premium-shell.retela-dark-shell .retela-delivery-safety-card .retela-modal-eyebrow,
+.premium-shell.retela-dark-shell .retela-meeting-place-card .retela-modal-eyebrow {
   color: #94e7b5 !important;
 }
 
 .retela-dark .retela-delivery-location-action,
 .retela-dark .order-delivery-map-button,
+.retela-dark .retela-meeting-place-action,
 .premium-shell.retela-dark-shell .retela-delivery-location-action,
-.premium-shell.retela-dark-shell .order-delivery-map-button {
+.premium-shell.retela-dark-shell .order-delivery-map-button,
+.premium-shell.retela-dark-shell .retela-meeting-place-action {
   border-color: rgba(52, 211, 153, 0.32) !important;
   background: rgba(22, 163, 106, 0.14) !important;
   color: #b8ffd0 !important;

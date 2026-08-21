@@ -3,7 +3,7 @@ import { query } from "../config/db.js";
 import { generateAIResponse } from "../utils/aiProvider.js";
 import { loadSystemSettings } from "../utils/systemSettings.js";
 import { shippingSummary } from "../utils/shippingSettings.js";
-import { ensureProductInventoryColumns, nonDeletedProductWhere } from "../utils/productInventory.js";
+import { availableProductWhere, ensureProductInventoryColumns } from "../utils/productInventory.js";
 import { productImageExpression } from "../utils/productImages.js";
 import { asyncHandler, HttpError } from "../utils/errors.js";
 
@@ -23,7 +23,7 @@ router.post("/", asyncHandler(async (req, res) => {
     query(
       `SELECT name, brand, category, gender, size, price, stock, \`condition\`, description, ${productImageExpression("products")} AS image_url
        FROM products
-       WHERE ${nonDeletedProductWhere()}
+       WHERE ${availableProductWhere()}
        ORDER BY created_at DESC
        LIMIT 200`
     )

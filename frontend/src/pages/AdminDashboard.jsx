@@ -42,6 +42,8 @@ const chartGlowPlugin = {
   }
 };
 
+const defaultDeliverySafetyPolicy = "For everyone's safety, customers and delivery personnel should meet only at the confirmed delivery or meeting location shown in the order. Verify the order and customer/delivery identity before handing over or accepting an item. Avoid changing the meetup location through unofficial messages. Keep communication inside RETELA whenever possible. Do not share OTPs, passwords, or sensitive account information. If the location feels unsafe, contact the other party through RETELA and arrange a safer public meeting point before completing the order.";
+
 ChartJS.register(ArcElement, BarElement, CategoryScale, Filler, LinearScale, LineElement, PointElement, Tooltip, Legend, chartGlowPlugin);
 
 const assetUrl = (url) => {
@@ -802,7 +804,7 @@ export default function AdminDashboard({ active, onChange }) {
   }
 
   if (active === "Orders") {
-    return <OrderManagement rows={orders} updateOrder={updateOrder} />;
+    return <OrderManagement rows={orders} updateOrder={updateOrder} onNavigate={onChange} />;
   }
 
   if (active === "POS") {
@@ -3046,7 +3048,7 @@ function paymentLabel(method) {
   return "COD";
 }
 
-function OrderManagement({ rows, updateOrder }) {
+function OrderManagement({ rows, updateOrder, onNavigate }) {
   const [selectedOrderId, setSelectedOrderId] = useState(null);
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [loadingOrderId, setLoadingOrderId] = useState(null);
@@ -3132,9 +3134,11 @@ function OrderManagement({ rows, updateOrder }) {
       if (event.key === "Escape") setSelectedOrderId(null);
     };
     document.body.style.overflow = "hidden";
+    document.body.classList.add("retela-modal-open");
     window.addEventListener("keydown", onKeyDown);
     return () => {
       document.body.style.overflow = "";
+      document.body.classList.remove("retela-modal-open");
       window.removeEventListener("keydown", onKeyDown);
     };
   }, [selectedOrderId]);
@@ -3209,6 +3213,18 @@ function OrderManagement({ rows, updateOrder }) {
             saveTracking={saveTracking}
             updateOrder={updateOrder}
             onStatusChanged={() => setReloadToken((value) => value + 1)}
+            onMeetingPlaceSaved={(meetingPlace) => {
+              setSelectedOrder((current) => current?.order ? { ...current, order: { ...current.order, meeting_place: meetingPlace } } : current);
+              setReloadToken((value) => value + 1);
+            }}
+            onMessageCustomer={(order) => {
+              localStorage.setItem("retela_admin_chat_context", JSON.stringify({
+                customerId: Number(order.user_id),
+                orderId: Number(order.id),
+                context: `Conversation regarding Order #${order.id}`
+              }));
+              onNavigate?.("Messages");
+            }}
             onClose={() => setSelectedOrderId(null)}
           />
         ) : null}
@@ -3375,8 +3391,27 @@ function isOrderInDateRange(dateValue, range) {
   return true;
 }
 
-function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTrackingNumber, saveTracking, updateOrder, onStatusChanged, onClose }) {
+function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTrackingNumber, saveTracking, updateOrder, onStatusChanged, onMeetingPlaceSaved, onMessageCustomer, onClose }) {
   const source = selectedOrder?.order;
+  const [meetingPlaceDraft, setMeetingPlaceDraft] = useState("");
+  const [meetingPlaceSaving, setMeetingPlaceSaving] = useState(false);
+  const [meetingPlaceError, setMeetingPlaceError] = useState("");
+  const [deliverySafetyPolicy, setDeliverySafetyPolicy] = useState(defaultDeliverySafetyPolicy);
+
+  useEffect(() => {
+    setMeetingPlaceDraft(source?.meeting_place || "");
+    setMeetingPlaceError("");
+  }, [source?.id, source?.meeting_place]);
+
+  useEffect(() => {
+    let active = true;
+    cachedGet("/settings/public", {}, { cacheMs: 10000, retries: 1 })
+      .then(({ data }) => {
+        if (active) setDeliverySafetyPolicy(String(data?.about?.deliverySafetyPolicy || defaultDeliverySafetyPolicy).trim() || defaultDeliverySafetyPolicy);
+      })
+      .catch(() => {});
+    return () => { active = false; };
+  }, []);
 
   async function updateStatus(status) {
     if (!source?.id) return;
@@ -3384,9 +3419,23 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
     onStatusChanged();
   }
 
+  async function saveMeetingPlace() {
+    if (!source?.id || meetingPlaceSaving) return;
+    setMeetingPlaceSaving(true);
+    setMeetingPlaceError("");
+    try {
+      const { data } = await api.patch(`/orders/${source.id}/meeting-place`, { meetingPlace: meetingPlaceDraft });
+      onMeetingPlaceSaved?.(data.meeting_place || null);
+    } catch (error) {
+      setMeetingPlaceError(getApiErrorMessage(error, "Could not save meeting place."));
+    } finally {
+      setMeetingPlaceSaving(false);
+    }
+  }
+
   return (
     <motion.div className="retela-modal-backdrop z-[120] p-3 sm:p-5" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onMouseDown={onClose}>
-      <motion.div className="retela-modal-card max-h-[88vh] w-[min(92vw,900px)] max-w-none bg-white text-[#111827]" initial={{ opacity: 0, scale: 0.94, y: 18 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.94, y: 18 }} transition={{ duration: 0.22, ease: "easeOut" }} onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="admin-order-details-title">
+      <motion.div className="retela-modal-card admin-order-details-modal max-h-[88vh] w-[min(92vw,900px)] max-w-none bg-white text-[#111827]" initial={{ opacity: 0, scale: 0.94, y: 18 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.94, y: 18 }} transition={{ duration: 0.22, ease: "easeOut" }} onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="admin-order-details-title">
           {loading ? (
             <div className="retela-modal-body grid gap-4">
               <div className="skeleton h-8 w-1/2 rounded-2xl" />
@@ -3417,6 +3466,32 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
                 </div>
               </div>
               {source.fulfillment_method === "delivery" ? <OrderDeliveryInfo order={source} title="Delivery Location" mapLabel="View Delivery Route" routeEnabled /> : null}
+              <section className="admin-meeting-place-card">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-[0.16em] text-emerald-700">Meeting Place</p>
+                  <h4 className="mt-1 font-display text-lg font-bold text-[#111827]">Admin-selected meetup location</h4>
+                </div>
+                <textarea
+                  value={meetingPlaceDraft}
+                  onChange={(event) => setMeetingPlaceDraft(event.target.value)}
+                  maxLength={500}
+                  rows={3}
+                  placeholder="Enter meeting place"
+                  className="min-h-24 w-full resize-y rounded-2xl border border-[#dfe9e3] bg-white px-3 py-3 text-sm font-semibold text-[#111827] outline-none placeholder:text-slate-400 focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100"
+                />
+                <div className="flex flex-wrap items-center gap-2">
+                  <button type="button" disabled={meetingPlaceSaving} onClick={saveMeetingPlace} className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60">
+                    {meetingPlaceSaving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
+                    Save Meeting Place
+                  </button>
+                  {source.meeting_place ? <span className="break-words text-xs font-semibold text-slate-500">Saved: {source.meeting_place}</span> : <span className="text-xs font-semibold text-slate-500">Meeting place will be provided by the shop.</span>}
+                </div>
+                {meetingPlaceError ? <p className="text-xs font-bold text-rose-600">{meetingPlaceError}</p> : null}
+              </section>
+              <section className="admin-delivery-safety-card">
+                <p className="text-xs font-bold uppercase tracking-[0.16em] text-emerald-700">Delivery & Meetup Safety</p>
+                <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-slate-600">{deliverySafetyPolicy}</p>
+              </section>
               <div className="grid gap-3">
                 {selectedOrder.items.map((item) => (
                   <div key={`${item.product_id}-${item.quantity}`} className="flex items-center gap-3 rounded-2xl border border-[#dfe9e3] bg-white p-3 shadow-sm transition hover:border-emerald-200">
@@ -3434,10 +3509,11 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
               </div>
               <div className="retela-modal-footer">
                 <div className="flex w-full flex-wrap items-center gap-2">
+                {source.user_id ? <button type="button" onClick={() => onMessageCustomer?.(source)} className="inline-flex items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-xs font-bold text-emerald-800 transition hover:bg-emerald-100"><MessageSquare size={15} /> Message Customer</button> : null}
                 <button disabled={!["pending", "paid"].includes(source.status)} onClick={() => updateStatus(source.status === "paid" ? "processing" : "approved")} className={`rounded-xl px-4 py-2 text-xs font-bold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-55 ${["pending", "paid"].includes(source.status) ? orderButtonClass("approved") : "bg-slate-100 text-slate-500"}`}>Accept</button>
                 <button disabled={!["pending", "approved", "processing", "ready"].includes(source.status)} onClick={() => updateStatus("cancelled")} className={`rounded-xl px-4 py-2 text-xs font-bold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-55 ${["pending", "approved", "processing", "ready"].includes(source.status) ? orderButtonClass("cancelled") : "bg-slate-100 text-slate-500"}`}>Reject</button>
-                <button disabled={!["pending", "approved", "processing"].includes(source.status)} onClick={() => updateStatus("ready")} className={`rounded-xl px-4 py-2 text-xs font-bold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-55 ${["pending", "approved", "processing"].includes(source.status) ? orderButtonClass("ready") : "bg-slate-100 text-slate-500"}`}>Out for Delivery</button>
-                <button disabled={source.status === "completed"} onClick={() => updateStatus("completed")} className={`rounded-xl px-4 py-2 text-xs font-bold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-55 ${source.status !== "completed" ? orderButtonClass("completed") : "bg-slate-100 text-slate-500"}`}>Completed</button>
+                <button disabled={!["approved", "processing"].includes(source.status)} onClick={() => updateStatus("ready")} className={`rounded-xl px-4 py-2 text-xs font-bold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-55 ${["approved", "processing"].includes(source.status) ? orderButtonClass("ready") : "bg-slate-100 text-slate-500"}`}>Out for Delivery</button>
+                <button disabled={source.status !== "ready"} onClick={() => updateStatus("completed")} className={`rounded-xl px-4 py-2 text-xs font-bold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-55 ${source.status === "ready" ? orderButtonClass("completed") : "bg-slate-100 text-slate-500"}`}>Completed</button>
                 <button type="button" onClick={onClose} className="ml-auto rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-700 transition hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700">Close</button>
                 </div>
               </div>

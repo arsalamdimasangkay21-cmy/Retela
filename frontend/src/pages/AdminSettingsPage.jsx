@@ -134,6 +134,7 @@ const defaultSettings = {
     returnConditions: "Return allowed within 7 days. Apparel must not be heavily damaged.",
     refundProcess: "Refund approval depends on admin verification and proof review.",
     supportChannels: "Live chat, AI assistant support, and admin support",
+    deliverySafetyPolicy: "For everyone's safety, customers and delivery personnel should meet only at the confirmed delivery or meeting location shown in the order. Verify the order and customer/delivery identity before handing over or accepting an item. Avoid changing the meetup location through unofficial messages. Keep communication inside RETELA whenever possible. Do not share OTPs, passwords, or sensitive account information. If the location feels unsafe, contact the other party through RETELA and arrange a safer public meeting point before completing the order.",
     ownerProfile: "Tela to Pera Thrift Shop Admin",
     developers: "RETELA Development Team",
     thesisMembers: "RETELA Thesis Members"
@@ -694,6 +695,7 @@ export default function AdminSettingsPage({ onChange }) {
             <TextInput label="Estimated Delivery Time" value={settings.about.estimatedDeliveryTime} onChange={(value) => updateSetting("about", "estimatedDeliveryTime", value)} />
             <TextInput label="Support Channels" value={settings.about.supportChannels} onChange={(value) => updateSetting("about", "supportChannels", value)} />
             <TextArea label="Return Conditions" value={settings.about.returnConditions} onChange={(value) => updateSetting("about", "returnConditions", value)} />
+            <TextArea label="Delivery & Meetup Safety" value={settings.about.deliverySafetyPolicy} onChange={(value) => updateSetting("about", "deliverySafetyPolicy", value)} />
             <TextArea label="Refund Process" value={settings.about.refundProcess} onChange={(value) => updateSetting("about", "refundProcess", value)} />
             <TextInput label="Owner/Admin Profile" value={settings.about.ownerProfile} onChange={(value) => updateSetting("about", "ownerProfile", value)} />
             <TextInput label="Developers" value={settings.about.developers} onChange={(value) => updateSetting("about", "developers", value)} />

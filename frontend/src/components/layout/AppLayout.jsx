@@ -122,6 +122,9 @@ export default function AppLayout({ children, active, onChange }) {
     const handleNewOrder = (payload) => {
       window.dispatchEvent(new CustomEvent("retela:data-change", { detail: { type: "order", payload } }));
     };
+    const handleOrderUpdate = (payload) => {
+      window.dispatchEvent(new CustomEvent("retela:data-change", { detail: { type: "order_update", payload } }));
+    };
     const handleNewProduct = (payload) => {
       window.dispatchEvent(new CustomEvent("retela:data-change", { detail: { type: "product", payload } }));
     };
@@ -141,6 +144,7 @@ export default function AppLayout({ children, active, onChange }) {
     socket.on("new-registration", handleNewRegistration);
     socket.on("notification:new", handleNewNotification);
     socket.on("order:new", handleNewOrder);
+    socket.on("order:update", handleOrderUpdate);
     socket.on("product:new", handleNewProduct);
     socket.on("product:update", handleProductUpdate);
     socket.on("inventory:update", handleInventoryUpdate);
@@ -150,6 +154,7 @@ export default function AppLayout({ children, active, onChange }) {
       socket.off("new-registration", handleNewRegistration);
       socket.off("notification:new", handleNewNotification);
       socket.off("order:new", handleNewOrder);
+      socket.off("order:update", handleOrderUpdate);
       socket.off("product:new", handleNewProduct);
       socket.off("product:update", handleProductUpdate);
       socket.off("inventory:update", handleInventoryUpdate);

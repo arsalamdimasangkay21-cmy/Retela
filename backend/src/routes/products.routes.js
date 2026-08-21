@@ -284,13 +284,13 @@ router.get("/", requireAuth, requireApproved, asyncHandler(async (req, res) => {
   const params = {};
 
   const isAdmin = req.user.role === "admin";
-  clauses.push(isAdmin ? nonDeletedProductWhere() : `${nonDeletedProductWhere()} AND is_active = TRUE`);
+  clauses.push(isAdmin ? nonDeletedProductWhere() : availableProductWhere());
 
   if (isAdmin && filters.stock === "available") clauses.push("stock > 0");
-  if (!isAdmin && filters.stock === "available") clauses.push("stock > 0");
   if (filters.stock === "in_stock") clauses.push(isAdmin ? "stock > 5" : "stock > 0");
-  if (filters.stock === "low_stock") clauses.push("stock BETWEEN 1 AND 5");
-  if (filters.stock === "out_of_stock") clauses.push("stock <= 0");
+  if (filters.stock === "low_stock") clauses.push(isAdmin ? "stock BETWEEN 1 AND 5" : "stock BETWEEN 1 AND 5");
+  if (isAdmin && filters.stock === "out_of_stock") clauses.push("stock <= 0");
+  if (!isAdmin && filters.stock === "out_of_stock") clauses.push("1 = 0");
 
   if (filters.search) {
     clauses.push("(LOWER(name) LIKE :search OR LOWER(sku) LIKE :search OR LOWER(brand) LIKE :search OR LOWER(category) LIKE :search OR LOWER(size) LIKE :search OR LOWER(color) LIKE :search OR LOWER(description) LIKE :search)");

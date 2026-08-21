@@ -194,8 +194,9 @@ export default function AdminConversationsPage() {
       api.get("/messages/customers/approved")
     ]);
     const nextConversations = conversationRes.data;
+    const nextCustomers = customerRes.data;
     setConversations(nextConversations);
-    setApprovedCustomers(customerRes.data);
+    setApprovedCustomers(nextCustomers);
     setConversationSnapshots((current) => ({
       ...current,
       ...Object.fromEntries(nextConversations.map((conversation) => [conversation.id, {
@@ -209,6 +210,24 @@ export default function AdminConversationsPage() {
         return [chatKey(conversation), Number(conversation.unread_count || 0)];
       }))
     }));
+    const rawContext = localStorage.getItem("retela_admin_chat_context");
+    if (rawContext) {
+      try {
+        const context = JSON.parse(rawContext);
+        const customerId = Number(context.customerId);
+        const targetConversation = nextConversations.find((conversation) => Number(conversation.customer_id) === customerId);
+        const targetCustomer = nextCustomers.find((customer) => Number(customer.customer_id) === customerId);
+        const target = targetConversation || targetCustomer;
+        if (target) {
+          setSelectedChat(chatKey(target));
+          setText((current) => current || String(context.context || "").trim());
+          if (window.innerWidth < 1024) setMobileListOpen(false);
+          localStorage.removeItem("retela_admin_chat_context");
+        }
+      } catch {
+        localStorage.removeItem("retela_admin_chat_context");
+      }
+    }
   }
 
   async function loadMessages(conversation) {

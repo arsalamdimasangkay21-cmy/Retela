@@ -36,6 +36,7 @@ const onlinePaymentMethods = ["gcash", "debit", "credit", "maya"];
 const defaultReturnShippingFee = 50;
 const defaultCustomerFilters = { search: "", brand: "all", category: "all", size: "all", stock: "all", minPrice: "", maxPrice: "", sortBy: "latest" };
 const defaultDeliveryCenter = { latitude: 7.1907, longitude: 124.5308 };
+const defaultDeliverySafetyPolicy = "For everyone's safety, customers and delivery personnel should meet only at the confirmed delivery or meeting location shown in the order. Verify the order and customer/delivery identity before handing over or accepting an item. Avoid changing the meetup location through unofficial messages. Keep communication inside RETELA whenever possible. Do not share OTPs, passwords, or sensitive account information. If the location feels unsafe, contact the other party through RETELA and arrange a safer public meeting point before completing the order.";
 const paymentNumberLabels = {
   gcash: "GCash mobile number",
   debit: "Billing mobile number",
@@ -134,6 +135,14 @@ function deliveryLocationStorageKey(userId) {
   return `retela_delivery_location_${userId || "guest"}`;
 }
 
+function deliverySafetyPolicyFromShop(shop) {
+  return String(shop?.about?.deliverySafetyPolicy || defaultDeliverySafetyPolicy).trim() || defaultDeliverySafetyPolicy;
+}
+
+function setModalBodyLock(active) {
+  document.body.classList.toggle("retela-modal-open", Boolean(active));
+}
+
 function stockStatus(stock) {
   const quantity = Number(stock || 0);
   if (quantity <= 0) return "Out of stock";
@@ -213,7 +222,7 @@ export default function CustomerDashboard({ active, onChange }) {
     cartRef.current = cart;
   }, [cart]);
 
-  const visibleProducts = useMemo(() => products, [products]);
+  const visibleProducts = useMemo(() => products.filter((item) => Number(item.stock || 0) > 0), [products]);
   const filteredProducts = useMemo(() => {
     if (!shopProductIdsFilter.length) return visibleProducts;
     const productIds = new Set(shopProductIdsFilter.map(Number));
@@ -269,7 +278,7 @@ export default function CustomerDashboard({ active, onChange }) {
       cachedGet("/settings/promotions", {}, { cacheMs: 10000, retries: 1, force })
     ]);
     if (cancelled?.()) return;
-    setProducts(productRes.data);
+    setProducts((Array.isArray(productRes.data) ? productRes.data : []).filter((item) => Number(item.stock || 0) > 0));
     setFilterOptions(filterRes.data);
     setOrders(orderRes.data);
     setNotifications(customerNotificationRows(notificationRes.data));
@@ -524,7 +533,7 @@ export default function CustomerDashboard({ active, onChange }) {
       if (!current || stock <= 0) {
         if (shouldValidate) {
           ok = false;
-          message ||= "This apparel item is no longer available.";
+          message ||= `${item.name || "This apparel item"} is no longer available.`;
           continue;
         }
         nextCart.push(item);
@@ -775,6 +784,7 @@ export default function CustomerDashboard({ active, onChange }) {
           applyCoupon={applyCoupon}
           promotions={promotions}
           deliveryLocation={deliveryLocation}
+          deliverySafetyPolicy={deliverySafetyPolicyFromShop(shopInfo)}
           onOpenLocationSelector={() => setLocationSelectorOpen(true)}
           paymentMethod={paymentMethod}
           selectPaymentMethod={selectPaymentMethod}
@@ -798,6 +808,7 @@ export default function CustomerDashboard({ active, onChange }) {
             paymentError={paymentError}
             updatePaymentNumber={updatePaymentNumber}
             deliveryLocation={deliveryLocation}
+            deliverySafetyPolicy={deliverySafetyPolicyFromShop(shopInfo)}
             checkout={checkout}
             checkoutLoading={checkoutLoading}
             onClose={() => setCheckoutSummaryOpen(false)}
@@ -899,6 +910,7 @@ export default function CustomerDashboard({ active, onChange }) {
       profile={profile}
       reviews={reviews}
       returnRequests={returnRequests}
+      deliverySafetyPolicy={deliverySafetyPolicyFromShop(shopInfo)}
       onNavigate={onChange}
       onOrderCancelled={(updatedOrder) => {
         setOrders((current) => current.map((order) => Number(order.id) === Number(updatedOrder.id) ? { ...order, ...updatedOrder } : order));
@@ -954,6 +966,7 @@ function CartPage({
   applyCoupon,
   promotions,
   deliveryLocation,
+  deliverySafetyPolicy,
   onOpenLocationSelector,
   paymentMethod,
   selectPaymentMethod,
@@ -1098,12 +1111,27 @@ function CartPage({
             <strong className="font-display text-2xl text-emerald-700">{money(pricing.total)}</strong>
           </div>
         </div>
+        <DeliverySafetyPolicyCard policy={deliverySafetyPolicy} compact />
         {!selectedCount ? <p className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm font-bold text-amber-700">Please select at least one item.</p> : null}
         <Button className="retela-checkout-button mt-4 w-full" disabled={!selectedCount || checkoutLoading} onClick={openCheckoutSummary}>
           <ShoppingCart size={17} /> {checkoutLoading && paymentMethod !== "cod" ? `Redirecting to ${paymentLabel(paymentMethod)}...` : checkoutLoading ? "Processing..." : paymentMethod === "cod" ? "Checkout" : `Checkout with ${paymentLabel(paymentMethod)}`}
         </Button>
       </Card>
     </div>
+  );
+}
+
+function DeliverySafetyPolicyCard({ policy, compact = false }) {
+  return (
+    <section className={`retela-delivery-safety-card ${compact ? "is-compact" : ""}`}>
+      <div className="flex items-start gap-3">
+        <span className="retela-delivery-safety-icon"><ShieldCheck size={17} /></span>
+        <div className="min-w-0">
+          <p className="retela-modal-eyebrow">Delivery & Meetup Safety</p>
+          <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6">{policy || defaultDeliverySafetyPolicy}</p>
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -1129,12 +1157,14 @@ function FeaturedApparelHero({ items, loading, onAddToCart, onBuyNow }) {
     if (!selectedApparel) return undefined;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
+    setModalBodyLock(true);
     function handleKeyDown(event) {
       if (event.key === "Escape") closeDetails();
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => {
       document.body.style.overflow = previousOverflow;
+      setModalBodyLock(false);
       window.removeEventListener("keydown", handleKeyDown);
     };
   }, [selectedApparel]);
@@ -1375,6 +1405,7 @@ function Shop({ products, addToCart, buyNow, filters, setFilters, filterOptions,
     if (!isDetailsModalOpen && !isPhotoModalOpen) return undefined;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
+    setModalBodyLock(true);
     function handleKeyDown(event) {
       if (event.key !== "Escape") return;
       if (isPhotoModalOpen) closePhoto();
@@ -1383,6 +1414,7 @@ function Shop({ products, addToCart, buyNow, filters, setFilters, filterOptions,
     window.addEventListener("keydown", handleKeyDown);
     return () => {
       document.body.style.overflow = previousOverflow;
+      setModalBodyLock(false);
       window.removeEventListener("keydown", handleKeyDown);
     };
   }, [isDetailsModalOpen, isPhotoModalOpen]);
@@ -1526,6 +1558,7 @@ function CustomerFilters({ filters, setFilters, filterOptions }) {
 
 function ApparelDetailsModal({ item, onClose, onViewPhoto, onAdd, onBuyNow }) {
   const status = stockStatus(item.stock);
+  const outOfStock = Number(item.stock || 0) <= 0;
   return createPortal(
     <div className="retela-product-details-backdrop fixed inset-0 z-[200] grid place-items-center bg-black/65 p-4 backdrop-blur-sm" onMouseDown={onClose} role="presentation">
       <section
@@ -1545,7 +1578,7 @@ function ApparelDetailsModal({ item, onClose, onViewPhoto, onAdd, onBuyNow }) {
           </button>
         </div>
 
-        <div className="grid gap-5 p-5">
+        <div className="retela-product-details-grid grid gap-5 p-5">
           <div className="grid gap-2 text-sm text-slate-600 sm:grid-cols-2">
             <DetailRow label="Apparel Name" value={item.name} />
             <DetailRow label="Brand" value={item.brand || "Other"} />
@@ -1571,8 +1604,8 @@ function ApparelDetailsModal({ item, onClose, onViewPhoto, onAdd, onBuyNow }) {
               </button>
             </div>
             <div className="grid gap-2 sm:grid-cols-2">
-              <Button onClick={() => onAdd(item)}><ShoppingCart size={17} /> Add to Cart</Button>
-              <Button onClick={() => onBuyNow(item)}>Buy Now</Button>
+              <Button disabled={outOfStock} onClick={() => onAdd(item)}><ShoppingCart size={17} /> {outOfStock ? "Unavailable" : "Add to Cart"}</Button>
+              <Button disabled={outOfStock} onClick={() => onBuyNow(item)}>{outOfStock ? "Unavailable" : "Buy Now"}</Button>
             </div>
           </div>
         </div>
@@ -1927,7 +1960,7 @@ function PaymentDetailsPanel({ method, value, error, onChange }) {
   );
 }
 
-function CheckoutSummaryModal({ items, pricing, paymentMethod, paymentDetails, paymentError, updatePaymentNumber, deliveryLocation, checkout, checkoutLoading, onClose }) {
+function CheckoutSummaryModal({ items, pricing, paymentMethod, paymentDetails, paymentError, updatePaymentNumber, deliveryLocation, deliverySafetyPolicy, checkout, checkoutLoading, onClose }) {
   const normalizedDeliveryLocation = normalizeDeliveryLocation(deliveryLocation);
   return createPortal(
     <motion.div
@@ -1979,6 +2012,7 @@ function CheckoutSummaryModal({ items, pricing, paymentMethod, paymentDetails, p
           {normalizedDeliveryLocation.notes ? <p className="mt-1 break-words text-xs font-semibold text-white/58">Notes: {normalizedDeliveryLocation.notes}</p> : null}
           {hasDeliveryCoordinates(normalizedDeliveryLocation) ? <p className="mt-2 text-xs font-bold text-neonbrand">Exact map pin saved for this order.</p> : null}
         </div>
+        <DeliverySafetyPolicyCard policy={deliverySafetyPolicy} compact />
 
         <div className="mt-5 rounded-2xl border border-neonbrand/15 bg-neonbrand/5 p-4">
           <p className="text-xs font-bold uppercase tracking-[0.16em] text-neonbrand/75">Selected Payment Method</p>
@@ -2324,7 +2358,7 @@ function formatNotificationDate(value) {
   return date.toLocaleString(undefined, { month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
-function Orders({ rows, profile, reviews = [], returnRequests = [], onNavigate, onOrderCancelled }) {
+function Orders({ rows, profile, reviews = [], returnRequests = [], deliverySafetyPolicy, onNavigate, onOrderCancelled }) {
   const flow = ["pending", "awaiting_payment", "paid", "processing", "completed"];
   const [selectedOrderId, setSelectedOrderId] = useState(null);
   const [selectedOrder, setSelectedOrder] = useState(null);
@@ -2392,10 +2426,12 @@ function Orders({ rows, profile, reviews = [], returnRequests = [], onNavigate, 
       if (event.key === "Escape") setSelectedOrderId(null);
     };
     document.body.style.overflow = "hidden";
+    setModalBodyLock(true);
     window.addEventListener("keydown", onKeyDown);
     return () => {
       alive = false;
       document.body.style.overflow = "";
+      setModalBodyLock(false);
       window.removeEventListener("keydown", onKeyDown);
     };
   }, [selectedOrderId]);
@@ -2498,7 +2534,7 @@ function Orders({ rows, profile, reviews = [], returnRequests = [], onNavigate, 
         </div>
       );})}
       <AnimatePresence>
-        {selectedOrderId ? <CustomerOrderModal loading={loading} selectedOrder={selectedOrder} displayNumber={rows.length - rows.findIndex((item) => item.id === selectedOrderId)} onPay={payOrder} payingOrderId={payingOrderId} onClose={() => setSelectedOrderId(null)} /> : null}
+        {selectedOrderId ? <CustomerOrderModal loading={loading} selectedOrder={selectedOrder} displayNumber={rows.length - rows.findIndex((item) => item.id === selectedOrderId)} deliverySafetyPolicy={deliverySafetyPolicy} onPay={payOrder} payingOrderId={payingOrderId} onClose={() => setSelectedOrderId(null)} /> : null}
         {cancelDialogOrder ? (
           <CancelOrderDialog
             order={cancelDialogOrder}
@@ -2513,9 +2549,21 @@ function Orders({ rows, profile, reviews = [], returnRequests = [], onNavigate, 
   );
 }
 
-function CustomerOrderModal({ loading, selectedOrder, displayNumber, onPay, payingOrderId, onClose }) {
+function CustomerOrderModal({ loading, selectedOrder, displayNumber, deliverySafetyPolicy, onPay, payingOrderId, onClose }) {
   const order = selectedOrder?.order;
   const cancelled = isOrderCancelled(order);
+  const meetingPlace = String(order?.meeting_place || "").trim();
+  const meetingMapUrl = meetingPlace ? deliveryMapUrl({ address: meetingPlace }) : "";
+
+  function messageShop() {
+    window.dispatchEvent(new CustomEvent("retela:open-customer-assistant", {
+      detail: {
+        orderId: order?.id,
+        context: order?.id ? `Conversation regarding Order #${order.id}` : "Conversation regarding my order"
+      }
+    }));
+  }
+
   return (
     <motion.div className="retela-modal-backdrop z-[120]" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onMouseDown={onClose}>
       <motion.div className="retela-modal-card modal-md" initial={{ opacity: 0, scale: 0.94, y: 18 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.94, y: 18 }} transition={{ duration: 0.22, ease: "easeOut" }} onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="customer-order-details-title">
@@ -2543,6 +2591,25 @@ function CustomerOrderModal({ loading, selectedOrder, displayNumber, onPay, payi
                   <ModalInfo label="Payment Status" value={customerOrderStatus(order.payment_status || "unpaid")} />
                 </div>
                 {order.fulfillment_method === "delivery" ? <OrderDeliveryInfo order={order} title="Delivery Information" mapLabel="View Location" /> : null}
+                <section className="retela-meeting-place-card">
+                  <div>
+                    <p className="retela-modal-eyebrow">Meeting Place</p>
+                    <h4>Admin-selected meetup location</h4>
+                  </div>
+                  {meetingPlace ? (
+                    <>
+                      <p>{meetingPlace}</p>
+                      {meetingMapUrl ? (
+                        <a href={meetingMapUrl} target="_blank" rel="noreferrer" className="retela-meeting-place-action">
+                          <MapPin size={15} /> View Meeting Place
+                        </a>
+                      ) : null}
+                    </>
+                  ) : (
+                    <p>Meeting place will be provided by the shop.</p>
+                  )}
+                </section>
+                <DeliverySafetyPolicyCard policy={deliverySafetyPolicy} />
                 <div className="grid gap-2">
                   <p className="retela-modal-eyebrow">Items</p>
                   {selectedOrder.items.map((item) => (
@@ -2564,6 +2631,9 @@ function CustomerOrderModal({ loading, selectedOrder, displayNumber, onPay, payi
                     {payingOrderId === order.id ? "Opening..." : `Pay with ${paymentLabel(order.payment_method)}`}
                   </button>
                 ) : null}
+                <button type="button" onClick={messageShop} className="inline-flex items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-xs font-bold text-emerald-800 transition hover:bg-emerald-100">
+                  <MessageCircle size={15} /> Message Shop
+                </button>
                 <button type="button" onClick={onClose} className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-700 transition hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700">Close</button>
               </div>
             </>

@@ -94,6 +94,7 @@ export const DEFAULT_SYSTEM_SETTINGS = {
     returnConditions: "Return allowed within 7 days. Apparel must not be heavily damaged.",
     refundProcess: "Refund approval depends on admin verification and proof review.",
     supportChannels: "Live chat, AI assistant support, and admin support",
+    deliverySafetyPolicy: "For everyone's safety, customers and delivery personnel should meet only at the confirmed delivery or meeting location shown in the order. Verify the order and customer/delivery identity before handing over or accepting an item. Avoid changing the meetup location through unofficial messages. Keep communication inside RETELA whenever possible. Do not share OTPs, passwords, or sensitive account information. If the location feels unsafe, contact the other party through RETELA and arrange a safer public meeting point before completing the order.",
     ownerProfile: "Tela to Pera Thrift Shop Admin",
     developers: "RETELA Development Team",
     thesisMembers: "RETELA Thesis Members"
@@ -198,6 +199,7 @@ const settingsSchema = z.object({
     returnConditions: z.string().trim().max(800),
     refundProcess: z.string().trim().max(800),
     supportChannels: z.string().trim().max(255),
+    deliverySafetyPolicy: z.string().trim().max(1800),
     ownerProfile: z.string().trim().max(255),
     developers: z.string().trim().max(500),
     thesisMembers: z.string().trim().max(500)
