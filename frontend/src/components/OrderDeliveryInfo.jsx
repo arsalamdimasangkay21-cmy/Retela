@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { Loader2, MapPin } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Loader2, MapPin, RotateCcw } from "lucide-react";
 import { api, cachedGet } from "../api/client";
 import { osmTileUrl, routeUrl, validMapCoordinate } from "../config/maps";
 
@@ -203,7 +203,7 @@ function InlineDeliveryRoute({ order, snapshot }) {
           <div className="retela-route-status is-warning">Exact map location is unavailable for this order. The saved delivery address is still shown above.</div>
         ) : (
           <>
-            <DeliveryRouteMap shop={shop} destination={snapshot} route={route} />
+            <DeliveryRouteMap shop={shop} destination={destinationSnapshot} route={route} />
             <div className="retela-route-metrics">
               <RouteMetric label="Distance" value={route ? `${(route.distanceMeters / 1000).toFixed(1)} km` : loadingRoute ? "Loading..." : "Unavailable"} />
               <RouteMetric label="Estimated travel" value={route ? `${Math.max(1, Math.round(route.durationSeconds / 60))} min` : loadingRoute ? "Loading..." : "Unavailable"} />
@@ -236,8 +236,12 @@ function RouteMetric({ label, value }) {
 
 function DeliveryRouteMap({ shop, destination, route }) {
   const [zoomOffset, setZoomOffset] = useState(0);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
   const [tileState, setTileState] = useState("loading");
   const [tileVersion, setTileVersion] = useState(0);
+  const pointerRef = useRef(new Map());
+  const dragOriginRef = useRef(null);
+  const pinchRef = useRef(null);
   const map = useMemo(() => buildRouteMapModel(shop, destination, route, zoomOffset), [destination, route, shop, zoomOffset]);
   const routePoints = (route?.coordinates?.length ? route.coordinates : [shop, destination]).map((point) => projectPointOnMap(point, map));
   const routeReady = Boolean(route?.coordinates?.length);
@@ -249,8 +253,50 @@ function DeliveryRouteMap({ shop, destination, route }) {
     setTileVersion((value) => value + 1);
   }
 
+  function pointerDistance() {
+    const points = [...pointerRef.current.values()];
+    return points.length >= 2 ? Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y) : null;
+  }
+
+  function handlePointerDown(event) {
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    pointerRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (pointerRef.current.size === 1) dragOriginRef.current = { pointer: event.pointerId, x: event.clientX, y: event.clientY, pan };
+    if (pointerRef.current.size === 2) pinchRef.current = { distance: pointerDistance(), zoomOffset };
+  }
+
+  function handlePointerMove(event) {
+    if (!pointerRef.current.has(event.pointerId)) return;
+    pointerRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (pointerRef.current.size >= 2 && pinchRef.current) {
+      const distance = pointerDistance();
+      if (distance && pinchRef.current.distance) setZoomOffset(Math.max(-3, Math.min(3, pinchRef.current.zoomOffset + Math.round((distance - pinchRef.current.distance) / 90))));
+      return;
+    }
+    if (dragOriginRef.current?.pointer === event.pointerId) {
+      setPan({ x: dragOriginRef.current.pan.x + event.clientX - dragOriginRef.current.x, y: dragOriginRef.current.pan.y + event.clientY - dragOriginRef.current.y });
+    }
+  }
+
+  function handlePointerUp(event) {
+    pointerRef.current.delete(event.pointerId);
+    if (pointerRef.current.size < 2) pinchRef.current = null;
+    if (!pointerRef.current.size) dragOriginRef.current = null;
+  }
+
+  function resetRouteView() {
+    setZoomOffset(0);
+    setPan({ x: 0, y: 0 });
+  }
+
+  useEffect(() => {
+    setPan({ x: 0, y: 0 });
+    setZoomOffset(0);
+  }, [destination.latitude, destination.longitude, shop.latitude, shop.longitude]);
+
   return (
-    <div className="retela-route-map" aria-label="Delivery route map">
+    <div className="retela-route-map" aria-label="Delivery route map" onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerCancel={handlePointerUp} onWheel={(event) => { event.preventDefault(); setZoomOffset((value) => Math.max(-3, Math.min(3, value + (event.deltaY < 0 ? 1 : -1)))); }}>
+      <div className="retela-map-canvas" style={{ transform: `translate3d(${pan.x}px, ${pan.y}px, 0)` }}>
       {tileState !== "error" && map.tiles.map((tile) => (
         <img
           key={`${tile.tileX}-${tile.tileY}-${map.zoom}-${tileVersion}`}
@@ -272,9 +318,11 @@ function DeliveryRouteMap({ shop, destination, route }) {
         <RouteMarker point={shopPoint} tone="shop" label="RETELA Shop" />
         <RouteMarker point={destinationPoint} tone="customer" label="Customer Delivery Location" />
       </> : null}
+      </div>
       <div className="retela-route-map-tools">
         <button type="button" onClick={() => setZoomOffset((value) => Math.min(3, value + 1))}>+</button>
         <button type="button" onClick={() => setZoomOffset((value) => Math.max(-3, value - 1))}>-</button>
+        <button type="button" onClick={resetRouteView} aria-label="Reset Route View" title="Reset Route View"><RotateCcw size={14} /></button>
       </div>
     </div>
   );

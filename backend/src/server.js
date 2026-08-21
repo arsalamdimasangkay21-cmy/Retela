@@ -7,6 +7,7 @@ import { initializeDatabase } from "./config/db.js";
 import { corsOrigin } from "./config/cors.js";
 import { configureSocket } from "./socket.js";
 import { validateEmailConfiguration } from "./services/emailService.js";
+import { startMeetupReminderWorker } from "./workers/meetupReminders.js";
 
 if (!process.env.PAYMONGO_SECRET_KEY && !globalThis.__RETELA_PAYMONGO_WARNING_LOGGED__) {
   globalThis.__RETELA_PAYMONGO_WARNING_LOGGED__ = true;
@@ -56,9 +57,10 @@ httpServer.on("error", (error) => {
 httpServer.listen(PORT, HOST, () => {
   console.log(`[server] RETELA backend listening on port ${PORT}`);
 
-  initializeDatabaseOrExit()
+    initializeDatabaseOrExit()
     .then(() => {
       validateEmailConfiguration();
+      startMeetupReminderWorker(io);
       console.log("[database] Startup initialization completed.");
     })
     .catch(() => {});

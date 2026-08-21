@@ -75,7 +75,9 @@ const defaultSettings = {
     refundAlerts: true,
     emailNotifications: true,
     pushNotifications: true,
-    soundNotifications: true
+    soundNotifications: true,
+    meetup24HourReminder: true,
+    meetup1HourReminder: true
   },
   payment: {
     gcashNumber: "",
@@ -606,6 +608,13 @@ export default function AdminSettingsPage({ onChange }) {
             <ToggleSwitch label="Email Notifications" checked={settings.notifications.emailNotifications} onChange={(value) => updateSetting("notifications", "emailNotifications", value)} />
             <ToggleSwitch label="Push Notifications" checked={settings.notifications.pushNotifications} onChange={(value) => updateSetting("notifications", "pushNotifications", value)} />
             <ToggleSwitch label="Sound Notifications" checked={settings.notifications.soundNotifications} onChange={(value) => updateSetting("notifications", "soundNotifications", value)} />
+            <div className="settings-toggle-group md:col-span-2">
+              <p className="text-xs font-black uppercase tracking-[0.16em] text-neonbrand/80">Meetup Reminders</p>
+              <div className="mt-2 grid gap-3 sm:grid-cols-2">
+                <ToggleSwitch label="24 hours before" checked={settings.notifications.meetup24HourReminder !== false} onChange={(value) => updateSetting("notifications", "meetup24HourReminder", value)} />
+                <ToggleSwitch label="1 hour before" checked={settings.notifications.meetup1HourReminder !== false} onChange={(value) => updateSetting("notifications", "meetup1HourReminder", value)} />
+              </div>
+            </div>
           </ToggleGrid>
         </SettingsCard>
 

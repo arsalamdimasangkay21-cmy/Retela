@@ -32,7 +32,9 @@ export const DEFAULT_SYSTEM_SETTINGS = {
     refundAlerts: true,
     emailNotifications: true,
     pushNotifications: true,
-    soundNotifications: true
+    soundNotifications: true,
+    meetup24HourReminder: true,
+    meetup1HourReminder: true
   },
   payment: {
     gcashNumber: "",
@@ -132,7 +134,9 @@ const settingsSchema = z.object({
     refundAlerts: z.boolean(),
     emailNotifications: z.boolean(),
     pushNotifications: z.boolean(),
-    soundNotifications: z.boolean()
+    soundNotifications: z.boolean(),
+    meetup24HourReminder: z.boolean().optional().default(true),
+    meetup1HourReminder: z.boolean().optional().default(true)
   }),
   payment: z.object({
     gcashNumber: z.string().trim().max(30).optional().default(""),

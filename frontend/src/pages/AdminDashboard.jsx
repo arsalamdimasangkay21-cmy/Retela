@@ -3540,6 +3540,10 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
                   <p className="text-xs font-bold uppercase tracking-[0.16em] text-emerald-700">Customer Confirmation</p>
                   <p className="mt-1 text-sm font-bold text-slate-700">{source.meetup_confirmation_status === "agreed" ? "✓ Customer agreed" : source.meetup_confirmation_status === "disagreed" ? "Customer disagreed" : "Waiting for customer response"}</p>
                   {source.meetup_customer_note ? <p className="mt-1 break-words text-sm text-slate-600">Customer note: {source.meetup_customer_note}</p> : null}
+                  {source.meetup_confirmation_status === "agreed" ? <div className="mt-2 grid gap-1 text-xs font-semibold text-slate-600 sm:grid-cols-2">
+                    <span>24-hour reminder: {source.meetup_24h_reminder_sent_at ? `Sent ${new Date(source.meetup_24h_reminder_sent_at).toLocaleString()}` : "Scheduled"}</span>
+                    <span>1-hour reminder: {source.meetup_1h_reminder_sent_at ? `Sent ${new Date(source.meetup_1h_reminder_sent_at).toLocaleString()}` : "Scheduled"}</span>
+                  </div> : null}
                 </div> : null}
                 {meetingPlaceError ? <p className="text-xs font-bold text-rose-600">{meetingPlaceError}</p> : null}
               </section> : null}
