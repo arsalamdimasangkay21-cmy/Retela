@@ -476,7 +476,7 @@ async function markOrderPaid({ orderId, transactionId, reference, checkoutSessio
   await query(
     `UPDATE orders
      SET status = CASE
-           WHEN status IN ('awaiting_payment', 'payment_failed') THEN 'paid'
+           WHEN status IN ('awaiting_payment', 'payment_failed') THEN 'pending'
            ELSE status
          END,
          payment_status = 'paid',

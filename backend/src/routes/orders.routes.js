@@ -15,7 +15,9 @@ const customerCancellableStatuses = new Set(["pending", "awaiting_payment"]);
 const allowedAdminStatusTransitions = {
   pending: new Set(["approved", "cancelled"]),
   awaiting_payment: new Set(["cancelled", "payment_failed", "paid"]),
-  paid: new Set(["processing", "cancelled"]),
+  // `paid` is a legacy fulfillment value from older online orders. Treat it
+  // as payment-confirmed pending so those orders can enter the normal flow.
+  paid: new Set(["approved", "processing", "cancelled"]),
   approved: new Set(["processing", "ready", "cancelled"]),
   processing: new Set(["ready", "cancelled"]),
   ready: new Set(["completed", "cancelled"]),
@@ -590,11 +592,15 @@ router.patch("/:id/status", requireAuth, requireRole("admin"), asyncHandler(asyn
   await ensureOrderColumns();
   const schema = z.object({ status: z.enum(statuses) });
   const { status } = schema.parse(req.body);
-  const orders = await query("SELECT user_id, status, payment_method FROM orders WHERE id = :id", { id: req.params.id });
+  const orders = await query("SELECT user_id, status, payment_method, payment_status FROM orders WHERE id = :id", { id: req.params.id });
   if (!orders.length) throw new HttpError(404, "Order not found");
   const currentStatus = normalizeOrderStatus(orders[0].status);
   if (currentStatus !== status && !allowedAdminStatusTransitions[currentStatus]?.has(status)) {
     throw new HttpError(409, "This order status cannot be changed that way.");
+  }
+  const isCod = String(orders[0].payment_method || "").toLowerCase() === "cod";
+  if (status === "approved" && !isCod && orders[0].payment_status !== "paid") {
+    throw new HttpError(409, "This online order must be paid before it can be accepted.");
   }
   await query("UPDATE orders SET status = :status WHERE id = :id", { id: req.params.id, status });
   const title = status === "ready" ? "Ready to deliver" : status === "completed" ? "Order received" : "Order update";

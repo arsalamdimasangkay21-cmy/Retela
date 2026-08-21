@@ -3088,8 +3088,8 @@ function OrderManagement({ rows, updateOrder, onNavigate }) {
     order_no: `Order #${row.id}`,
     list_no: onlineOrders.length - index,
     customer: row.username || "Walk-in Customer",
-    status: orderStatusLabel(row.status),
-    status_key: row.status,
+    status: orderStatusLabel(displayFulfillmentStatus(row)),
+    status_key: displayFulfillmentStatus(row),
     total: money(row.total_amount),
     payment: paymentLabel(row.payment_method),
     payment_key: row.payment_method,
@@ -3450,13 +3450,13 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
                   <h3 id="admin-order-details-title" className="mt-2 font-display text-2xl font-bold text-[#111827]">Order #{source.id}</h3>
                   <p className="mt-1 text-sm font-medium text-slate-500">{source.username || "Walk-in Customer"} | {new Date(source.created_at).toLocaleString()}</p>
                 </div>
-                <span className={`rounded-full px-3 py-2 text-xs font-bold ${orderBadgeClass(source.status)}`}>{orderStatusLabel(source.status)}</span>
+                <span className={`rounded-full px-3 py-2 text-xs font-bold ${orderBadgeClass(displayFulfillmentStatus(source))}`}>{orderStatusLabel(displayFulfillmentStatus(source))}</span>
               </div>
               <div className="retela-modal-body grid gap-4">
               <div className="grid gap-3 sm:grid-cols-3">
                 <OrderSummaryCard label="Total" value={`PHP ${source.total_amount}`} />
                 <OrderSummaryCard label="Items" value={selectedOrder.items.length} />
-                <OrderSummaryCard label="Payment" value={paymentLabel(source.payment_method)} />
+                <OrderSummaryCard label="Payment" value={`${paymentLabel(source.payment_method)} · ${paymentStatusLabel(source.payment_status)}`} />
               </div>
               <div className="rounded-2xl border border-[#dfe9e3] bg-[#f8faf9] p-4">
                 <span className="block text-xs font-bold uppercase tracking-[0.16em] text-slate-500">Tracking Number</span>
@@ -3510,10 +3510,10 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
               <div className="retela-modal-footer">
                 <div className="flex w-full flex-wrap items-center gap-2">
                 {source.user_id ? <button type="button" onClick={() => onMessageCustomer?.(source)} className="inline-flex items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-xs font-bold text-emerald-800 transition hover:bg-emerald-100"><MessageSquare size={15} /> Message Customer</button> : null}
-                <button disabled={!["pending", "paid"].includes(source.status)} onClick={() => updateStatus(source.status === "paid" ? "processing" : "approved")} className={`rounded-xl px-4 py-2 text-xs font-bold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-55 ${["pending", "paid"].includes(source.status) ? orderButtonClass("approved") : "bg-slate-100 text-slate-500"}`}>Accept</button>
-                <button disabled={!["pending", "approved", "processing", "ready"].includes(source.status)} onClick={() => updateStatus("cancelled")} className={`rounded-xl px-4 py-2 text-xs font-bold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-55 ${["pending", "approved", "processing", "ready"].includes(source.status) ? orderButtonClass("cancelled") : "bg-slate-100 text-slate-500"}`}>Reject</button>
-                <button disabled={!["approved", "processing"].includes(source.status)} onClick={() => updateStatus("ready")} className={`rounded-xl px-4 py-2 text-xs font-bold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-55 ${["approved", "processing"].includes(source.status) ? orderButtonClass("ready") : "bg-slate-100 text-slate-500"}`}>Out for Delivery</button>
-                <button disabled={source.status !== "ready"} onClick={() => updateStatus("completed")} className={`rounded-xl px-4 py-2 text-xs font-bold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-55 ${source.status === "ready" ? orderButtonClass("completed") : "bg-slate-100 text-slate-500"}`}>Completed</button>
+                <button disabled={!canAcceptOrder(source)} onClick={() => updateStatus("approved")} className={`rounded-xl px-4 py-2 text-xs font-bold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-55 ${canAcceptOrder(source) ? orderButtonClass("approved") : "bg-slate-100 text-slate-500"}`}>Accept</button>
+                <button disabled={!["pending", "approved", "processing", "ready"].includes(displayFulfillmentStatus(source))} onClick={() => updateStatus("cancelled")} className={`rounded-xl px-4 py-2 text-xs font-bold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-55 ${["pending", "approved", "processing", "ready"].includes(displayFulfillmentStatus(source)) ? orderButtonClass("cancelled") : "bg-slate-100 text-slate-500"}`}>Reject</button>
+                <button disabled={!["approved", "processing"].includes(displayFulfillmentStatus(source))} onClick={() => updateStatus("ready")} className={`rounded-xl px-4 py-2 text-xs font-bold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-55 ${["approved", "processing"].includes(displayFulfillmentStatus(source)) ? orderButtonClass("ready") : "bg-slate-100 text-slate-500"}`}>Out for Delivery</button>
+                <button disabled={displayFulfillmentStatus(source) !== "ready"} onClick={() => updateStatus("completed")} className={`rounded-xl px-4 py-2 text-xs font-bold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-55 ${displayFulfillmentStatus(source) === "ready" ? orderButtonClass("completed") : "bg-slate-100 text-slate-500"}`}>Completed</button>
                 <button type="button" onClick={onClose} className="ml-auto rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-700 transition hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700">Close</button>
                 </div>
               </div>
@@ -3796,6 +3796,33 @@ function formatCell(key, value) {
     return <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-bold ${value ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"}`}><ActiveDot active={value} />{value ? "Online" : "Offline"}</span>;
   }
   return String(value ?? "");
+}
+
+function displayFulfillmentStatus(order) {
+  // Older PayMongo orders stored `paid` in the fulfillment status. They are
+  // still pending fulfillment once payment is confirmed.
+  if (order?.status === "paid" && order?.payment_status === "paid") return "pending";
+  return order?.status || "pending";
+}
+
+function canAcceptOrder(order) {
+  if (!order) return false;
+  const fulfillmentStatus = displayFulfillmentStatus(order);
+  if (fulfillmentStatus !== "pending") return false;
+  const paymentMethod = String(order.payment_method || "").toLowerCase();
+  return paymentMethod === "cod" || paymentMethod === "cash" || order.payment_status === "paid" || order.status === "paid";
+}
+
+function paymentStatusLabel(status) {
+  const labels = {
+    paid: "Paid",
+    awaiting_payment: "Awaiting Payment",
+    failed: "Payment Failed",
+    cancelled: "Cancelled",
+    refunded: "Refunded",
+    unpaid: "Unpaid"
+  };
+  return labels[status] || "Unpaid";
 }
 
 function orderButtonClass(status) {
