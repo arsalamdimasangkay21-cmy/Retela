@@ -9,6 +9,7 @@ import { createAdminNotification } from "../utils/adminNotifications.js";
 const router = Router();
 let paymentColumnsReady;
 const PAYMONGO_CHECKOUT_URL = "https://api.paymongo.com/v2/checkout_sessions";
+const PAYMONGO_CHECKOUT_URL_V1 = "https://api.paymongo.com/v1/checkout_sessions";
 const PAYMONGO_GCASH_PAYMENT_METHOD_TYPES = Object.freeze(["gcash"]);
 const PAYMONGO_CHECKOUT_METHOD_TYPES = Object.freeze({
   gcash: PAYMONGO_GCASH_PAYMENT_METHOD_TYPES,
@@ -79,6 +80,13 @@ function authHeader() {
   return `Basic ${Buffer.from(`${paymongoSecret()}:`).toString("base64")}`;
 }
 
+function paymongoFetchHeaders() {
+  return {
+    Authorization: authHeader(),
+    "Content-Type": "application/json"
+  };
+}
+
 function paymongoErrorDetails(data) {
   const error = data?.errors?.[0] || {};
   return {
@@ -125,6 +133,10 @@ function buildCheckoutPayload({ orderId, reference, billing, amount, paymentMeth
         }],
         payment_method_types: paymentMethodTypes,
         reference_number: reference,
+        metadata: {
+          order_id: String(orderId),
+          order_number: `RETELA-${orderId}`
+        },
         success_url: successUrl,
         cancel_url: cancelUrl
       }
@@ -143,53 +155,131 @@ function logPaymongoCheckoutResponse(data) {
   });
 }
 
-function verifyWebhookSignature(req) {
-  const secret = process.env.PAYMONGO_WEBHOOK_SECRET;
-  if (!secret) return true;
-  const header = req.headers["paymongo-signature"] || req.headers["Paymongo-Signature"];
-  if (!header || !Buffer.isBuffer(req.body)) return false;
-  const parts = Object.fromEntries(String(header).split(",").map((part) => part.split("=").map((value) => value.trim())));
-  const timestamp = parts.t;
-  const signature = parts.v1 || parts.li || parts.te;
-  if (!timestamp || !signature) return false;
-  const payload = `${timestamp}.${req.body.toString("utf8")}`;
-  const expected = crypto.createHmac("sha256", secret).update(payload).digest("hex");
-  const expectedBuffer = Buffer.from(expected);
-  const signatureBuffer = Buffer.from(signature);
-  return expectedBuffer.length === signatureBuffer.length && crypto.timingSafeEqual(expectedBuffer, signatureBuffer);
-}
-
-async function markOrderPaid({ orderId, transactionId, reference }) {
-  const rows = await query("SELECT id, user_id, status, payment_status FROM orders WHERE id = :orderId", { orderId });
-  if (!rows.length) return null;
-  if (rows[0].payment_status === "paid") return null;
-  if (rows[0].status === "cancelled" || rows[0].payment_status === "cancelled") return null;
-  await query(
-    `UPDATE orders
-     SET status = 'paid',
-         payment_status = 'paid',
-         transaction_id = COALESCE(:transactionId, transaction_id),
-         payment_reference = COALESCE(:reference, payment_reference),
-         paid_at = NOW(),
-         payment_provider = 'paymongo'
-     WHERE id = :orderId`,
-    { orderId, transactionId: transactionId || null, reference: reference || null }
-  );
-  await query(
-    "INSERT INTO notifications (user_id, type, title, body) VALUES (:userId, 'order', 'Payment received', :body)",
-    { userId: rows[0].user_id, body: `Payment for Order #${orderId} was confirmed.` }
-  );
-  return createAdminNotification({
-    type: "payment",
-    title: "Payment received",
-    body: `Payment for Order #${orderId} was confirmed.`,
-    customerId: rows[0].user_id,
-    emit: false
+async function fetchPaymongoCheckoutSession(sessionId) {
+  if (!sessionId) throw new HttpError(409, "No PayMongo checkout session is stored for this order.");
+  const urls = [
+    `${PAYMONGO_CHECKOUT_URL}/${encodeURIComponent(sessionId)}`,
+    `${PAYMONGO_CHECKOUT_URL_V1}/${encodeURIComponent(sessionId)}`
+  ];
+  let lastProviderError = null;
+  for (const url of urls) {
+    const response = await fetch(url, {
+      method: "GET",
+      headers: paymongoFetchHeaders()
+    });
+    const data = await response.json().catch(() => ({}));
+    if (response.ok) return data;
+    lastProviderError = { status: response.status, data };
+    if (response.status !== 404) break;
+  }
+  const providerError = paymongoErrorDetails(lastProviderError?.data);
+  console.error("[paymongo-verify] checkout session retrieve failed", {
+    sessionId,
+    status: lastProviderError?.status || null,
+    detail: providerError.detail,
+    code: providerError.code
   });
+  throw new HttpError(502, providerError.detail || "Unable to verify payment with PayMongo.");
 }
 
-async function markOrderFailed({ orderId, transactionId, reference }) {
-  const rows = await query("SELECT id, user_id, status, payment_status FROM orders WHERE id = :orderId", { orderId });
+function checkoutSessionFromPaymongoPayload(payload) {
+  return payload?.data?.type === "checkout_session"
+    ? payload.data
+    : payload?.data?.data?.type === "checkout_session"
+      ? payload.data.data
+      : payload?.data?.attributes?.data?.type === "checkout_session"
+        ? payload.data.attributes.data
+        : payload?.data?.attributes?.data || payload?.data?.data || payload?.data || null;
+}
+
+function checkoutSessionAttributes(session) {
+  return session?.attributes || {};
+}
+
+function successfulPaymentFromSession(session) {
+  const attributes = checkoutSessionAttributes(session);
+  const payments = Array.isArray(attributes.payments) ? attributes.payments : [];
+  return payments.find((payment) => {
+    const status = String(payment?.attributes?.status || payment?.status || "").toLowerCase();
+    return status === "paid" || status === "succeeded" || status === "success";
+  }) || null;
+}
+
+function paymentIntentFromSession(session) {
+  return checkoutSessionAttributes(session).payment_intent || null;
+}
+
+function isSessionPaymentConfirmed(session) {
+  const attributes = checkoutSessionAttributes(session);
+  const sessionStatus = String(attributes.status || "").toLowerCase();
+  const intentStatus = String(paymentIntentFromSession(session)?.attributes?.status || paymentIntentFromSession(session)?.status || "").toLowerCase();
+  return Boolean(successfulPaymentFromSession(session))
+    || sessionStatus === "paid"
+    || intentStatus === "succeeded"
+    || intentStatus === "paid";
+}
+
+function failedPaymentFromSession(session) {
+  const attributes = checkoutSessionAttributes(session);
+  const payments = Array.isArray(attributes.payments) ? attributes.payments : [];
+  return payments.find((payment) => {
+    const status = String(payment?.attributes?.status || payment?.status || "").toLowerCase();
+    return ["failed", "cancelled", "canceled", "expired"].includes(status);
+  }) || null;
+}
+
+function paymongoSessionSummary(session) {
+  const attributes = checkoutSessionAttributes(session);
+  const payment = successfulPaymentFromSession(session) || failedPaymentFromSession(session);
+  const intent = paymentIntentFromSession(session);
+  return {
+    sessionId: session?.id || null,
+    sessionStatus: attributes.status || null,
+    paymentStatus: payment?.attributes?.status || payment?.status || intent?.attributes?.status || intent?.status || null,
+    paymentId: payment?.id || null,
+    paymentIntentId: intent?.id || null,
+    reference: referenceFromSession(session),
+    orderId: orderIdFromSession(session)
+  };
+}
+
+function orderIdFromReference(reference) {
+  const match = String(reference || "").match(/RETELA-(\d+)|#(\d+)/);
+  return match ? Number(match[1] || match[2]) : null;
+}
+
+function orderIdFromSession(session) {
+  const attributes = checkoutSessionAttributes(session);
+  const metadataId = attributes.metadata?.order_id ? Number(attributes.metadata.order_id) : null;
+  if (Number.isInteger(metadataId) && metadataId > 0) return metadataId;
+  return orderIdFromReference(attributes.reference_number || attributes.external_reference_number || attributes.description);
+}
+
+function referenceFromSession(session) {
+  const attributes = checkoutSessionAttributes(session);
+  return attributes.reference_number || attributes.external_reference_number || attributes.description || null;
+}
+
+function transactionIdFromSession(session, fallback = null) {
+  const summary = paymongoSessionSummary(session);
+  return summary.paymentId || summary.paymentIntentId || summary.sessionId || fallback || null;
+}
+
+function emitPaymentFailureUpdate(io, order) {
+  if (!order) return;
+  const payload = {
+    id: Number(order.id),
+    status: "payment_failed",
+    payment_status: "failed",
+    payment_reference: order.payment_reference || null,
+    transaction_id: order.transaction_id || null
+  };
+  if (order.user_id) io?.to(`user:${order.user_id}`).emit("order:update", payload);
+  io?.to("admin").emit("order:update", payload);
+}
+
+async function markOrderFailed({ orderId, transactionId, reference, io = null }) {
+  const rows = await query("SELECT id, user_id, status, payment_status, payment_reference, transaction_id FROM orders WHERE id = :orderId", { orderId });
   if (!rows.length || rows[0].payment_status === "paid") return;
   if (rows[0].status === "cancelled" || rows[0].payment_status === "cancelled") return;
   await query(
@@ -206,11 +296,218 @@ async function markOrderFailed({ orderId, transactionId, reference }) {
     "INSERT INTO notifications (user_id, type, title, body) VALUES (:userId, 'order', 'Payment failed', :body)",
     { userId: rows[0].user_id, body: `Payment for Order #${orderId} failed or was cancelled.` }
   );
+  emitPaymentFailureUpdate(io, rows[0]);
+}
+
+function paymongoEventResource(payload) {
+  return payload?.data?.attributes?.data || payload?.data?.data || payload?.data || payload || null;
+}
+
+function isPaymongoCheckoutSessionResource(resource) {
+  return resource?.type === "checkout_session" || String(resource?.id || "").startsWith("cs_");
+}
+
+function sessionForWebhookPayload(payload) {
+  const resource = paymongoEventResource(payload);
+  if (isPaymongoCheckoutSessionResource(resource)) return resource;
+  return checkoutSessionFromPaymongoPayload(payload);
+}
+
+function eventTypeFromPayload(payload) {
+  const dataType = payload?.data?.type;
+  const attributeType = payload?.data?.attributes?.type;
+  if (dataType === "event") return attributeType || payload?.type || payload?.event_type;
+  return dataType || attributeType || payload?.type || payload?.event_type;
+}
+
+function statusLooksFailed(value) {
+  return /failed|cancelled|canceled|expired/i.test(String(value || ""));
+}
+
+function statusLooksPaid(value) {
+  return /checkout_session\.payment\.paid|payment\.paid|\bpaid\b/i.test(String(value || ""));
+}
+
+function paymongoMode() {
+  const key = process.env.PAYMONGO_SECRET_KEY || "";
+  if (key.startsWith("sk_test_")) return "test";
+  if (key.startsWith("sk_live_")) return "live";
+  return key ? "unknown" : "missing";
+}
+
+function assertTestModeIfRequested() {
+  if (String(process.env.NODE_ENV || "").toLowerCase() === "test") return;
+  if (String(process.env.PAYMONGO_EXPECT_TEST_MODE || "").toLowerCase() === "true" && paymongoMode() !== "test") {
+    console.warn("[paymongo config] PayMongo test mode expected, but backend secret key is not sk_test_.");
+  }
+}
+
+function isSessionPaymentFailed(session) {
+  const attributes = checkoutSessionAttributes(session);
+  const sessionStatus = String(attributes.status || "").toLowerCase();
+  const intent = paymentIntentFromSession(session);
+  const intentStatus = String(intent?.attributes?.status || intent?.status || "").toLowerCase();
+  return Boolean(failedPaymentFromSession(session)) || ["failed", "cancelled", "canceled", "expired"].includes(sessionStatus) || ["failed", "cancelled", "canceled", "expired"].includes(intentStatus);
+}
+
+function paymentStateLabel(status) {
+  const normalized = String(status || "").toLowerCase();
+  if (normalized === "awaiting_payment") return "Awaiting Payment";
+  if (normalized === "paid") return "Paid";
+  if (normalized === "failed") return "Payment Failed";
+  if (normalized === "cancelled" || normalized === "canceled") return "Cancelled";
+  if (normalized === "refunded") return "Refunded";
+  if (normalized === "unpaid") return "Unpaid";
+  return status || "Unknown";
+}
+
+function paymentStatusResponse(order, extras = {}) {
+  return {
+    ...extras,
+    order,
+    ...(order ? {
+      id: order.id,
+      status: order.status,
+      payment_status: order.payment_status,
+      payment_status_label: paymentStateLabel(order.payment_status),
+      payment_method: order.payment_method,
+      payment_reference: order.payment_reference,
+      transaction_id: order.transaction_id,
+      paid_at: order.paid_at,
+      payment_provider: order.payment_provider,
+      total_amount: order.total_amount
+    } : {})
+  };
+}
+
+async function findOrderForPaymongo({ orderId, checkoutSessionId, reference, userId = null, isAdmin = false }) {
+  const ownership = isAdmin ? "" : "AND user_id = :userId";
+  if (orderId) {
+    const rows = await query(
+      `SELECT id, user_id, status, payment_status, payment_method, payment_reference, transaction_id, paid_at, payment_provider, checkout_session_id, total_amount
+       FROM orders
+       WHERE id = :orderId ${ownership}
+       LIMIT 1`,
+      { orderId, userId }
+    );
+    if (rows.length) return rows[0];
+  }
+  if (checkoutSessionId) {
+    const rows = await query(
+      `SELECT id, user_id, status, payment_status, payment_method, payment_reference, transaction_id, paid_at, payment_provider, checkout_session_id, total_amount
+       FROM orders
+       WHERE checkout_session_id = :checkoutSessionId ${ownership}
+       LIMIT 1`,
+      { checkoutSessionId, userId }
+    );
+    if (rows.length) return rows[0];
+  }
+  if (reference) {
+    const rows = await query(
+      `SELECT id, user_id, status, payment_status, payment_method, payment_reference, transaction_id, paid_at, payment_provider, checkout_session_id, total_amount
+       FROM orders
+       WHERE payment_reference = :reference ${ownership}
+       LIMIT 1`,
+      { reference, userId }
+    );
+    if (rows.length) return rows[0];
+  }
+  return null;
+}
+
+function emitPaymentOrderUpdate(io, order) {
+  if (!order) return;
+  const payload = {
+    id: Number(order.id),
+    status: order.status,
+    payment_status: order.payment_status,
+    payment_reference: order.payment_reference || null,
+    transaction_id: order.transaction_id || null,
+    paid_at: order.paid_at || null
+  };
+  if (order.user_id) io?.to(`user:${order.user_id}`).emit("order:update", payload);
+  io?.to("admin").emit("order:update", payload);
+}
+
+async function getOrderPaymentStatus(orderId) {
+  const rows = await query(
+    `SELECT id, user_id, status, payment_status, payment_method, payment_reference, transaction_id, paid_at, payment_provider, checkout_session_id, total_amount
+     FROM orders
+     WHERE id = :orderId
+     LIMIT 1`,
+    { orderId }
+  );
+  return rows[0] || null;
+}
+
+function verifyWebhookSignature(req) {
+  const secret = process.env.PAYMONGO_WEBHOOK_SECRET;
+  if (!secret) {
+    if (!globalThis.__RETELA_PAYMONGO_WEBHOOK_SECRET_WARNING__) {
+      globalThis.__RETELA_PAYMONGO_WEBHOOK_SECRET_WARNING__ = true;
+      console.warn("[paymongo-webhook] PAYMONGO_WEBHOOK_SECRET is not configured; signature verification is skipped.");
+    }
+    return true;
+  }
+  const header = req.headers["paymongo-signature"] || req.headers["Paymongo-Signature"];
+  if (!header || !Buffer.isBuffer(req.body)) return false;
+  const parts = Object.fromEntries(String(header).split(",").map((part) => part.split("=").map((value) => value.trim())));
+  const timestamp = parts.t;
+  const signature = parts.v1 || parts.li || parts.te;
+  if (!timestamp || !signature) return false;
+  const payload = `${timestamp}.${req.body.toString("utf8")}`;
+  const expected = crypto.createHmac("sha256", secret).update(payload).digest("hex");
+  const expectedBuffer = Buffer.from(expected);
+  const signatureBuffer = Buffer.from(signature);
+  return expectedBuffer.length === signatureBuffer.length && crypto.timingSafeEqual(expectedBuffer, signatureBuffer);
+}
+
+async function markOrderPaid({ orderId, transactionId, reference, checkoutSessionId, io = null }) {
+  const rows = await query("SELECT id, user_id, status, payment_status FROM orders WHERE id = :orderId", { orderId });
+  if (!rows.length) return { order: null, adminNotification: null, updated: false };
+  if (rows[0].payment_status === "paid") {
+    const order = await getOrderPaymentStatus(orderId);
+    return { order, adminNotification: null, updated: false };
+  }
+  if (rows[0].status === "cancelled" || rows[0].payment_status === "cancelled") {
+    const order = await getOrderPaymentStatus(orderId);
+    return { order, adminNotification: null, updated: false };
+  }
+  await query(
+    `UPDATE orders
+     SET status = CASE
+           WHEN status IN ('awaiting_payment', 'payment_failed') THEN 'paid'
+           ELSE status
+         END,
+         payment_status = 'paid',
+         transaction_id = COALESCE(:transactionId, transaction_id),
+         payment_reference = COALESCE(:reference, payment_reference),
+         paid_at = NOW(),
+         payment_provider = 'paymongo',
+         checkout_session_id = COALESCE(:checkoutSessionId, checkout_session_id)
+     WHERE id = :orderId`,
+    { orderId, transactionId: transactionId || null, reference: reference || null, checkoutSessionId: checkoutSessionId || null }
+  );
+  await query(
+    "INSERT INTO notifications (user_id, type, title, body) VALUES (:userId, 'order', 'Payment received', :body)",
+    { userId: rows[0].user_id, body: `Payment for Order #${orderId} was confirmed.` }
+  );
+  const adminNotification = await createAdminNotification({
+    type: "payment",
+    title: "Payment received",
+    body: `Payment for Order #${orderId} was confirmed.`,
+    customerId: rows[0].user_id,
+    emit: false
+  });
+  const order = await getOrderPaymentStatus(orderId);
+  emitPaymentOrderUpdate(io, order);
+  return { order, adminNotification, updated: true };
 }
 
 router.post("/create-gcash-checkout", requireAuth, requireApproved, asyncHandler(async (req, res) => {
   await ensurePaymentColumns();
   assertPaymongoConfigured();
+  assertTestModeIfRequested();
   const schema = z.object({
     orderId: z.coerce.number().int().positive(),
     paymentMethod: z.enum(["gcash", "debit", "credit", "maya"]).default("gcash"),
@@ -275,10 +572,7 @@ router.post("/create-gcash-checkout", requireAuth, requireApproved, asyncHandler
   try {
     response = await fetch(PAYMONGO_CHECKOUT_URL, {
       method: "POST",
-      headers: {
-        Authorization: authHeader(),
-        "Content-Type": "application/json"
-      },
+      headers: paymongoFetchHeaders(),
       body: JSON.stringify(checkoutPayload)
     });
     data = await response.json().catch(() => ({}));
@@ -337,35 +631,131 @@ router.post("/create-gcash-checkout", requireAuth, requireApproved, asyncHandler
     }
   );
 
-  res.json({ checkoutUrl, orderId: order.id, reference, provider: "paymongo" });
+  res.json({ checkoutUrl, orderId: order.id, reference, checkoutSessionId: data.data.id, provider: "paymongo" });
+}));
+
+router.post("/orders/:orderId/verify", requireAuth, requireApproved, asyncHandler(async (req, res) => {
+  await ensurePaymentColumns();
+  assertPaymongoConfigured();
+  const orderId = Number(req.params.orderId);
+  if (!Number.isInteger(orderId) || orderId <= 0) throw new HttpError(400, "A valid order ID is required.");
+  const order = await findOrderForPaymongo({
+    orderId,
+    userId: req.user.id,
+    isAdmin: req.user.role === "admin"
+  });
+  if (!order) throw new HttpError(404, "Order not found");
+  console.log("[paymongo-verify] order:", order.id);
+  if (order.payment_status === "paid") {
+    return res.json(paymentStatusResponse(order, { confirmed: true, alreadyPaid: true }));
+  }
+  if (!order.checkout_session_id) {
+    console.warn("[paymongo-verify] missing checkout session", {
+      orderId: order.id,
+      hasReference: Boolean(order.payment_reference)
+    });
+    throw new HttpError(409, "This order does not have a PayMongo checkout session to verify.");
+  }
+  const sessionResponse = await fetchPaymongoCheckoutSession(order.checkout_session_id);
+  const session = checkoutSessionFromPaymongoPayload(sessionResponse);
+  const summary = paymongoSessionSummary(session);
+  console.log("[paymongo-verify] session status:", summary.sessionStatus || null);
+  console.log("[paymongo-verify] payment status:", summary.paymentStatus || null);
+  if (isSessionPaymentConfirmed(session)) {
+    const transactionId = summary.paymentId || summary.paymentIntentId || summary.sessionId;
+    const reference = summary.reference || order.payment_reference;
+    const paidResult = await markOrderPaid({
+      orderId: order.id,
+      transactionId,
+      reference,
+      checkoutSessionId: summary.sessionId || order.checkout_session_id,
+      io: req.app.get("io")
+    });
+    if (paidResult.adminNotification) {
+      req.app.get("io")?.to("admin").emit("notification:new", {
+        ...paidResult.adminNotification,
+        created_at: new Date().toISOString()
+      });
+    }
+    console.log("[paymongo-verify] order payment_status updated to paid", { order: order.id });
+    return res.json(paymentStatusResponse(paidResult.order, {
+      confirmed: true,
+      sessionStatus: summary.sessionStatus,
+      paymentStatus: summary.paymentStatus
+    }));
+  }
+  if (isSessionPaymentFailed(session)) {
+    await markOrderFailed({
+      orderId: order.id,
+      transactionId: transactionIdFromSession(session),
+      reference: summary.reference || order.payment_reference,
+      io: req.app.get("io")
+    });
+  }
+  const latestOrder = await getOrderPaymentStatus(order.id);
+  res.json(paymentStatusResponse(latestOrder, {
+    confirmed: false,
+    sessionStatus: summary.sessionStatus,
+    paymentStatus: summary.paymentStatus
+  }));
 }));
 
 router.post("/webhook", asyncHandler(async (req, res) => {
   await ensurePaymentColumns();
   if (!verifyWebhookSignature(req)) throw new HttpError(401, "Invalid PayMongo webhook signature.");
   const payload = Buffer.isBuffer(req.body) ? JSON.parse(req.body.toString("utf8")) : req.body;
-  const event = payload?.data;
-  const attributes = event?.attributes || {};
-  const resource = attributes?.data || event;
-  const resourceAttributes = resource?.attributes || {};
-  const reference = resourceAttributes.reference_number || resourceAttributes.external_reference_number || resourceAttributes.description?.match(/#(\d+)/)?.[1];
-  const orderMatch = String(reference || "").match(/RETELA-(\d+)/) || String(resourceAttributes.description || "").match(/#(\d+)/);
-  const orderId = orderMatch ? Number(orderMatch[1]) : null;
-  const eventType = attributes.type || event?.type;
+  const event = payload?.data || {};
+  const eventType = eventTypeFromPayload(payload);
+  const session = sessionForWebhookPayload(payload);
+  const summary = paymongoSessionSummary(session);
+  const reference = summary.reference || referenceFromSession(session);
+  const orderId = summary.orderId || orderIdFromReference(reference);
+  const order = await findOrderForPaymongo({
+    orderId,
+    checkoutSessionId: summary.sessionId,
+    reference
+  });
 
-  if (orderId && /paid|payment\.paid|checkout_session\.payment\.paid/i.test(String(eventType))) {
-    const adminNotification = await markOrderPaid({ orderId, transactionId: resource?.id || event?.id, reference });
-    if (adminNotification) {
+  console.log("[paymongo-webhook] event received");
+  console.log("[paymongo-webhook] event type:", eventType || "unknown");
+  console.log("[paymongo-webhook] order:", order?.id || orderId || null);
+
+  if (!order) {
+    console.warn("[paymongo-webhook] order not found for PayMongo event", {
+      eventType: eventType || null,
+      sessionId: summary.sessionId,
+      reference
+    });
+    return res.json({ received: true, matched: false });
+  }
+
+  if (statusLooksPaid(eventType) || isSessionPaymentConfirmed(session)) {
+    const transactionId = transactionIdFromSession(session, event?.id);
+    const paidResult = await markOrderPaid({
+      orderId: order.id,
+      transactionId,
+      reference: summary.reference || order.payment_reference,
+      checkoutSessionId: summary.sessionId || order.checkout_session_id,
+      io: req.app.get("io")
+    });
+    console.log("[paymongo-webhook] payment confirmed", { order: order.id });
+    if (paidResult.updated) console.log("[paymongo-webhook] order payment_status updated to paid", { order: order.id });
+    if (paidResult.adminNotification) {
       req.app.get("io")?.to("admin").emit("notification:new", {
-        ...adminNotification,
+        ...paidResult.adminNotification,
         created_at: new Date().toISOString()
       });
     }
   }
-  if (orderId && /failed|cancelled|canceled|expired/i.test(String(eventType))) {
-    await markOrderFailed({ orderId, transactionId: resource?.id || event?.id, reference });
+  if (statusLooksFailed(eventType) || isSessionPaymentFailed(session)) {
+    await markOrderFailed({
+      orderId: order.id,
+      transactionId: transactionIdFromSession(session, event?.id),
+      reference: summary.reference || order.payment_reference,
+      io: req.app.get("io")
+    });
   }
-  res.json({ received: true });
+  res.json({ received: true, matched: true });
 }));
 
 router.get("/status/:id", requireAuth, requireApproved, asyncHandler(async (req, res) => {
@@ -377,7 +767,7 @@ router.get("/status/:id", requireAuth, requireApproved, asyncHandler(async (req,
     { id: req.params.id, userId: req.user.id, isAdmin: req.user.role === "admin" }
   );
   if (!rows.length) throw new HttpError(404, "Order not found");
-  res.json(rows[0]);
+  res.json(paymentStatusResponse(rows[0]));
 }));
 
 export default router;
