@@ -2791,8 +2791,9 @@ button {
   min-width: 0;
   flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 12px;
+  text-align: left;
 }
 
 .admin-orders-header p {
@@ -2813,13 +2814,12 @@ button {
   line-height: 1.1;
 }
 
-.admin-orders-header > span {
-  border-radius: 999px;
-  background: #dcfce7;
-  padding: 8px 12px;
-  color: #14532d;
+.admin-orders-header span {
+  display: block;
+  margin-top: 4px;
+  color: #557166;
   font-size: 0.84rem;
-  font-weight: 850;
+  font-weight: 700;
 }
 
 .admin-orders-filter-card {
@@ -3208,8 +3208,7 @@ button {
     font-size: 1.45rem;
   }
 
-  .admin-orders-header > span {
-    padding: 7px 10px;
+  .admin-orders-header span {
     font-size: 0.78rem;
   }
 
@@ -3298,13 +3297,11 @@ button {
 }
 
 .admin-orders-header {
-  justify-content: center;
-  text-align: center;
+  justify-content: flex-start;
+  text-align: left;
 }
 
-.admin-orders-header > span {
-  width: fit-content;
-}
+.admin-orders-header span { width: auto; }
 
 .orders-toolbar {
   display: flex;

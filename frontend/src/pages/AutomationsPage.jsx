@@ -18,9 +18,11 @@ import {
   ShoppingCart,
   SlidersHorizontal,
   Sparkles,
+  Trash2,
   X
 } from "lucide-react";
 import { Button, Card, Field } from "../components/ui";
+import ConfirmDialog from "../components/ConfirmDialog";
 
 const storageKey = "retela_automations_config";
 const logStorageKey = "retela_automations_logs";
@@ -193,6 +195,8 @@ export default function AutomationsPage() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [editingAutomation, setEditingAutomation] = useState(null);
+  const [deletingAutomation, setDeletingAutomation] = useState(null);
+  const [toast, setToast] = useState(null);
 
   useEffect(() => {
     localStorage.setItem(storageKey, JSON.stringify(automations));
@@ -256,8 +260,24 @@ export default function AutomationsPage() {
     setEditingAutomation(null);
   }
 
+  function deleteAutomation() {
+    if (!deletingAutomation) return;
+    const deletedTitle = deletingAutomation.title;
+    setAutomations((items) => items.filter((automation) => automation.id !== deletingAutomation.id));
+    setDeletingAutomation(null);
+    setToast({ message: "Automation deleted successfully." });
+    addLog("deleted", deletedTitle, "Automation was deleted.");
+  }
+
   return (
-    <motion.div className="grid min-w-0 gap-5" initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.45, ease: "easeOut" }}>
+    <motion.div className="relative grid min-w-0 gap-5" initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.45, ease: "easeOut" }}>
+      {toast ? (
+        <div className="fixed right-5 top-5 z-[1900] flex max-w-[min(380px,calc(100vw-2rem))] items-start gap-3 rounded-2xl border border-neonbrand/30 bg-[#07110d] px-4 py-3 text-sm font-bold text-neonbrand shadow-2xl" role="status">
+          <CheckCircle2 size={18} className="mt-0.5 shrink-0" />
+          <span className="min-w-0 flex-1">{toast.message}</span>
+          <button type="button" onClick={() => setToast(null)} className="shrink-0 text-white/55 hover:text-white" aria-label="Dismiss notification"><X size={16} /></button>
+        </div>
+      ) : null}
       <AutomationHero onCreate={() => setEditingAutomation(blankAutomation)} />
 
       <div className="grid gap-4 sm:grid-cols-3">
@@ -277,6 +297,7 @@ export default function AutomationsPage() {
             onToggle={() => toggleAutomation(automation.id)}
             onEdit={() => setEditingAutomation(automation)}
             onTrigger={() => simulateTrigger(automation)}
+            onDelete={() => setDeletingAutomation(automation)}
           />
         ))}
       </div>
@@ -300,6 +321,15 @@ export default function AutomationsPage() {
         open={Boolean(editingAutomation)}
         onClose={() => setEditingAutomation(null)}
         onSave={saveAutomation}
+      />
+      <ConfirmDialog
+        open={Boolean(deletingAutomation)}
+        title="Delete Automation?"
+        message="Are you sure you want to delete this automation? This action cannot be undone."
+        confirmLabel="Delete"
+        cancelLabel="Cancel"
+        onConfirm={deleteAutomation}
+        onClose={() => setDeletingAutomation(null)}
       />
     </motion.div>
   );
@@ -371,7 +401,7 @@ function AutomationToolbar({ search, setSearch, statusFilter, setStatusFilter, o
   );
 }
 
-function AutomationCard({ automation, index, onToggle, onEdit, onTrigger }) {
+function AutomationCard({ automation, index, onToggle, onEdit, onTrigger, onDelete }) {
   const Icon = iconMap[automation.icon] || Sparkles;
   return (
     <motion.article
@@ -410,6 +440,10 @@ function AutomationCard({ automation, index, onToggle, onEdit, onTrigger }) {
           <button type="button" onClick={onEdit} className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-3 py-2 text-xs font-bold text-white/72 transition hover:border-neonbrand/45 hover:text-neonbrand">
             <Edit3 size={15} />
             Edit
+          </button>
+          <button type="button" onClick={onDelete} className="inline-flex items-center gap-2 rounded-2xl border border-rose-300/25 bg-rose-300/10 px-3 py-2 text-xs font-bold text-rose-200 transition hover:border-rose-300/45 hover:bg-rose-300/20">
+            <Trash2 size={15} />
+            Delete
           </button>
         </div>
       </div>

@@ -3167,8 +3167,8 @@ function OrderManagement({ rows, updateOrder, onNavigate }) {
           <div>
             <p>Order Management</p>
             <h3>Orders</h3>
+            <span>Showing {filteredOrders.length} of {onlineOrders.length} orders</span>
           </div>
-          <span>Showing {filteredOrders.length} of {onlineOrders.length} orders</span>
         </div>
       </Card>
       <section className="admin-orders-filter-card">
