@@ -3213,8 +3213,8 @@ function OrderManagement({ rows, updateOrder, onNavigate }) {
             saveTracking={saveTracking}
             updateOrder={updateOrder}
             onStatusChanged={() => setReloadToken((value) => value + 1)}
-            onMeetingPlaceSaved={(meetingPlace) => {
-              setSelectedOrder((current) => current?.order ? { ...current, order: { ...current.order, meeting_place: meetingPlace } } : current);
+            onMeetingPlaceSaved={(details) => {
+              setSelectedOrder((current) => current?.order ? { ...current, order: { ...current.order, ...details } } : current);
               setReloadToken((value) => value + 1);
             }}
             onMessageCustomer={(order) => {
@@ -3231,6 +3231,20 @@ function OrderManagement({ rows, updateOrder, onNavigate }) {
       </AnimatePresence>
     </div>
   );
+}
+
+function formatMeetupDate(value) {
+  if (!value) return "";
+  const date = new Date(`${String(value).slice(0, 10)}T00:00:00`);
+  return Number.isNaN(date.getTime()) ? "" : date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
+function formatMeetupTime(value) {
+  if (!value) return "";
+  const [hours, minutes] = String(value).slice(0, 5).split(":").map(Number);
+  if (!Number.isInteger(hours) || !Number.isInteger(minutes)) return "";
+  const date = new Date(2000, 0, 1, hours, minutes);
+  return date.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
 }
 
 function OrdersResponsiveView({ rows, onViewDetails }) {
@@ -3394,14 +3408,18 @@ function isOrderInDateRange(dateValue, range) {
 function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTrackingNumber, saveTracking, updateOrder, onStatusChanged, onMeetingPlaceSaved, onMessageCustomer, onClose }) {
   const source = selectedOrder?.order;
   const [meetingPlaceDraft, setMeetingPlaceDraft] = useState("");
+  const [meetupDateDraft, setMeetupDateDraft] = useState("");
+  const [meetupTimeDraft, setMeetupTimeDraft] = useState("");
   const [meetingPlaceSaving, setMeetingPlaceSaving] = useState(false);
   const [meetingPlaceError, setMeetingPlaceError] = useState("");
   const [deliverySafetyPolicy, setDeliverySafetyPolicy] = useState(defaultDeliverySafetyPolicy);
 
   useEffect(() => {
     setMeetingPlaceDraft(source?.meeting_place || "");
+    setMeetupDateDraft(source?.meetup_date ? String(source.meetup_date).slice(0, 10) : "");
+    setMeetupTimeDraft(source?.meetup_time ? String(source.meetup_time).slice(0, 5) : "");
     setMeetingPlaceError("");
-  }, [source?.id, source?.meeting_place]);
+  }, [source?.id, source?.meeting_place, source?.meetup_date, source?.meetup_time]);
 
   useEffect(() => {
     let active = true;
@@ -3424,8 +3442,16 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
     setMeetingPlaceSaving(true);
     setMeetingPlaceError("");
     try {
-      const { data } = await api.patch(`/orders/${source.id}/meeting-place`, { meetingPlace: meetingPlaceDraft });
-      onMeetingPlaceSaved?.(data.meeting_place || null);
+      const { data } = await api.patch(`/orders/${source.id}/meeting-place`, {
+        meetingPlace: meetingPlaceDraft,
+        meetupDate: meetupDateDraft,
+        meetupTime: meetupTimeDraft
+      });
+      onMeetingPlaceSaved?.({
+        meeting_place: data.meeting_place || null,
+        meetup_date: data.meetup_date || null,
+        meetup_time: data.meetup_time || null
+      });
     } catch (error) {
       setMeetingPlaceError(getApiErrorMessage(error, "Could not save meeting place."));
     } finally {
@@ -3466,7 +3492,7 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
                 </div>
               </div>
               {source.fulfillment_method === "delivery" ? <OrderDeliveryInfo order={source} title="Delivery Location" mapLabel="View Delivery Route" routeEnabled /> : null}
-              <section className="admin-meeting-place-card">
+              {source.meetup_eligible ? <section className="admin-meeting-place-card">
                 <div>
                   <p className="text-xs font-bold uppercase tracking-[0.16em] text-emerald-700">Meeting Place</p>
                   <h4 className="mt-1 font-display text-lg font-bold text-[#111827]">Admin-selected meetup location</h4>
@@ -3479,15 +3505,25 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
                   placeholder="Enter meeting place"
                   className="min-h-24 w-full resize-y rounded-2xl border border-[#dfe9e3] bg-white px-3 py-3 text-sm font-semibold text-[#111827] outline-none placeholder:text-slate-400 focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100"
                 />
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className="grid gap-1 text-sm font-bold text-slate-700">
+                    <span>Meetup Date</span>
+                    <input type="date" value={meetupDateDraft} onChange={(event) => setMeetupDateDraft(event.target.value)} className="min-h-11 rounded-xl border border-[#dfe9e3] bg-white px-3 py-2 text-sm font-semibold text-[#111827] outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100" />
+                  </label>
+                  <label className="grid gap-1 text-sm font-bold text-slate-700">
+                    <span>Meetup Time</span>
+                    <input type="time" value={meetupTimeDraft} onChange={(event) => setMeetupTimeDraft(event.target.value)} className="min-h-11 rounded-xl border border-[#dfe9e3] bg-white px-3 py-2 text-sm font-semibold text-[#111827] outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100" />
+                  </label>
+                </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <button type="button" disabled={meetingPlaceSaving} onClick={saveMeetingPlace} className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60">
                     {meetingPlaceSaving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
-                    Save Meeting Place
+                    Save Meetup Details
                   </button>
-                  {source.meeting_place ? <span className="break-words text-xs font-semibold text-slate-500">Saved: {source.meeting_place}</span> : <span className="text-xs font-semibold text-slate-500">Meeting place will be provided by the shop.</span>}
+                  {source.meeting_place || source.meetup_date || source.meetup_time ? <span className="break-words text-xs font-semibold text-slate-500">Saved: {source.meeting_place || "No meeting place"}{source.meetup_date ? ` · ${formatMeetupDate(source.meetup_date)}` : ""}{source.meetup_time ? ` · ${formatMeetupTime(source.meetup_time)}` : ""}</span> : <span className="text-xs font-semibold text-slate-500">Meeting place and meetup schedule will be provided by the shop.</span>}
                 </div>
                 {meetingPlaceError ? <p className="text-xs font-bold text-rose-600">{meetingPlaceError}</p> : null}
-              </section>
+              </section> : null}
               <section className="admin-delivery-safety-card">
                 <p className="text-xs font-bold uppercase tracking-[0.16em] text-emerald-700">Delivery & Meetup Safety</p>
                 <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-slate-600">{deliverySafetyPolicy}</p>

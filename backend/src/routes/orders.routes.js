@@ -8,6 +8,7 @@ import { productImageExpression } from "../utils/productImages.js";
 import { calculateCheckoutPricing } from "../utils/promotions.js";
 import { createAdminNotification } from "../utils/adminNotifications.js";
 import { ensureCartTable } from "./cart.routes.js";
+import { loadSystemSettings } from "../utils/systemSettings.js";
 
 const router = Router();
 const statuses = ["pending", "awaiting_payment", "paid", "approved", "processing", "ready", "completed", "cancelled", "payment_failed"];
@@ -28,6 +29,35 @@ const allowedAdminStatusTransitions = {
 const transientOrderLockCodes = new Set(["ER_LOCK_WAIT_TIMEOUT", "ER_LOCK_DEADLOCK"]);
 const maxOrderCreateAttempts = 3;
 let orderColumnsReady;
+
+function normalizeMunicipality(value) {
+  return String(value || "")
+    .toLowerCase()
+    .trim()
+    .replace(/[.,/\\-]+/g, " ")
+    .replace(/\s+/g, " ");
+}
+
+function addressMatchesMunicipality(address, municipality) {
+  const target = normalizeMunicipality(municipality);
+  const source = normalizeMunicipality(address);
+  if (!target || !source) return false;
+  const segments = source.split(/\s*,\s*/).map((segment) => segment.trim()).filter(Boolean);
+  if (segments.includes(target)) return true;
+  const escaped = target.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&");
+  return new RegExp(`(?:^|\\s)${escaped}(?:$|\\s)`, "i").test(source);
+}
+
+async function decorateMeetupEligibility(orders) {
+  if (!orders.length) return orders;
+  const { config } = await loadSystemSettings();
+  const shopMunicipality = config.general.shopMunicipality;
+  return orders.map((order) => ({
+    ...order,
+    meetup_eligible: Boolean(order.fulfillment_method === "delivery" && addressMatchesMunicipality(order.delivery_address || order.location, shopMunicipality)),
+    shop_municipality: shopMunicipality || null
+  }));
+}
 
 function normalizeOrderStatus(status) {
   return String(status || "").trim().toLowerCase().replace(/\s+/g, "_");
@@ -83,7 +113,7 @@ async function ensureOrderColumns() {
        FROM INFORMATION_SCHEMA.COLUMNS
        WHERE TABLE_SCHEMA = DATABASE()
          AND TABLE_NAME = 'orders'
-         AND COLUMN_NAME IN ('tracking_number', 'fulfillment_method', 'delivery_address', 'delivery_latitude', 'delivery_longitude', 'delivery_landmark', 'delivery_notes', 'meeting_place', 'subtotal_amount', 'coupon_discount', 'sale_discount', 'shipping_fee', 'coupon_code', 'payment_status', 'payment_reference', 'transaction_id', 'paid_at', 'payment_provider', 'checkout_session_id', 'checkout_url', 'order_channel', 'cash_received', 'change_amount', 'pos_cashier_id')`
+         AND COLUMN_NAME IN ('tracking_number', 'fulfillment_method', 'delivery_address', 'delivery_latitude', 'delivery_longitude', 'delivery_landmark', 'delivery_notes', 'meeting_place', 'meetup_date', 'meetup_time', 'subtotal_amount', 'coupon_discount', 'sale_discount', 'shipping_fee', 'coupon_code', 'payment_status', 'payment_reference', 'transaction_id', 'paid_at', 'payment_provider', 'checkout_session_id', 'checkout_url', 'order_channel', 'cash_received', 'change_amount', 'pos_cashier_id')`
     );
     const columns = new Set(rows.map((row) => row.COLUMN_NAME));
     await safeModifyColumn("orders", "status", "status enum update", "ALTER TABLE orders MODIFY status ENUM('pending','awaiting_payment','paid','approved','processing','ready','completed','cancelled','payment_failed') NOT NULL DEFAULT 'pending'");
@@ -102,6 +132,8 @@ async function ensureOrderColumns() {
     if (!columns.has("delivery_landmark")) await query("ALTER TABLE orders ADD COLUMN delivery_landmark VARCHAR(255) NULL AFTER delivery_longitude");
     if (!columns.has("delivery_notes")) await query("ALTER TABLE orders ADD COLUMN delivery_notes TEXT NULL AFTER delivery_landmark");
     if (!columns.has("meeting_place")) await query("ALTER TABLE orders ADD COLUMN meeting_place VARCHAR(500) NULL AFTER delivery_notes");
+    if (!columns.has("meetup_date")) await query("ALTER TABLE orders ADD COLUMN meetup_date DATE NULL AFTER meeting_place");
+    if (!columns.has("meetup_time")) await query("ALTER TABLE orders ADD COLUMN meetup_time TIME NULL AFTER meetup_date");
     if (!columns.has("subtotal_amount")) await query("ALTER TABLE orders ADD COLUMN subtotal_amount DECIMAL(10,2) NOT NULL DEFAULT 0 AFTER fulfillment_method");
     if (!columns.has("coupon_discount")) await query("ALTER TABLE orders ADD COLUMN coupon_discount DECIMAL(10,2) NOT NULL DEFAULT 0 AFTER subtotal_amount");
     if (!columns.has("sale_discount")) await query("ALTER TABLE orders ADD COLUMN sale_discount DECIMAL(10,2) NOT NULL DEFAULT 0 AFTER coupon_discount");
@@ -148,6 +180,8 @@ router.get("/", requireAuth, requireApproved, asyncHandler(async (req, res) => {
     o.delivery_landmark,
     o.delivery_notes,
     o.meeting_place,
+    o.meetup_date,
+    o.meetup_time,
     o.subtotal_amount,
     o.coupon_discount,
     o.sale_discount,
@@ -206,6 +240,8 @@ GROUP BY
     o.delivery_landmark,
     o.delivery_notes,
     o.meeting_place,
+    o.meetup_date,
+    o.meetup_time,
     o.subtotal_amount,
     o.coupon_discount,
     o.sale_discount,
@@ -219,7 +255,7 @@ ORDER BY o.created_at DESC`,
 {
     userId: req.user.id,
 });
-  res.json(orders);
+  res.json(await decorateMeetupEligibility(orders));
 }));
 
 router.get("/:id/items", requireAuth, requireApproved, asyncHandler(async (req, res) => {
@@ -229,7 +265,7 @@ router.get("/:id/items", requireAuth, requireApproved, asyncHandler(async (req, 
     `SELECT o.id, o.user_id, o.order_channel, o.status, o.payment_method, o.payment_status, o.payment_reference,
        o.transaction_id, o.paid_at, o.cash_received, o.change_amount,
        o.tracking_number, o.fulfillment_method, o.delivery_address, o.delivery_latitude,
-       o.delivery_longitude, o.delivery_landmark, o.delivery_notes, o.meeting_place, o.subtotal_amount, o.coupon_discount,
+       o.delivery_longitude, o.delivery_landmark, o.delivery_notes, o.meeting_place, o.meetup_date, o.meetup_time, o.subtotal_amount, o.coupon_discount,
        o.sale_discount, o.shipping_fee, o.coupon_code, o.total_amount, o.checkout_url, o.created_at,
        u.username, u.location, u.phone_number
      FROM orders o
@@ -250,7 +286,8 @@ router.get("/:id/items", requireAuth, requireApproved, asyncHandler(async (req, 
     { id: req.params.id }
   );
 
-  res.json({ order: orders[0], items });
+  const [order] = await decorateMeetupEligibility(orders);
+  res.json({ order, items });
 }));
 
 router.patch("/:id/cancel", requireAuth, requireApproved, asyncHandler(async (req, res) => {
@@ -643,14 +680,24 @@ router.patch("/:id/tracking", requireAuth, requireRole("admin"), asyncHandler(as
 
 router.patch("/:id/meeting-place", requireAuth, requireRole("admin"), asyncHandler(async (req, res) => {
   await ensureOrderColumns();
-  const schema = z.object({ meetingPlace: z.string().trim().max(500).optional().default("") });
+  const schema = z.object({
+    meetingPlace: z.string().trim().max(500).optional().default(""),
+    meetupDate: z.string().trim().regex(/^$|^\d{4}-\d{2}-\d{2}$/).optional().default(""),
+    meetupTime: z.string().trim().regex(/^$|^\d{2}:\d{2}$/).optional().default("")
+  });
   const input = schema.parse(req.body);
   const orderId = Number(req.params.id);
   if (!Number.isInteger(orderId) || orderId <= 0) throw new HttpError(400, "A valid order ID is required");
-  const orders = await query("SELECT id, user_id, order_channel FROM orders WHERE id = :id", { id: orderId });
+  const orders = await query("SELECT orders.id, orders.user_id, orders.order_channel, orders.fulfillment_method, orders.delivery_address, users.location FROM orders LEFT JOIN users ON users.id = orders.user_id WHERE orders.id = :id", { id: orderId });
   if (!orders.length) throw new HttpError(404, "Order not found");
+  const { config } = await loadSystemSettings();
+  if (orders[0].fulfillment_method !== "delivery" || !addressMatchesMunicipality(orders[0].delivery_address || orders[0].location, config.general.shopMunicipality)) {
+    throw new HttpError(403, "Meeting place and meetup schedule are only available for customers within the shop municipality.");
+  }
   const meetingPlace = input.meetingPlace || null;
-  await query("UPDATE orders SET meeting_place = :meetingPlace WHERE id = :id", { id: orderId, meetingPlace });
+  const meetupDate = input.meetupDate || null;
+  const meetupTime = input.meetupTime || null;
+  await query("UPDATE orders SET meeting_place = :meetingPlace, meetup_date = :meetupDate, meetup_time = :meetupTime WHERE id = :id", { id: orderId, meetingPlace, meetupDate, meetupTime });
   if (orders[0].user_id) {
     await query(
       "INSERT INTO notifications (user_id, type, title, body) VALUES (:userId, 'order', 'Meeting place updated', :body)",
@@ -661,15 +708,15 @@ router.patch("/:id/meeting-place", requireAuth, requireRole("admin"), asyncHandl
           : `Meeting place for Order #${orderId} was cleared.`
       }
     );
-    req.app.get("io")?.to(`user:${orders[0].user_id}`).emit("order:update", { id: orderId, meeting_place: meetingPlace });
+    req.app.get("io")?.to(`user:${orders[0].user_id}`).emit("order:update", { id: orderId, meeting_place: meetingPlace, meetup_date: meetupDate, meetup_time: meetupTime });
     req.app.get("io")?.to(`user:${orders[0].user_id}`).emit("notification:new", {
       type: "order",
       title: "Meeting place updated",
       body: meetingPlace ? `Meeting place for Order #${orderId}: ${meetingPlace}` : `Meeting place for Order #${orderId} was cleared.`
     });
   }
-  req.app.get("io")?.to("admin").emit("order:update", { id: orderId, meeting_place: meetingPlace });
-  res.json({ message: "Meeting place saved", meeting_place: meetingPlace });
+  req.app.get("io")?.to("admin").emit("order:update", { id: orderId, meeting_place: meetingPlace, meetup_date: meetupDate, meetup_time: meetupTime });
+  res.json({ message: "Meetup details saved", meeting_place: meetingPlace, meetup_date: meetupDate, meetup_time: meetupTime });
 }));
 
 export default router;

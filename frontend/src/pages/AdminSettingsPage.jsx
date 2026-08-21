@@ -45,6 +45,7 @@ const defaultSettings = {
     contactNumber: "",
     emailAddress: "",
     shopAddress: "",
+    shopMunicipality: "",
     shopLatitude: null,
     shopLongitude: null,
     currency: "PHP",
@@ -553,6 +554,7 @@ export default function AdminSettingsPage({ onChange }) {
             <TextInput label="Contact Number" value={settings.general.contactNumber} error={errors["general.contactNumber"]} onChange={(value) => updateSetting("general", "contactNumber", value)} />
             <TextInput label="Email Address" type="email" value={settings.general.emailAddress} error={errors["general.emailAddress"]} onChange={(value) => updateSetting("general", "emailAddress", value)} />
             <TextInput label="Shop Address" value={settings.general.shopAddress} onChange={(value) => updateSetting("general", "shopAddress", value)} className="md:col-span-2" />
+            <TextInput label="Shop Municipality" value={settings.general.shopMunicipality} onChange={(value) => updateSetting("general", "shopMunicipality", value)} placeholder="Example: Midsayap" />
             <ShopLocationSetting
               value={settings.general}
               error={errors["general.shopLocation"]}

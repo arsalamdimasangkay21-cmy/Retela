@@ -2591,7 +2591,7 @@ function CustomerOrderModal({ loading, selectedOrder, displayNumber, deliverySaf
                   <ModalInfo label="Payment Status" value={customerOrderStatus(order.payment_status || "unpaid")} />
                 </div>
                 {order.fulfillment_method === "delivery" ? <OrderDeliveryInfo order={order} title="Delivery Information" mapLabel="View Location" /> : null}
-                <section className="retela-meeting-place-card">
+                {order.meetup_eligible ? <section className="retela-meeting-place-card">
                   <div>
                     <p className="retela-modal-eyebrow">Meeting Place</p>
                     <h4>Admin-selected meetup location</h4>
@@ -2608,7 +2608,11 @@ function CustomerOrderModal({ loading, selectedOrder, displayNumber, deliverySaf
                   ) : (
                     <p>Meeting place will be provided by the shop.</p>
                   )}
-                </section>
+                  <div className="mt-3 border-t border-emerald-100 pt-3">
+                    <p className="retela-modal-eyebrow">Meetup Date &amp; Time</p>
+                    <p>{order.meetup_date ? formatMeetupDate(order.meetup_date) : "Meetup date will be provided by the shop."}{order.meetup_time ? ` • ${formatMeetupTime(order.meetup_time)}` : ""}</p>
+                  </div>
+                </section> : null}
                 <DeliverySafetyPolicyCard policy={deliverySafetyPolicy} />
                 <div className="grid gap-2">
                   <p className="retela-modal-eyebrow">Items</p>
@@ -2711,6 +2715,19 @@ function paymentLabel(method) {
   if (method === "credit") return "Credit Card";
   if (method === "maya") return "Maya";
   return "COD";
+}
+
+function formatMeetupDate(value) {
+  if (!value) return "";
+  const date = new Date(`${String(value).slice(0, 10)}T00:00:00`);
+  return Number.isNaN(date.getTime()) ? "" : date.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+}
+
+function formatMeetupTime(value) {
+  if (!value) return "";
+  const [hours, minutes] = String(value).slice(0, 5).split(":").map(Number);
+  if (!Number.isInteger(hours) || !Number.isInteger(minutes)) return "";
+  return new Date(2000, 0, 1, hours, minutes).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
 }
 
 function Detail({ label, value }) {
