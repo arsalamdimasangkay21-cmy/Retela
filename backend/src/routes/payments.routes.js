@@ -9,7 +9,13 @@ import { createAdminNotification } from "../utils/adminNotifications.js";
 const router = Router();
 let paymentColumnsReady;
 const PAYMONGO_CHECKOUT_URL = "https://api.paymongo.com/v2/checkout_sessions";
-const GCASH_PAYMENT_METHOD_TYPES = ["gcash"];
+const PAYMONGO_GCASH_PAYMENT_METHOD_TYPES = Object.freeze(["gcash"]);
+const PAYMONGO_CHECKOUT_METHOD_TYPES = Object.freeze({
+  gcash: PAYMONGO_GCASH_PAYMENT_METHOD_TYPES,
+  debit: Object.freeze(["card"]),
+  credit: Object.freeze(["card"]),
+  maya: Object.freeze(["paymaya"])
+});
 
 async function ensurePaymentColumns() {
   paymentColumnsReady ||= (async () => {
@@ -40,6 +46,14 @@ async function ensurePaymentColumns() {
 function paymongoSecret() {
   const key = process.env.PAYMONGO_SECRET_KEY || "";
   if (!key) throw new HttpError(503, "PayMongo configuration missing. Contact administrator.");
+  if (key.startsWith("pk_")) {
+    console.error("[paymongo config] PAYMONGO_SECRET_KEY contains a public key. Use an sk_test_ or sk_live_ secret key on the backend.");
+    throw new HttpError(503, "PayMongo configuration invalid. Contact administrator.");
+  }
+  if (!key.startsWith("sk_test_") && !key.startsWith("sk_live_") && !globalThis.__RETELA_PAYMONGO_KEY_FORMAT_WARNING__) {
+    globalThis.__RETELA_PAYMONGO_KEY_FORMAT_WARNING__ = true;
+    console.warn("[paymongo config] PAYMONGO_SECRET_KEY does not look like a PayMongo secret key.");
+  }
   return key;
 }
 
@@ -49,7 +63,16 @@ function assertPaymongoConfigured() {
 
 function clientUrl(path) {
   const base = (process.env.CLIENT_URL || "https://retela.shop").split(",")[0].trim().replace(/\/$/, "");
-  return `${base}${path}`;
+  const url = `${base}${path}`;
+  try {
+    return new URL(url).toString();
+  } catch {
+    console.error("[paymongo config] CLIENT_URL produced an invalid PayMongo redirect URL.", {
+      configured: Boolean(process.env.CLIENT_URL),
+      path
+    });
+    throw new HttpError(503, "Payment redirect URL is not configured correctly. Contact administrator.");
+  }
 }
 
 function authHeader() {
@@ -61,6 +84,51 @@ function paymongoErrorDetails(data) {
   return {
     code: error.code || null,
     detail: error.detail || error.message || null
+  };
+}
+
+function checkoutPaymentMethodTypes(method) {
+  const normalizedMethod = String(method || "gcash").toLowerCase();
+  const paymentMethodTypes = PAYMONGO_CHECKOUT_METHOD_TYPES[normalizedMethod];
+  if (!paymentMethodTypes) {
+    throw new HttpError(400, "This online payment method is not available.");
+  }
+  if (!Array.isArray(paymentMethodTypes) || paymentMethodTypes.length === 0) {
+    console.error("[paymongo config] PayMongo checkout payment_method_types is empty.", {
+      requestedPaymentMethod: normalizedMethod
+    });
+    throw new HttpError(503, "PayMongo payment methods are not configured. Contact administrator.");
+  }
+  return [...paymentMethodTypes];
+}
+
+function safeUrlSummary(url) {
+  try {
+    const parsed = new URL(url);
+    return `${parsed.origin}${parsed.pathname}`;
+  } catch {
+    return "invalid_url";
+  }
+}
+
+function buildCheckoutPayload({ orderId, reference, billing, amount, paymentMethodTypes, successUrl, cancelUrl }) {
+  return {
+    data: {
+      attributes: {
+        billing,
+        description: `RETELA Order #${orderId}`,
+        line_items: [{
+          currency: "PHP",
+          amount,
+          name: `RETELA Order #${orderId}`,
+          quantity: 1
+        }],
+        payment_method_types: paymentMethodTypes,
+        reference_number: reference,
+        success_url: successUrl,
+        cancel_url: cancelUrl
+      }
+    }
   };
 }
 
@@ -171,20 +239,36 @@ router.post("/create-gcash-checkout", requireAuth, requireApproved, asyncHandler
 
   const reference = `RETELA-${order.id}-${Date.now()}`;
   const amount = Math.round(Number(order.total_amount) * 100);
+  if (!Number.isSafeInteger(amount) || amount <= 0) {
+    throw new HttpError(400, "Invalid order amount for online payment.");
+  }
+  const paymentMethodTypes = checkoutPaymentMethodTypes(input.paymentMethod);
+  const successUrl = clientUrl(`/payment/success?order=${order.id}&ref=${reference}`);
+  const cancelUrl = clientUrl(`/payment/cancel?order=${order.id}&ref=${reference}`);
   const billingPhone = input.billingPhone || order.phone_number || "";
   const billing = {
     name: order.display_name || order.username || req.user.username,
     ...(order.email ? { email: order.email } : {}),
     ...(billingPhone ? { phone: billingPhone } : {})
   };
-  console.log("Creating GCash payment", {
+  console.log("Creating PayMongo checkout", {
     orderId: order.id,
     requestedPaymentMethod: input.paymentMethod,
-    paymentMethodTypes: GCASH_PAYMENT_METHOD_TYPES,
+    paymentMethodTypes,
     provider: "paymongo",
     amount,
-    successUrl: clientUrl(`/payment/success?order=${order.id}&ref=${reference}`),
-    cancelUrl: clientUrl(`/payment/cancel?order=${order.id}&ref=${reference}`)
+    currency: "PHP",
+    successUrl: safeUrlSummary(successUrl),
+    cancelUrl: safeUrlSummary(cancelUrl)
+  });
+  const checkoutPayload = buildCheckoutPayload({
+    orderId: order.id,
+    reference,
+    billing,
+    amount,
+    paymentMethodTypes,
+    successUrl,
+    cancelUrl
   });
   let response;
   let data;
@@ -195,34 +279,17 @@ router.post("/create-gcash-checkout", requireAuth, requireApproved, asyncHandler
         Authorization: authHeader(),
         "Content-Type": "application/json"
       },
-      body: JSON.stringify({
-        data: {
-          attributes: {
-            billing,
-            description: `RETELA Order #${order.id}`,
-            line_items: [{
-              currency: "PHP",
-              amount,
-              name: `RETELA Order #${order.id}`,
-              quantity: 1
-            }],
-            payment_method_types: GCASH_PAYMENT_METHOD_TYPES,
-            reference_number: reference,
-            success_url: clientUrl(`/payment/success?order=${order.id}&ref=${reference}`),
-            cancel_url: clientUrl(`/payment/cancel?order=${order.id}&ref=${reference}`)
-          }
-        }
-      })
+      body: JSON.stringify(checkoutPayload)
     });
     data = await response.json().catch(() => ({}));
     if (response.ok) logPaymongoCheckoutResponse(data);
   } catch (error) {
-    console.error("GCash payment error:", {
+    console.error("PayMongo checkout error:", {
       provider: "paymongo",
       message: error.message,
       code: error.code || null
     });
-    throw new HttpError(502, "Unable to create GCash payment.");
+    throw new HttpError(502, "Unable to create online payment.");
   }
   console.log("Payment provider status:", {
     provider: "paymongo",
@@ -232,23 +299,23 @@ router.post("/create-gcash-checkout", requireAuth, requireApproved, asyncHandler
   });
   if (!response.ok) {
     const providerError = paymongoErrorDetails(data);
-    console.error("GCash payment error:", {
+    console.error("PayMongo checkout error:", {
       provider: "paymongo",
       status: response.status,
       detail: providerError.detail,
       code: providerError.code
     });
-    throw new HttpError(502, providerError.detail || "Unable to create GCash payment.");
+    throw new HttpError(502, providerError.detail || "Unable to create online payment.");
   }
   const checkoutUrl = data?.data?.attributes?.checkout_url;
   if (!checkoutUrl) {
-    console.error("GCash payment error:", {
+    console.error("PayMongo checkout error:", {
       provider: "paymongo",
       status: response.status,
       reason: "missing_checkout_url",
       orderId: order.id
     });
-    throw new HttpError(502, "GCash checkout URL was not returned by the payment provider.");
+    throw new HttpError(502, "Payment checkout URL was not returned by the payment provider.");
   }
 
   await query(
@@ -263,7 +330,7 @@ router.post("/create-gcash-checkout", requireAuth, requireApproved, asyncHandler
      WHERE id = :orderId`,
     {
       orderId: order.id,
-      paymentMethod: "gcash",
+      paymentMethod: input.paymentMethod,
       reference,
       sessionId: data.data.id,
       checkoutUrl
