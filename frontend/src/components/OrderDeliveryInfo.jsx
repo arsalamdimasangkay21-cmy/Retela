@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Loader2, MapPin } from "lucide-react";
-import { cachedGet } from "../api/client";
+import { api, cachedGet } from "../api/client";
+import { osmTileUrl, routeUrl, validMapCoordinate } from "../config/maps";
 
 function finiteCoordinate(value) {
   const number = Number(value);
@@ -86,6 +87,7 @@ export default function OrderDeliveryInfo({ order, title = "Delivery Information
 }
 
 function InlineDeliveryRoute({ order, snapshot }) {
+  const [destinationSnapshot, setDestinationSnapshot] = useState(snapshot);
   const [settings, setSettings] = useState(null);
   const [route, setRoute] = useState(null);
   const [loadingSettings, setLoadingSettings] = useState(true);
@@ -94,7 +96,31 @@ function InlineDeliveryRoute({ order, snapshot }) {
 
   const shop = useMemo(() => normalizeShopLocation(settings || {}), [settings]);
   const hasShopCoordinates = shop.latitude !== null && shop.longitude !== null;
-  const hasDestinationCoordinates = snapshot.latitude !== null && snapshot.longitude !== null;
+  const hasDestinationCoordinates = validMapCoordinate(destinationSnapshot.latitude, destinationSnapshot.longitude);
+
+  useEffect(() => {
+    setDestinationSnapshot(snapshot);
+  }, [snapshot.address, snapshot.latitude, snapshot.longitude, snapshot.landmark, snapshot.notes]);
+
+  useEffect(() => {
+    if (hasDestinationCoordinates || !destinationSnapshot.address || !order?.id) return undefined;
+    let active = true;
+    api.post(`/orders/${order.id}/resolve-delivery-location`)
+      .then(({ data }) => {
+        if (!active) return;
+        setDestinationSnapshot((current) => ({ ...current, latitude: finiteCoordinate(data.delivery_latitude), longitude: finiteCoordinate(data.delivery_longitude) }));
+      })
+      .catch(() => {});
+    return () => { active = false; };
+  }, [destinationSnapshot.address, hasDestinationCoordinates, order?.id]);
+
+  useEffect(() => {
+    if (import.meta.env.DEV && hasShopCoordinates && hasDestinationCoordinates) {
+      console.info("[delivery-map] shop", { latitude: shop.latitude, longitude: shop.longitude });
+      console.info("[delivery-map] customer", { latitude: destinationSnapshot.latitude, longitude: destinationSnapshot.longitude });
+      console.info("[route] provider", "OSRM");
+    }
+  }, [destinationSnapshot.latitude, destinationSnapshot.longitude, hasDestinationCoordinates, hasShopCoordinates, shop.latitude, shop.longitude]);
 
   useEffect(() => {
     let active = true;
@@ -118,11 +144,15 @@ function InlineDeliveryRoute({ order, snapshot }) {
     const controller = new AbortController();
     setLoadingRoute(true);
     setError("");
+    if (import.meta.env.DEV) console.info("[route] request", { origin: { latitude: shop.latitude, longitude: shop.longitude }, destination: { latitude: destinationSnapshot.latitude, longitude: destinationSnapshot.longitude } });
     fetch(
-      `https://router.project-osrm.org/route/v1/driving/${shop.longitude},${shop.latitude};${snapshot.longitude},${snapshot.latitude}?overview=full&geometries=geojson`,
+      routeUrl(shop, destinationSnapshot),
       { signal: controller.signal }
     )
-      .then((response) => response.ok ? response.json() : Promise.reject(new Error("Route unavailable")))
+      .then((response) => {
+        if (import.meta.env.DEV) console.info("[route] HTTP status", response.status);
+        return response.ok ? response.json() : Promise.reject(new Error(`Route unavailable (${response.status})`));
+      })
       .then((data) => {
         const routeData = Array.isArray(data?.routes) ? data.routes[0] : null;
         if (!routeData) throw new Error("Route unavailable");
@@ -131,33 +161,37 @@ function InlineDeliveryRoute({ order, snapshot }) {
           distanceMeters: Number(routeData.distance || 0),
           durationSeconds: Number(routeData.duration || 0)
         });
+        if (import.meta.env.DEV) console.info("[route] response", { distanceMeters: routeData.distance, durationSeconds: routeData.duration });
       })
       .catch((requestError) => {
-        if (requestError?.name !== "AbortError") setError("Route details are unavailable right now.");
+        if (requestError?.name !== "AbortError") {
+          if (import.meta.env.DEV) console.warn("[route] error", requestError?.message);
+          setError("Route details are temporarily unavailable.");
+        }
       })
       .finally(() => {
         setLoadingRoute(false);
       });
     return () => controller.abort();
-  }, [hasDestinationCoordinates, hasShopCoordinates, loadingSettings, shop.latitude, shop.longitude, snapshot.latitude, snapshot.longitude]);
+  }, [destinationSnapshot.latitude, destinationSnapshot.longitude, hasDestinationCoordinates, hasShopCoordinates, loadingSettings, shop.latitude, shop.longitude]);
 
   return <div className="retela-inline-route">
         <div className="retela-route-summary">
           <RouteInfoBlock label="From" value={shop.name || "Tela to Pera Thrift Shop"} detail={shop.address || "Exact RETELA shop location has not been configured yet."} />
-          <RouteInfoBlock label="To" value="Customer Delivery Location" detail={snapshot.address || "No exact delivery location was saved for this order."} />
+          <RouteInfoBlock label="To" value="Customer Delivery Location" detail={destinationSnapshot.address || "No exact delivery location was saved for this order."} />
         </div>
 
-        {snapshot.landmark ? (
+        {destinationSnapshot.landmark ? (
           <div className="retela-route-note">
             <span>Landmark</span>
-            <strong>{snapshot.landmark}</strong>
+            <strong>{destinationSnapshot.landmark}</strong>
           </div>
         ) : null}
 
-        {snapshot.notes ? (
+        {destinationSnapshot.notes ? (
           <div className="retela-route-note">
             <span>Delivery Notes</span>
-            <strong>{snapshot.notes}</strong>
+            <strong>{destinationSnapshot.notes}</strong>
           </div>
         ) : null}
 
@@ -220,7 +254,7 @@ function DeliveryRouteMap({ shop, destination, route }) {
       {tileState !== "error" && map.tiles.map((tile) => (
         <img
           key={`${tile.tileX}-${tile.tileY}-${map.zoom}-${tileVersion}`}
-          src={`https://tile.openstreetmap.org/${map.zoom}/${tile.tileX}/${tile.tileY}.png?v=${tileVersion}`}
+          src={osmTileUrl(map.zoom, tile.tileX, tile.tileY, tileVersion)}
           alt=""
           loading="lazy"
           onLoad={() => setTileState((state) => state === "loading" ? "ready" : state)}
@@ -252,8 +286,8 @@ export function MeetingLocationMap({ customer, meeting, onSelect }) {
   const [tileVersion, setTileVersion] = useState(0);
   const [route, setRoute] = useState(null);
   const [routeState, setRouteState] = useState("idle");
-  const hasCustomer = customer?.latitude != null && customer?.longitude != null;
-  const hasMeeting = meeting?.latitude != null && meeting?.longitude != null;
+  const hasCustomer = validMapCoordinate(customer?.latitude, customer?.longitude);
+  const hasMeeting = validMapCoordinate(meeting?.latitude, meeting?.longitude);
   const map = useMemo(() => buildRouteMapModel(customer, meeting || customer, route, zoomOffset), [customer, meeting, route, zoomOffset]);
   const routePoints = (route?.coordinates?.length ? route.coordinates : hasMeeting ? [customer, meeting] : [customer]).map((point) => projectPointOnMap(point, map));
   const routeReady = Boolean(route?.coordinates?.length);
@@ -271,16 +305,24 @@ export function MeetingLocationMap({ customer, meeting, onSelect }) {
     }
     const controller = new AbortController();
     setRouteState("loading");
-    fetch(`https://router.project-osrm.org/route/v1/driving/${customer.longitude},${customer.latitude};${meeting.longitude},${meeting.latitude}?overview=full&geometries=geojson`, { signal: controller.signal })
-      .then((response) => response.ok ? response.json() : Promise.reject(new Error("Route unavailable")))
+    if (import.meta.env.DEV) console.info("[route] request", { origin: customer, destination: meeting });
+    fetch(routeUrl(customer, meeting), { signal: controller.signal })
+      .then((response) => {
+        if (import.meta.env.DEV) console.info("[route] HTTP status", response.status);
+        return response.ok ? response.json() : Promise.reject(new Error(`Route unavailable (${response.status})`));
+      })
       .then((data) => {
         const routeData = Array.isArray(data?.routes) ? data.routes[0] : null;
         if (!routeData) throw new Error("Route unavailable");
         setRoute({ coordinates: (routeData.geometry?.coordinates || []).map(([longitude, latitude]) => ({ latitude, longitude })), distanceMeters: Number(routeData.distance || 0), durationSeconds: Number(routeData.duration || 0) });
+        if (import.meta.env.DEV) console.info("[route] response", { distanceMeters: routeData.distance, durationSeconds: routeData.duration });
         setRouteState("ready");
       })
       .catch((error) => {
-        if (error?.name !== "AbortError") setRouteState("error");
+        if (error?.name !== "AbortError") {
+          if (import.meta.env.DEV) console.warn("[route] error", error?.message);
+          setRouteState("error");
+        }
       });
     return () => controller.abort();
   }, [customer?.latitude, customer?.longitude, hasCustomer, hasMeeting, meeting?.latitude, meeting?.longitude]);
@@ -296,7 +338,7 @@ export function MeetingLocationMap({ customer, meeting, onSelect }) {
 
   return (
     <div className="retela-route-map retela-meetup-map" onClick={selectFromMap} role={onSelect ? "button" : undefined} tabIndex={onSelect ? 0 : undefined} aria-label={onSelect ? "Select meetup location on map" : "Customer to meetup route map"}>
-      {tileState !== "error" && map.tiles.map((tile) => <img key={`${tile.tileX}-${tile.tileY}-${map.zoom}-${tileVersion}`} src={`https://tile.openstreetmap.org/${map.zoom}/${tile.tileX}/${tile.tileY}.png?v=${tileVersion}`} alt="" loading="lazy" onLoad={() => setTileState((state) => state === "loading" ? "ready" : state)} onError={() => { if (import.meta.env.DEV) console.warn("[map] tile load error"); setTileState("error"); }} style={{ left: `calc(50% + ${(tile.x - map.offsetX) * 256}px)`, top: `calc(50% + ${(tile.y - map.offsetY) * 256}px)` }} />)}
+      {tileState !== "error" && map.tiles.map((tile) => <img key={`${tile.tileX}-${tile.tileY}-${map.zoom}-${tileVersion}`} src={osmTileUrl(map.zoom, tile.tileX, tile.tileY, tileVersion)} alt="" loading="lazy" onLoad={() => setTileState((state) => state === "loading" ? "ready" : state)} onError={() => { if (import.meta.env.DEV) console.warn("[map] tile load error"); setTileState("error"); }} style={{ left: `calc(50% + ${(tile.x - map.offsetX) * 256}px)`, top: `calc(50% + ${(tile.y - map.offsetY) * 256}px)` }} />)}
       {tileState === "error" ? <div className="retela-map-status-overlay"><span>Map could not be loaded.</span><button type="button" onClick={retryTiles}>Retry</button></div> : null}
       {tileState === "loading" ? <div className="retela-map-status-overlay is-loading"><Loader2 size={16} className="animate-spin" /> Loading map...</div> : null}
       {tileState === "ready" ? <>

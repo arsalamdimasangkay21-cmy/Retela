@@ -20,6 +20,7 @@ import ProductImage from "../components/ProductImage";
 import ProductQuickView from "../components/ProductQuickView";
 import { Button, Card, Field } from "../components/ui";
 import { resolveAssetUrl } from "../config/branding";
+import { osmTileUrl } from "../config/maps";
 import { useAuth } from "../context/AuthContext";
 import useBlockingLoader from "../hooks/useBlockingLoader";
 import { emitUserThemeChange, readUserTheme, saveUserTheme } from "../utils/userTheme";
@@ -1920,7 +1921,7 @@ function LightweightDeliveryMap({ location, resolving, onSelect }) {
         {tileState !== "error" && tiles.map((tile) => (
           <img
             key={`${tile.tileX}-${tile.tileY}-${zoom}-${tileVersion}`}
-            src={`https://tile.openstreetmap.org/${zoom}/${tile.tileX}/${tile.tileY}.png?v=${tileVersion}`}
+            src={osmTileUrl(zoom, tile.tileX, tile.tileY, tileVersion)}
             alt=""
             loading="lazy"
             onLoad={() => setTileState((state) => state === "loading" ? "ready" : state)}

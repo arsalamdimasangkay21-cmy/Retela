@@ -681,6 +681,32 @@ router.patch("/:id/status", requireAuth, requireRole("admin"), asyncHandler(asyn
   res.json({ message: "Order updated" });
 }));
 
+router.post("/:id/resolve-delivery-location", requireAuth, requireApproved, asyncHandler(async (req, res) => {
+  await ensureOrderColumns();
+  const ownershipFilter = req.user.role === "admin" ? "" : "AND o.user_id = :userId";
+  const orders = await query(`SELECT o.id, o.user_id, o.delivery_address, o.delivery_latitude, o.delivery_longitude FROM orders o WHERE o.id = :id ${ownershipFilter} LIMIT 1`, { id: req.params.id, userId: req.user.id });
+  if (!orders.length) throw new HttpError(404, "Order not found");
+  const existingLatitude = Number(orders[0].delivery_latitude);
+  const existingLongitude = Number(orders[0].delivery_longitude);
+  if (Number.isFinite(existingLatitude) && Number.isFinite(existingLongitude) && Math.abs(existingLatitude) <= 90 && Math.abs(existingLongitude) <= 180 && !(Math.abs(existingLatitude) < 0.01 && Math.abs(existingLongitude) < 0.01)) {
+    return res.json({ delivery_latitude: existingLatitude, delivery_longitude: existingLongitude });
+  }
+  const address = String(orders[0].delivery_address || "").trim();
+  if (!address) throw new HttpError(409, "No saved delivery address is available to resolve.");
+  const response = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=ph&q=${encodeURIComponent(address)}`, { headers: { "User-Agent": "RETELA/1.0 delivery-location-resolver" } });
+  if (!response.ok) throw new HttpError(503, "Delivery location could not be resolved right now.");
+  const geocoded = await response.json();
+  const [result] = Array.isArray(geocoded) ? geocoded : [];
+  const latitude = Number.parseFloat(result?.lat);
+  const longitude = Number.parseFloat(result?.lon);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude) || Math.abs(latitude) < 0.01 || Math.abs(longitude) < 0.01) throw new HttpError(503, "Delivery location coordinates are unavailable for this order.");
+  await query("UPDATE orders SET delivery_latitude = :latitude, delivery_longitude = :longitude WHERE id = :id AND delivery_latitude IS NULL AND delivery_longitude IS NULL", { id: req.params.id, latitude, longitude });
+  const payload = { id: Number(req.params.id), delivery_latitude: latitude, delivery_longitude: longitude };
+  req.app.get("io")?.to(`user:${orders[0].user_id}`).emit("order:update", payload);
+  req.app.get("io")?.to("admin").emit("order:update", payload);
+  res.json(payload);
+}));
+
 router.patch("/:id/tracking", requireAuth, requireRole("admin"), asyncHandler(async (req, res) => {
   await ensureOrderColumns();
   const schema = z.object({ tracking_number: z.string().trim().max(120).optional().default("") });
