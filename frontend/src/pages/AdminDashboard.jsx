@@ -11,7 +11,7 @@ import { ChangePasswordForm } from "../components/ChangePasswordForm";
 import ConfirmDialog from "../components/ConfirmDialog";
 import CustomerDocumentsModal from "../components/CustomerDocumentsModal";
 import NotificationPreviewPanel from "../components/NotificationPreviewPanel";
-import OrderDeliveryInfo, { MeetingLocationMap } from "../components/OrderDeliveryInfo";
+import OrderDeliveryInfo from "../components/OrderDeliveryInfo";
 import ProductImage from "../components/ProductImage";
 import ProductQuickView from "../components/ProductQuickView";
 import { Button, Card, Field, StatCard } from "../components/ui";
@@ -3418,8 +3418,6 @@ function isOrderInDateRange(dateValue, range) {
 function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTrackingNumber, saveTracking, updateOrder, onStatusChanged, onMeetingPlaceSaved, onMessageCustomer, onClose }) {
   const source = selectedOrder?.order;
   const [meetingPlaceDraft, setMeetingPlaceDraft] = useState("");
-  const [meetingLatitudeDraft, setMeetingLatitudeDraft] = useState(null);
-  const [meetingLongitudeDraft, setMeetingLongitudeDraft] = useState(null);
   const [meetupDateDraft, setMeetupDateDraft] = useState("");
   const [meetupTimeDraft, setMeetupTimeDraft] = useState("");
   const [meetingPlaceSaving, setMeetingPlaceSaving] = useState(false);
@@ -3428,12 +3426,10 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
 
   useEffect(() => {
     setMeetingPlaceDraft(source?.meeting_place || "");
-    setMeetingLatitudeDraft(source?.meeting_latitude == null ? null : Number(source.meeting_latitude));
-    setMeetingLongitudeDraft(source?.meeting_longitude == null ? null : Number(source.meeting_longitude));
     setMeetupDateDraft(source?.meetup_date ? String(source.meetup_date).slice(0, 10) : "");
     setMeetupTimeDraft(source?.meetup_time ? String(source.meetup_time).slice(0, 5) : "");
     setMeetingPlaceError("");
-  }, [source?.id, source?.meeting_place, source?.meeting_latitude, source?.meeting_longitude, source?.meetup_date, source?.meetup_time]);
+  }, [source?.id, source?.meeting_place, source?.meetup_date, source?.meetup_time]);
 
   useEffect(() => {
     let active = true;
@@ -3458,15 +3454,11 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
     try {
       const { data } = await api.patch(`/orders/${source.id}/meeting-place`, {
         meetingPlace: meetingPlaceDraft,
-        meetingLatitude: meetingLatitudeDraft,
-        meetingLongitude: meetingLongitudeDraft,
         meetupDate: meetupDateDraft,
         meetupTime: meetupTimeDraft
       });
       onMeetingPlaceSaved?.({
         meeting_place: data.meeting_place || null,
-        meeting_latitude: data.meeting_latitude ?? null,
-        meeting_longitude: data.meeting_longitude ?? null,
                 meetup_date: data.meetup_date || null,
         meetup_time: data.meetup_time || null,
         meetup_confirmation_status: data.meetup_confirmation_status || "pending",
@@ -3526,18 +3518,6 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
                   placeholder="Enter meeting place"
                   className="min-h-24 w-full resize-y rounded-2xl border border-[#dfe9e3] bg-white px-3 py-3 text-sm font-semibold text-[#111827] outline-none placeholder:text-slate-400 focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100"
                 />
-                {source.delivery_latitude != null && source.delivery_longitude != null ? <div className="grid gap-3">
-                  <p className="text-xs font-bold uppercase tracking-[0.16em] text-emerald-700">Select Meeting Location</p>
-                  <MeetingLocationMap
-                    customer={{ latitude: Number(source.delivery_latitude), longitude: Number(source.delivery_longitude) }}
-                    meeting={meetingLatitudeDraft != null && meetingLongitudeDraft != null ? { latitude: meetingLatitudeDraft, longitude: meetingLongitudeDraft } : null}
-                    onSelect={({ latitude, longitude }) => {
-                      setMeetingLatitudeDraft(latitude);
-                      setMeetingLongitudeDraft(longitude);
-                    }}
-                  />
-                  <p className="break-words text-xs font-semibold text-slate-500">Selected location: {meetingLatitudeDraft != null && meetingLongitudeDraft != null ? `${meetingLatitudeDraft.toFixed(7)}, ${meetingLongitudeDraft.toFixed(7)}` : "Tap the map to choose a meeting point."}</p>
-                </div> : <p className="text-xs font-semibold text-amber-700">Customer delivery coordinates are unavailable, so a meetup point cannot be selected on the map.</p>}
                 <div className="grid gap-3 sm:grid-cols-2">
                   <label className="grid gap-1 text-sm font-bold text-slate-700">
                     <span>Meetup Date</span>

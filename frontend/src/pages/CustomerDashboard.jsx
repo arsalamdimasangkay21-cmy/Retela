@@ -15,7 +15,7 @@ import ConfirmDialog from "../components/ConfirmDialog";
 import { dispatchCustomerToast } from "../components/CustomerToastStack";
 import FaceVerification from "../components/FaceVerification";
 import NotificationPreviewPanel from "../components/NotificationPreviewPanel";
-import OrderDeliveryInfo, { MeetingLocationMap } from "../components/OrderDeliveryInfo";
+import OrderDeliveryInfo from "../components/OrderDeliveryInfo";
 import ProductImage from "../components/ProductImage";
 import ProductQuickView from "../components/ProductQuickView";
 import { Button, Card, Field } from "../components/ui";
@@ -2581,7 +2581,6 @@ function CustomerOrderModal({ loading, selectedOrder, displayNumber, deliverySaf
   const order = selectedOrder?.order;
   const cancelled = isOrderCancelled(order);
   const meetingPlace = String(order?.meeting_place || "").trim();
-  const meetingMapUrl = meetingPlace ? deliveryMapUrl({ address: meetingPlace }) : "";
   const confirmationStatus = String(order?.meetup_confirmation_status || "pending").toLowerCase();
   const [confirmationStep, setConfirmationStep] = useState(null);
   const [meetupNote, setMeetupNote] = useState("");
@@ -2643,11 +2642,6 @@ function CustomerOrderModal({ loading, selectedOrder, displayNumber, deliverySaf
                   {meetingPlace ? (
                     <>
                       <p>{meetingPlace}</p>
-                      {meetingMapUrl ? (
-                        <a href={meetingMapUrl} target="_blank" rel="noreferrer" className="retela-meeting-place-action">
-                          <MapPin size={15} /> View Meeting Place
-                        </a>
-                      ) : null}
                     </>
                   ) : (
                     <p>Meeting place will be provided by the shop.</p>
@@ -2661,12 +2655,6 @@ function CustomerOrderModal({ loading, selectedOrder, displayNumber, deliverySaf
                       <p className="retela-modal-eyebrow">Customer Confirmation</p>
                       {confirmationStatus === "agreed" ? <p className="retela-meetup-confirmed">✓ Meetup Confirmed</p> : confirmationStatus === "disagreed" ? <><p className="retela-meetup-declined">Schedule declined</p><p>The shop will need to propose another meetup schedule.</p><button type="button" onClick={messageShop} className="retela-meeting-place-action"><MessageCircle size={15} /> Message Shop</button></> : confirmationStep === "agree" ? <div className="grid gap-2"><p>The shop proposed this meetup schedule.</p><p className="font-bold text-slate-800">Confirm this meetup schedule?</p><div className="flex flex-wrap gap-2"><button type="button" disabled={confirmationSaving} onClick={() => submitMeetupConfirmation("agreed")} className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-bold text-white">{confirmationSaving ? "Saving..." : "Confirm"}</button><button type="button" onClick={() => setConfirmationStep(null)} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-bold text-slate-700">Cancel</button></div></div> : confirmationStep === "disagree" ? <div className="grid gap-2"><p>Tell the shop why this schedule does not work (optional).</p><textarea value={meetupNote} onChange={(event) => setMeetupNote(event.target.value)} maxLength={500} rows={2} placeholder="I am not available at this time." className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900" /><div className="flex flex-wrap gap-2"><button type="button" disabled={confirmationSaving} onClick={() => submitMeetupConfirmation("disagreed")} className="rounded-xl bg-rose-600 px-3 py-2 text-xs font-bold text-white">{confirmationSaving ? "Saving..." : "Decline Schedule"}</button><button type="button" onClick={() => setConfirmationStep(null)} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-bold text-slate-700">Cancel</button></div></div> : <><p>The shop proposed this meetup schedule.</p><div className="flex flex-wrap gap-2"><button type="button" onClick={() => setConfirmationStep("agree")} className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-bold text-white">Agree</button><button type="button" onClick={() => setConfirmationStep("disagree")} className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700">Disagree</button></div></>}
                     </div>
-                  ) : null}
-                  {order.delivery_latitude != null && order.delivery_longitude != null && order.meeting_latitude != null && order.meeting_longitude != null ? (
-                    <MeetingLocationMap
-                      customer={{ latitude: Number(order.delivery_latitude), longitude: Number(order.delivery_longitude) }}
-                      meeting={{ latitude: Number(order.meeting_latitude), longitude: Number(order.meeting_longitude) }}
-                    />
                   ) : null}
                 </section> : null}
                 <DeliverySafetyPolicyCard policy={deliverySafetyPolicy} />

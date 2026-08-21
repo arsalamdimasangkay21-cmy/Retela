@@ -280,82 +280,6 @@ function DeliveryRouteMap({ shop, destination, route }) {
   );
 }
 
-export function MeetingLocationMap({ customer, meeting, onSelect }) {
-  const [zoomOffset, setZoomOffset] = useState(0);
-  const [tileState, setTileState] = useState("loading");
-  const [tileVersion, setTileVersion] = useState(0);
-  const [route, setRoute] = useState(null);
-  const [routeState, setRouteState] = useState("idle");
-  const hasCustomer = validMapCoordinate(customer?.latitude, customer?.longitude);
-  const hasMeeting = validMapCoordinate(meeting?.latitude, meeting?.longitude);
-  const map = useMemo(() => buildRouteMapModel(customer, meeting || customer, route, zoomOffset), [customer, meeting, route, zoomOffset]);
-  const routePoints = (route?.coordinates?.length ? route.coordinates : hasMeeting ? [customer, meeting] : [customer]).map((point) => projectPointOnMap(point, map));
-  const routeReady = Boolean(route?.coordinates?.length);
-  const path = routePoints.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`).join(" ");
-  function retryTiles() {
-    setTileState("loading");
-    setTileVersion((value) => value + 1);
-  }
-
-  useEffect(() => {
-    if (!hasCustomer || !hasMeeting) {
-      setRoute(null);
-      setRouteState("idle");
-      return undefined;
-    }
-    const controller = new AbortController();
-    setRouteState("loading");
-    if (import.meta.env.DEV) console.info("[route] request", { origin: customer, destination: meeting });
-    fetch(routeUrl(customer, meeting), { signal: controller.signal })
-      .then((response) => {
-        if (import.meta.env.DEV) console.info("[route] HTTP status", response.status);
-        return response.ok ? response.json() : Promise.reject(new Error(`Route unavailable (${response.status})`));
-      })
-      .then((data) => {
-        const routeData = Array.isArray(data?.routes) ? data.routes[0] : null;
-        if (!routeData) throw new Error("Route unavailable");
-        setRoute({ coordinates: (routeData.geometry?.coordinates || []).map(([longitude, latitude]) => ({ latitude, longitude })), distanceMeters: Number(routeData.distance || 0), durationSeconds: Number(routeData.duration || 0) });
-        if (import.meta.env.DEV) console.info("[route] response", { distanceMeters: routeData.distance, durationSeconds: routeData.duration });
-        setRouteState("ready");
-      })
-      .catch((error) => {
-        if (error?.name !== "AbortError") {
-          if (import.meta.env.DEV) console.warn("[route] error", error?.message);
-          setRouteState("error");
-        }
-      });
-    return () => controller.abort();
-  }, [customer?.latitude, customer?.longitude, hasCustomer, hasMeeting, meeting?.latitude, meeting?.longitude]);
-
-  function selectFromMap(event) {
-    if (!onSelect || !hasCustomer) return;
-    const rect = event.currentTarget.getBoundingClientRect();
-    const x = ((event.clientX - rect.left) / rect.width) * 100;
-    const y = ((event.clientY - rect.top) / rect.height) * 100;
-    const point = tileToCoordinates(map.center.x + (x - 50) / 100, map.center.y + (y - 50) / 100, map.zoom);
-    onSelect(point);
-  }
-
-  return (
-    <div className="retela-route-map retela-meetup-map" onClick={selectFromMap} role={onSelect ? "button" : undefined} tabIndex={onSelect ? 0 : undefined} aria-label={onSelect ? "Select meetup location on map" : "Customer to meetup route map"}>
-      {tileState !== "error" && map.tiles.map((tile) => <img key={`${tile.tileX}-${tile.tileY}-${map.zoom}-${tileVersion}`} src={osmTileUrl(map.zoom, tile.tileX, tile.tileY, tileVersion)} alt="" loading="lazy" onLoad={() => setTileState((state) => state === "loading" ? "ready" : state)} onError={() => { if (import.meta.env.DEV) console.warn("[map] tile load error"); setTileState("error"); }} style={{ left: `calc(50% + ${(tile.x - map.offsetX) * 256}px)`, top: `calc(50% + ${(tile.y - map.offsetY) * 256}px)` }} />)}
-      {tileState === "error" ? <div className="retela-map-status-overlay"><span>Map could not be loaded.</span><button type="button" onClick={retryTiles}>Retry</button></div> : null}
-      {tileState === "loading" ? <div className="retela-map-status-overlay is-loading"><Loader2 size={16} className="animate-spin" /> Loading map...</div> : null}
-      {tileState === "ready" ? <>
-        {routeReady ? <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><path d={path} /></svg> : null}
-        {hasCustomer ? <RouteMarker point={projectPointOnMap(customer, map)} tone="customer" label="Customer Location" /> : null}
-        {hasMeeting ? <RouteMarker point={projectPointOnMap(meeting, map)} tone="meeting" label="Meeting Place" /> : null}
-      </> : null}
-      <div className="retela-route-map-tools" onClick={(event) => event.stopPropagation()}>
-        <button type="button" onClick={() => setZoomOffset((value) => Math.min(3, value + 1))}>+</button>
-        <button type="button" onClick={() => setZoomOffset((value) => Math.max(-3, value - 1))}>-</button>
-      </div>
-      {onSelect ? <span className="retela-meetup-map-hint">Tap the map to select a meeting point</span> : null}
-      {hasMeeting && routeState === "error" ? <span className="retela-route-map-error">Unable to load route map.</span> : null}
-    </div>
-  );
-}
-
 function RouteMarker({ point, tone, label }) {
   return (
     <span className={`retela-route-marker is-${tone}`} style={{ left: `${point.x}%`, top: `${point.y}%` }}>
@@ -417,12 +341,4 @@ function projectPointOnMap(point, map) {
     x: 50 + (tile.x - map.center.x) * 100,
     y: 50 + (tile.y - map.center.y) * 100
   };
-}
-
-function tileToCoordinates(x, y, zoom) {
-  const scale = 2 ** zoom;
-  const longitude = (x / scale) * 360 - 180;
-  const n = Math.PI - (2 * Math.PI * y) / scale;
-  const latitude = (180 / Math.PI) * Math.atan(Math.sinh(n));
-  return { latitude, longitude };
 }

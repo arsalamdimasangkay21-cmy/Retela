@@ -744,18 +744,15 @@ router.patch("/:id/meeting-place", requireAuth, requireRole("admin"), asyncHandl
   }
   const orderId = Number(req.params.id);
   if (!Number.isInteger(orderId) || orderId <= 0) throw new HttpError(400, "A valid order ID is required");
-  const orders = await query("SELECT orders.id, orders.user_id, orders.order_channel, orders.fulfillment_method, orders.delivery_address, users.location FROM orders LEFT JOIN users ON users.id = orders.user_id WHERE orders.id = :id", { id: orderId });
+  const orders = await query("SELECT orders.id, orders.user_id, orders.order_channel, orders.fulfillment_method, orders.delivery_address, orders.meeting_latitude, orders.meeting_longitude, users.location FROM orders LEFT JOIN users ON users.id = orders.user_id WHERE orders.id = :id", { id: orderId });
   if (!orders.length) throw new HttpError(404, "Order not found");
   const { config } = await loadSystemSettings();
   if (orders[0].fulfillment_method !== "delivery" || !addressMatchesMunicipality(orders[0].delivery_address || orders[0].location, config.general.shopMunicipality)) {
     throw new HttpError(403, "Meeting place and meetup schedule are only available for customers within the shop municipality.");
   }
   const meetingPlace = input.meetingPlace || null;
-  if ((input.meetingLatitude == null) !== (input.meetingLongitude == null)) {
-    throw new HttpError(400, "Meeting latitude and longitude must be provided together.");
-  }
-  const meetingLatitude = input.meetingLatitude ?? null;
-  const meetingLongitude = input.meetingLongitude ?? null;
+  const meetingLatitude = input.meetingLatitude === undefined ? orders[0].meeting_latitude ?? null : input.meetingLatitude;
+  const meetingLongitude = input.meetingLongitude === undefined ? orders[0].meeting_longitude ?? null : input.meetingLongitude;
   const meetupDate = input.meetupDate || null;
   const meetupTime = input.meetupTime || null;
   await query("UPDATE orders SET meeting_place = :meetingPlace, meeting_latitude = :meetingLatitude, meeting_longitude = :meetingLongitude, meetup_date = :meetupDate, meetup_time = :meetupTime, meetup_confirmation_status = 'pending', meetup_confirmed_at = NULL, meetup_customer_note = NULL WHERE id = :id", { id: orderId, meetingPlace, meetingLatitude, meetingLongitude, meetupDate, meetupTime });
