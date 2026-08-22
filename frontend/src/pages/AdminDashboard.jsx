@@ -4,7 +4,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { Bar, Doughnut, Line, Pie } from "react-chartjs-2";
 import { Chart as ChartJS, ArcElement, BarElement, CategoryScale, Filler, LinearScale, LineElement, PointElement, Tooltip, Legend } from "chart.js";
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip as RechartsTooltip, XAxis, YAxis } from "recharts";
-import { Activity, Archive, Barcode, Bot, Check, CheckCircle2, ChevronLeft, ChevronRight, Clock3, Download, Edit3, Eye, FileSpreadsheet, Loader2, MapPin, Megaphone, MessageSquare, MoreHorizontal, PackageCheck, PackagePlus, Plus, Printer, ReceiptText, RotateCcw, Save, Search, Send, Shirt, ShoppingBag, SlidersHorizontal, Sparkles, Star, Tags, Trash2, TrendingUp, Upload, UserRound, WalletCards, X, Zap } from "lucide-react";
+import { Activity, Archive, Barcode, Bot, Camera, Check, CheckCircle2, ChevronLeft, ChevronRight, Clock3, Download, Edit3, Eye, FileSpreadsheet, Loader2, MapPin, Megaphone, MessageSquare, MoreHorizontal, PackageCheck, PackagePlus, Plus, Printer, ReceiptText, RotateCcw, Save, Search, Send, Shirt, ShoppingBag, SlidersHorizontal, Sparkles, Star, Tags, Trash2, TrendingUp, Upload, UserRound, WalletCards, X, Zap } from "lucide-react";
 import { api, API_URL, cachedGet, clearGetCache, getApiErrorMessage } from "../api/client";
 import JsBarcode from "jsbarcode";
 import { createApparelOption, deleteApparelOption, fetchApparelOptions } from "../api/apparelOptions";
@@ -221,6 +221,7 @@ export default function AdminDashboard({ active, onChange }) {
   const [productImage, setProductImage] = useState(null);
   const [editingProductId, setEditingProductId] = useState(null);
   const [inventoryModalOpen, setInventoryModalOpen] = useState(false);
+  const [inventoryFocusSku, setInventoryFocusSku] = useState("");
   const [filters, setFilters] = useState({ search: "", category: "all", brand: "all", stock: "all", size: "all", condition: "all" });
   const [customerFilters, setCustomerFilters] = useState(defaultCustomerFilters);
   const [profile, setProfile] = useState(null);
@@ -756,6 +757,8 @@ export default function AdminDashboard({ active, onChange }) {
       <>
         <PremiumInventoryPage
           products={inventoryProducts}
+          focusSku={inventoryFocusSku}
+          onFocusHandled={() => setInventoryFocusSku("")}
           filters={filters}
           setFilters={setFilters}
           onAddItem={() => {
@@ -933,7 +936,7 @@ export default function AdminDashboard({ active, onChange }) {
   }
 
   if (active === "Reports" || active === "Sales Analytics" || active === "Sales") {
-    return <SalesAnalytics summary={summary} />;
+    return <SalesAnalytics summary={summary} onViewInventory={(product) => { setInventoryFocusSku(productSku(product)); onChange("Inventory"); }} />;
   }
 
   if (active === "Automations") return <AutomationsPage />;
@@ -1294,6 +1297,8 @@ function formatAdminDate(value) {
 
 function PremiumInventoryPage({
   products,
+  focusSku = "",
+  onFocusHandled,
   filters,
   setFilters,
   onAddItem,
@@ -1320,6 +1325,7 @@ function PremiumInventoryPage({
   const sourceProducts = products.map(normalizeInventoryProduct);
   const [page, setPage] = useState(1);
   const [barcodeQuery, setBarcodeQuery] = useState("");
+  const [focusedSku, setFocusedSku] = useState("");
   const [barcodeModalOpen, setBarcodeModalOpen] = useState(false);
   const [selectedBarcodeIds, setSelectedBarcodeIds] = useState([]);
   const pageSize = 6;
@@ -1351,9 +1357,52 @@ function PremiumInventoryPage({
     setSelectedBarcodeIds((ids) => ids.filter((id) => allBarcodeIds.includes(id)));
   }, [allBarcodeIds]);
 
+  useEffect(() => {
+    const incomingSku = String(focusSku || "").trim();
+    if (!incomingSku) return;
+    setBarcodeQuery(incomingSku);
+    setFilters((current) => ({ ...current, search: incomingSku, category: "all", brand: "all", size: "all", condition: "all" }));
+    const targetIndex = sourceProducts.findIndex((product) => productSku(product).toLowerCase() === incomingSku.toLowerCase());
+    if (targetIndex >= 0) setPage(Math.floor(targetIndex / pageSize) + 1);
+    setFocusedSku(incomingSku);
+  }, [focusSku, setFilters, sourceProducts]);
+
+  useEffect(() => {
+    if (!focusedSku) return undefined;
+    const targetSku = focusedSku.toLowerCase();
+    const focusTimer = window.setTimeout(() => {
+      const target = [...document.querySelectorAll("[data-inventory-sku]")].find((element) => String(element.dataset.inventorySku || "").toLowerCase() === targetSku);
+      target?.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
+    }, 120);
+    const fadeTimer = window.setTimeout(() => {
+      setFocusedSku("");
+      onFocusHandled?.();
+    }, 3600);
+    return () => {
+      window.clearTimeout(focusTimer);
+      window.clearTimeout(fadeTimer);
+    };
+  }, [focusedSku]);
+
   function handleBarcodeQuery(value) {
-    setBarcodeQuery(value);
-    setFilters({ ...filters, search: value });
+    const normalized = String(value || "").trim();
+    setBarcodeQuery(normalized);
+    setFilters({ ...filters, search: normalized, category: "all", brand: "all", size: "all", condition: "all" });
+    if (normalized) {
+      const targetIndex = sourceProducts.findIndex((product) => productSku(product).toLowerCase() === normalized.toLowerCase());
+      if (targetIndex >= 0) setPage(Math.floor(targetIndex / pageSize) + 1);
+      setFocusedSku(normalized);
+    }
+  }
+
+  function focusInventoryProduct(product) {
+    const sku = productSku(product).trim();
+    if (!sku) return;
+    setBarcodeQuery(sku);
+    setFilters((current) => ({ ...current, search: sku, category: "all", brand: "all", size: "all", condition: "all" }));
+    const targetIndex = sourceProducts.findIndex((item) => productSku(item).toLowerCase() === sku.toLowerCase());
+    if (targetIndex >= 0) setPage(Math.floor(targetIndex / pageSize) + 1);
+    setFocusedSku(sku);
   }
 
   function toggleBarcode(id) {
@@ -1400,6 +1449,7 @@ function PremiumInventoryPage({
         value={barcodeQuery}
         onChange={handleBarcodeQuery}
         product={scannedProduct}
+        onProductSelect={focusInventoryProduct}
       />
 
       <Card className="inventory-filter-card">
@@ -1460,7 +1510,8 @@ function PremiumInventoryPage({
                   {pageProducts.map((product, index) => (
                     <motion.tr
                       key={product.id}
-                      className="group border-b border-white/7 align-top transition duration-300 hover:bg-neonbrand/[0.045]"
+                      data-inventory-sku={productSku(product)}
+                      className={`group border-b border-white/7 align-top transition duration-300 hover:bg-neonbrand/[0.045] ${focusedSku.toLowerCase() === productSku(product).toLowerCase() ? "inventory-item-focus" : ""}`}
                       initial={{ opacity: 0, y: 10 }}
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ duration: 0.28, delay: index * 0.035 }}
@@ -1498,7 +1549,7 @@ function PremiumInventoryPage({
             </div>
             <div className="grid gap-3 p-4 xl:hidden">
               {pageProducts.map((product) => (
-                <article key={product.id} className="rounded-3xl border border-white/10 bg-white/[0.055] p-3">
+                <article key={product.id} data-inventory-sku={productSku(product)} className={`rounded-3xl border border-white/10 bg-white/[0.055] p-3 ${focusedSku.toLowerCase() === productSku(product).toLowerCase() ? "inventory-item-focus" : ""}`}>
                   <div className="flex gap-3">
                     <div className="h-20 w-20 shrink-0 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.06]">
                       <ProductImage product={product} className="h-full w-full object-cover" alt={product.name} />
@@ -1667,9 +1718,19 @@ function InventoryActionButton({ tone, icon: Icon, children, onClick, disabled =
   );
 }
 
-function BarcodeScannerPanel({ title, value, onChange, product, onPrint, compact = false }) {
+function BarcodeScannerPanel({ title, value, onChange, product, onPrint, onProductSelect, compact = false }) {
   const hasQuery = Boolean(String(value || "").trim());
+  const [cameraOpen, setCameraOpen] = useState(false);
+
+  function handleCameraDetected(decodedValue) {
+    const normalized = String(decodedValue || "").trim();
+    if (!normalized) return;
+    onChange(normalized);
+    setCameraOpen(false);
+  }
+
   return (
+    <>
     <Card className={`border-neonbrand/15 bg-neonbrand/[0.055] ${compact ? "sales-barcode-card" : ""}`}>
       <div className="grid gap-4 xl:grid-cols-[minmax(260px,0.9fr)_minmax(0,1.1fr)]">
         <div>
@@ -1682,7 +1743,7 @@ function BarcodeScannerPanel({ title, value, onChange, product, onPrint, compact
               <p className="mt-1 text-sm text-white/45">Scan or type a RETELA barcode/SKU.</p>
             </div>
           </div>
-          <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+          <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
             <div className="relative min-w-0 flex-1">
               <Search className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-neonbrand" size={18} />
               <input
@@ -1692,6 +1753,9 @@ function BarcodeScannerPanel({ title, value, onChange, product, onPrint, compact
                 className="min-h-12 w-full rounded-2xl border border-white/10 bg-white/[0.07] py-3 pl-12 pr-4 text-sm font-semibold uppercase text-white outline-none placeholder:text-white/35 focus:border-neonbrand/60 focus:ring-4 focus:ring-neonbrand/10"
               />
             </div>
+            <button type="button" onClick={() => setCameraOpen(true)} className="inline-flex items-center justify-center gap-2 rounded-2xl border border-neonbrand/25 bg-neonbrand/10 px-4 py-3 text-sm font-bold text-neonbrand transition hover:bg-neonbrand hover:text-black">
+              <Camera size={17} /> Camera Scan
+            </button>
             <button type="button" onClick={() => { if (!compact) onChange(""); }} className="rounded-2xl border border-neonbrand/25 bg-neonbrand/10 px-4 py-3 text-sm font-bold text-neonbrand transition hover:bg-neonbrand hover:text-black">
               {compact ? "Scan" : "Clear"}
             </button>
@@ -1699,14 +1763,20 @@ function BarcodeScannerPanel({ title, value, onChange, product, onPrint, compact
         </div>
         <div className="rounded-[24px] border border-white/10 bg-black/20 p-4">
           {product ? (
-            <div className="grid gap-4 md:grid-cols-[180px_minmax(0,1fr)]">
+            <div
+              role="button"
+              tabIndex={0}
+              onClick={() => onProductSelect?.(product)}
+              onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") onProductSelect?.(product); }}
+              className="grid cursor-pointer gap-4 rounded-2xl outline-none focus-visible:ring-2 focus-visible:ring-neonbrand md:grid-cols-[180px_minmax(0,1fr)]"
+            >
               <div className="grid gap-2">
                 <div className="h-20 overflow-hidden rounded-2xl bg-white p-2">
                   <BarcodeSvg value={productSku(product)} />
                 </div>
                 <strong className="truncate text-center text-sm text-neonbrand">{productSku(product)}</strong>
                 {onPrint ? (
-                  <button type="button" onClick={() => onPrint(product)} className="inline-flex items-center justify-center gap-2 rounded-2xl border border-neonbrand/30 bg-neonbrand/10 px-3 py-2 text-xs font-bold text-neonbrand transition hover:bg-neonbrand hover:text-black">
+                  <button type="button" onClick={(event) => { event.stopPropagation(); onPrint(product); }} className="inline-flex items-center justify-center gap-2 rounded-2xl border border-neonbrand/30 bg-neonbrand/10 px-3 py-2 text-xs font-bold text-neonbrand transition hover:bg-neonbrand hover:text-black">
                     <Printer size={15} />
                     Print Barcode
                   </button>
@@ -1723,6 +1793,7 @@ function BarcodeScannerPanel({ title, value, onChange, product, onPrint, compact
                 <div className="mt-3">
                   <InventoryStatusBadge stock={product.stock} status={product.status} />
                 </div>
+                {onProductSelect ? <span className="mt-4 inline-flex items-center rounded-xl border border-neonbrand/25 bg-neonbrand/10 px-3 py-2 text-xs font-bold text-neonbrand">View in Inventory</span> : null}
               </div>
             </div>
           ) : (
@@ -1738,6 +1809,76 @@ function BarcodeScannerPanel({ title, value, onChange, product, onPrint, compact
         </div>
       </div>
     </Card>
+      {cameraOpen ? <BarcodeCameraModal onDetected={handleCameraDetected} onClose={() => setCameraOpen(false)} /> : null}
+    </>
+  );
+}
+
+function BarcodeCameraModal({ onDetected, onClose }) {
+  const regionId = useRef(`retela-admin-barcode-scanner-${Math.random().toString(36).slice(2)}`);
+  const scannerRef = useRef(null);
+  const detectedRef = useRef(false);
+  const onDetectedRef = useRef(onDetected);
+  const [error, setError] = useState("");
+  const [restartKey, setRestartKey] = useState(0);
+
+  useEffect(() => {
+    onDetectedRef.current = onDetected;
+  }, [onDetected]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function startScanner() {
+      try {
+        const { Html5Qrcode } = await import("html5-qrcode");
+        if (cancelled) return;
+        const scanner = new Html5Qrcode(regionId.current);
+        scannerRef.current = scanner;
+        await scanner.start(
+          { facingMode: "environment" },
+          { fps: 10, qrbox: { width: 280, height: 150 } },
+          (decodedText) => {
+            if (detectedRef.current || !String(decodedText || "").trim()) return;
+            detectedRef.current = true;
+            onDetectedRef.current?.(decodedText);
+          },
+          () => {}
+        );
+      } catch (scannerError) {
+        if (!cancelled) setError(scannerError?.name === "NotAllowedError" ? "Camera access is required to scan barcodes." : "Camera could not start. Check browser permissions or use manual SKU entry.");
+      }
+    }
+    startScanner();
+    return () => {
+      cancelled = true;
+      const scanner = scannerRef.current;
+      scannerRef.current = null;
+      if (scanner?.isScanning) scanner.stop().then(() => scanner.clear()).catch(() => {});
+      else {
+        try { scanner?.clear?.(); } catch { /* Camera may not have initialized. */ }
+      }
+    };
+  }, [restartKey]);
+
+  return createPortal(
+    <div className="retela-modal-backdrop z-[240] bg-slate-950/75 p-4" onMouseDown={onClose}>
+      <section className="retela-modal-card modal-md w-full max-w-lg" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label="Scan barcode">
+        <div className="retela-modal-header">
+          <div>
+            <p className="retela-modal-eyebrow">Scan Barcode</p>
+            <h2 className="font-display text-xl font-bold text-slate-950">Camera Scanner</h2>
+            <p className="text-sm text-slate-500">Point the camera at the RETELA barcode.</p>
+          </div>
+          <button type="button" onClick={onClose} className="retela-modal-close" aria-label="Close scanner"><X size={18} /></button>
+        </div>
+        <div className="retela-modal-body">
+          <div id={regionId.current} className="retela-admin-camera-region min-h-[240px] overflow-hidden rounded-2xl border border-slate-200 bg-slate-950" />
+          {error ? <div className="mt-3 grid gap-2 rounded-2xl bg-rose-50 p-3 text-sm font-semibold text-rose-700"><p>{error}</p><button type="button" onClick={() => { setError(""); setRestartKey((value) => value + 1); }} className="w-fit rounded-xl border border-rose-200 px-3 py-2 text-xs font-bold">Try Again</button></div> : null}
+          <button type="button" onClick={onClose} className="mt-4 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700">Close Scanner</button>
+        </div>
+      </section>
+    </div>,
+    document.body
   );
 }
 
@@ -2335,7 +2476,7 @@ function UsersIcon(props) {
   return <MessageSquare {...props} />;
 }
 
-function SalesAnalytics({ summary }) {
+function SalesAnalytics({ summary, onViewInventory }) {
   const [trendPeriod, setTrendPeriod] = useState("day");
   const [reportRange, setReportRange] = useState(defaultReportOptions.dateRange);
   const [salesChannel, setSalesChannel] = useState("all");
@@ -2685,6 +2826,7 @@ function SalesAnalytics({ summary }) {
         onChange={setSalesBarcodeQuery}
         product={scannedSalesProduct}
         onPrint={printProductBarcode}
+        onProductSelect={onViewInventory}
         compact
       />
 
