@@ -139,6 +139,12 @@ function shippingFeeText(quote, loading = false) {
   return Number(quote.shippingFee || 0) <= 0 ? "FREE" : money(quote.shippingFee);
 }
 
+function deliveryAreaText(quote) {
+  if (quote?.shippingZone === "nearby") return "Nearby / Free";
+  if (quote?.shippingZone === "outside") return "Outside";
+  return "";
+}
+
 function setModalBodyLock(active) {
   document.body.classList.toggle("retela-modal-open", Boolean(active));
 }
@@ -1192,6 +1198,7 @@ function CartPage({
                 {normalizedDeliveryLocation.landmark ? <span>{normalizedDeliveryLocation.landmark}</span> : null}
                 {distanceLabel ? <span>Distance from shop: {distanceLabel}</span> : null}
                 {shippingQuote ? <span>Shipping: {shippingFeeText(shippingQuote)}</span> : shippingQuoteLoading ? <span>Calculating shipping...</span> : null}
+                {deliveryAreaText(shippingQuote) ? <span>Delivery Area: {deliveryAreaText(shippingQuote)}</span> : null}
                 {shippingQuote?.reason ? <span>Reason: {shippingQuote.reason}</span> : null}
               </>
             ) : (
@@ -1988,6 +1995,7 @@ function CheckoutSummaryModal({ items, pricing, paymentMethod, paymentDetails, p
           {hasDeliveryCoordinates(normalizedDeliveryLocation) ? <p className="mt-2 text-xs font-bold text-neonbrand">Exact map pin saved for this order.</p> : null}
           {distanceLabel ? <p className="mt-2 text-xs font-semibold text-white/70">Distance from shop: {distanceLabel}</p> : null}
           <p className="mt-1 text-xs font-bold text-neonbrand">Shipping: {shippingFeeText(shippingQuote, shippingQuoteLoading)}</p>
+          {deliveryAreaText(shippingQuote) ? <p className="mt-1 text-xs font-bold text-neonbrand">Delivery Area: {deliveryAreaText(shippingQuote)}</p> : null}
           {shippingQuote?.reason ? <p className="mt-1 text-xs font-semibold text-white/70">Reason: {shippingQuote.reason}</p> : null}
         </div>
         <DeliverySafetyPolicyCard policy={deliverySafetyPolicy} compact />

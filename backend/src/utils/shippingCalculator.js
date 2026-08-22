@@ -117,6 +117,27 @@ export function classifyShippingLocation(location = {}, policy = {}) {
     };
   }
 
+  const deliveryAreaOverride = String(
+    policy.deliveryAreaOverride ?? policy.delivery_area_override ?? ""
+  ).trim().toLowerCase();
+  if (deliveryAreaOverride === "nearby") {
+    result = {
+      ...result,
+      shippingFee: 0,
+      shippingZone: "nearby",
+      shippingRule: "admin_override_nearby",
+      reason: "Nearby / Free (set by admin)"
+    };
+  } else if (deliveryAreaOverride === "outside") {
+    result = {
+      ...result,
+      shippingFee: outsideFee,
+      shippingZone: "outside",
+      shippingRule: "admin_override_outside",
+      reason: "Outside delivery area (set by admin)"
+    };
+  }
+
   if (policy.couponFreeShipping && result.shippingFee > 0) {
     return {
       ...result,

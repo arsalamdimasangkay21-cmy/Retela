@@ -551,6 +551,7 @@ async function ensureCoreTables() {
       delivery_longitude DECIMAL(10,7) NULL,
       delivery_landmark VARCHAR(255) NULL,
       delivery_notes TEXT NULL,
+      delivery_area_override ENUM('nearby','outside') NULL,
       birthday DATE NULL,
       gender VARCHAR(40) NULL,
       shop_description TEXT NULL,
@@ -591,6 +592,7 @@ async function ensureCoreTables() {
   await ensureColumn("users", "delivery_longitude", "delivery_longitude DECIMAL(10,7) NULL AFTER delivery_latitude");
   await ensureColumn("users", "delivery_landmark", "delivery_landmark VARCHAR(255) NULL AFTER delivery_longitude");
   await ensureColumn("users", "delivery_notes", "delivery_notes TEXT NULL AFTER delivery_landmark");
+  await ensureColumn("users", "delivery_area_override", "delivery_area_override ENUM('nearby','outside') NULL AFTER delivery_notes");
   await ensureColumn("users", "birthday", "birthday DATE NULL AFTER location");
   await ensureColumn("users", "gender", "gender VARCHAR(40) NULL AFTER birthday");
   await ensureColumn("users", "shop_description", "shop_description TEXT NULL AFTER gender");

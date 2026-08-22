@@ -84,3 +84,32 @@ test("pickup never incurs shipping", () => {
   assert.equal(quote.shippingRule, "pickup");
 });
 
+test("admin nearby override wins over an automatic outside classification", () => {
+  const quote = classifyShippingLocation(
+    { municipality: "Quezon City", latitude: 14.676, longitude: 121.0437 },
+    { ...policy, deliveryAreaOverride: "nearby" }
+  );
+  assert.equal(quote.shippingFee, 0);
+  assert.equal(quote.shippingZone, "nearby");
+  assert.equal(quote.shippingRule, "admin_override_nearby");
+});
+
+test("admin outside override wins over an automatic nearby classification", () => {
+  const quote = classifyShippingLocation(
+    { municipality: "Midsayap", latitude: 7.1907, longitude: 124.5308 },
+    { ...policy, deliveryAreaOverride: "outside" }
+  );
+  assert.equal(quote.shippingFee, 89);
+  assert.equal(quote.shippingZone, "outside");
+  assert.equal(quote.shippingRule, "admin_override_outside");
+});
+
+test("a cleared override falls back to automatic location classification", () => {
+  const quote = classifyShippingLocation(
+    { municipality: "Midsayap" },
+    { ...policy, deliveryAreaOverride: null }
+  );
+  assert.equal(quote.shippingFee, 0);
+  assert.equal(quote.shippingZone, "nearby");
+  assert.equal(quote.shippingRule, "municipality");
+});

@@ -11,7 +11,7 @@ export async function ensureCustomerLocationColumns() {
          AND TABLE_NAME = 'users'
          AND COLUMN_NAME IN ('formatted_address', 'delivery_barangay', 'delivery_municipality',
            'delivery_province', 'delivery_region', 'delivery_postal_code', 'delivery_place_id',
-           'delivery_location_source', 'delivery_latitude', 'delivery_longitude')`
+           'delivery_location_source', 'delivery_latitude', 'delivery_longitude', 'delivery_area_override')`
     );
     const columns = new Set(rows.map((row) => row.COLUMN_NAME));
     const definitions = [
@@ -24,7 +24,8 @@ export async function ensureCustomerLocationColumns() {
       ["delivery_place_id", "delivery_place_id VARCHAR(255) NULL AFTER delivery_postal_code"],
       ["delivery_location_source", "delivery_location_source VARCHAR(40) NULL AFTER delivery_place_id"],
       ["delivery_latitude", "delivery_latitude DECIMAL(10,7) NULL AFTER delivery_location_source"],
-      ["delivery_longitude", "delivery_longitude DECIMAL(10,7) NULL AFTER delivery_latitude"]
+      ["delivery_longitude", "delivery_longitude DECIMAL(10,7) NULL AFTER delivery_latitude"],
+      ["delivery_area_override", "delivery_area_override ENUM('nearby','outside') NULL AFTER delivery_notes"]
     ];
     for (const [column, definition] of definitions) {
       if (!columns.has(column)) await query(`ALTER TABLE users ADD COLUMN ${definition}`);
@@ -72,7 +73,7 @@ export async function loadCustomerDeliveryLocation(userId, executor = query) {
     `SELECT id, username, display_name, location, formatted_address,
        delivery_barangay, delivery_municipality, delivery_province, delivery_region,
        delivery_postal_code, delivery_place_id, delivery_latitude, delivery_longitude,
-       delivery_landmark, delivery_notes, delivery_location_source
+       delivery_landmark, delivery_notes, delivery_location_source, delivery_area_override
      FROM users
      WHERE id = :userId AND role = 'customer'
      LIMIT 1`,
@@ -83,6 +84,9 @@ export async function loadCustomerDeliveryLocation(userId, executor = query) {
   return {
     userId: Number(user.id),
     name: user.display_name || user.username || "Customer",
+    deliveryAreaOverride: ["nearby", "outside"].includes(String(user.delivery_area_override || "").toLowerCase())
+      ? String(user.delivery_area_override).toLowerCase()
+      : null,
     ...customerLocationFromRow(user)
   };
 }

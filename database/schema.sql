@@ -47,6 +47,7 @@ CREATE TABLE users (
   delivery_longitude DECIMAL(10,7) NULL,
   delivery_landmark VARCHAR(255) NULL,
   delivery_notes TEXT NULL,
+  delivery_area_override ENUM('nearby','outside') NULL,
   birthday DATE NULL,
   gender VARCHAR(40) NULL,
   shop_description TEXT NULL,

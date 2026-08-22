@@ -232,7 +232,11 @@ export function quoteShippingLocation(location, policy, options = {}) {
   return classifyShippingLocation(location, {
     ...policy,
     fulfillmentMethod: options.fulfillmentMethod || "delivery",
-    couponFreeShipping: Boolean(options.couponFreeShipping)
+    couponFreeShipping: Boolean(options.couponFreeShipping),
+    deliveryAreaOverride: options.deliveryAreaOverride
+      ?? location?.deliveryAreaOverride
+      ?? location?.delivery_area_override
+      ?? null
   });
 }
 

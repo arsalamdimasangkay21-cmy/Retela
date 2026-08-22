@@ -399,16 +399,14 @@ router.delete("/gcash-qr", asyncHandler(async (req, res) => {
   });
 }));
 
-router.get("/delivery-customers", asyncHandler(async (req, res) => {
+async function loadClassifiedDeliveryCustomers() {
   await ensureCustomerLocationColumns();
-  const filter = z.enum(["all", "nearby", "outside"]).catch("all").parse(String(req.query.zone || "all"));
-  const search = String(req.query.search || "").trim().toLowerCase();
   const [rows, policy] = await Promise.all([
     query(
       `SELECT id, username, display_name, location, formatted_address,
          delivery_barangay, delivery_municipality, delivery_province, delivery_region,
          delivery_postal_code, delivery_place_id, delivery_latitude, delivery_longitude,
-         delivery_landmark, delivery_notes, delivery_location_source
+         delivery_landmark, delivery_notes, delivery_location_source, delivery_area_override
        FROM users
        WHERE role = 'customer' AND status = 'approved'
        ORDER BY COALESCE(display_name, username) ASC`
@@ -417,13 +415,24 @@ router.get("/delivery-customers", asyncHandler(async (req, res) => {
   ]);
   const classified = rows.map((row) => {
     const location = customerLocationFromRow(row);
-    const quote = quoteShippingLocation(location, policy, { fulfillmentMethod: "delivery" });
+    const automaticQuote = quoteShippingLocation(location, policy, { fulfillmentMethod: "delivery" });
+    const deliveryAreaOverride = ["nearby", "outside"].includes(String(row.delivery_area_override || "").toLowerCase())
+      ? String(row.delivery_area_override).toLowerCase()
+      : null;
+    const quote = quoteShippingLocation(location, policy, {
+      fulfillmentMethod: "delivery",
+      deliveryAreaOverride
+    });
     return {
       id: Number(row.id),
       name: row.display_name || row.username || "Customer",
       municipality: location.municipality || "",
       address: location.formattedAddress || "",
       distanceKm: quote.distanceKm,
+      suggestedZone: automaticQuote.shippingZone,
+      suggestedRule: automaticQuote.shippingRule,
+      deliveryAreaOverride,
+      classificationMode: deliveryAreaOverride ? "manual" : "automatic",
       zone: quote.shippingZone,
       shippingFee: quote.shippingFee,
       shippingRule: quote.shippingRule,
@@ -435,12 +444,53 @@ router.get("/delivery-customers", asyncHandler(async (req, res) => {
     else counts.outside += 1;
     return counts;
   }, { nearby: 0, outside: 0 });
+  return { classified, summary };
+}
+
+router.get("/delivery-customers", asyncHandler(async (req, res) => {
+  const filter = z.enum(["all", "nearby", "outside"]).catch("all").parse(String(req.query.zone || "all"));
+  const search = String(req.query.search || "").trim().toLowerCase();
+  const summaryOnly = ["1", "true", "yes"].includes(String(req.query.summaryOnly || "").toLowerCase());
+  const { classified, summary } = await loadClassifiedDeliveryCustomers();
+  if (summaryOnly) {
+    res.json({ summary });
+    return;
+  }
   const customers = classified.filter((customer) => {
     if (filter !== "all" && customer.zone !== filter) return false;
     if (!search) return true;
     return `${customer.name} ${customer.municipality} ${customer.address}`.toLowerCase().includes(search);
   });
   res.json({ summary, customers });
+}));
+
+router.put("/delivery-customers/:id", asyncHandler(async (req, res) => {
+  await ensureCustomerLocationColumns();
+  const customerId = z.coerce.number().int().positive().parse(req.params.id);
+  const { override } = z.object({
+    override: z.enum(["nearby", "outside"]).nullable()
+  }).parse(req.body);
+  const result = await query(
+    `UPDATE users
+     SET delivery_area_override = :override
+     WHERE id = :customerId AND role = 'customer' AND status = 'approved'`,
+    { customerId, override }
+  );
+  if (!result.affectedRows) throw new HttpError(404, "Approved customer not found.");
+
+  const { classified, summary } = await loadClassifiedDeliveryCustomers();
+  const customer = classified.find((item) => item.id === customerId);
+  req.app.get("io")?.emit("shipping:update", {
+    type: "delivery_area_override",
+    customerId,
+    deliveryAreaOverride: override,
+    shippingZone: customer?.zone || null
+  });
+  res.json({
+    message: override ? "Customer delivery area updated." : "Automatic delivery classification restored.",
+    customer,
+    summary
+  });
 }));
 
 router.post("/reset", asyncHandler(async (req, res) => {

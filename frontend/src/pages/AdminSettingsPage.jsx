@@ -306,12 +306,14 @@ export default function AdminSettingsPage({ onChange }) {
   const [saving, setSaving] = useState("");
   const [toast, setToast] = useState(null);
   const [municipalityDraft, setMunicipalityDraft] = useState("");
-  const [deliveryAreaFilter, setDeliveryAreaFilter] = useState("nearby");
+  const [deliveryAreaFilter, setDeliveryAreaFilter] = useState("all");
   const [deliveryCustomerSearch, setDeliveryCustomerSearch] = useState("");
   const [deliveryCustomers, setDeliveryCustomers] = useState([]);
   const [deliverySummary, setDeliverySummary] = useState({ nearby: 0, outside: 0 });
   const [deliveryCustomersLoading, setDeliveryCustomersLoading] = useState(true);
   const [deliveryCustomersError, setDeliveryCustomersError] = useState("");
+  const [deliveryAreasOpen, setDeliveryAreasOpen] = useState(false);
+  const [deliveryCustomerSaving, setDeliveryCustomerSaving] = useState(null);
   const [removeQrConfirmOpen, setRemoveQrConfirmOpen] = useState(false);
   const [gcashQrVersion, setGcashQrVersion] = useState(0);
   const [userTheme, setUserTheme] = useState(() => readUserTheme(user));
@@ -331,7 +333,7 @@ export default function AdminSettingsPage({ onChange }) {
   const filteredDeliveryCustomers = useMemo(() => {
     const search = deliveryCustomerSearch.trim().toLowerCase();
     return deliveryCustomers.filter((customer) => {
-      if (String(customer.zone || "").toLowerCase() !== deliveryAreaFilter) return false;
+      if (deliveryAreaFilter !== "all" && String(customer.zone || "").toLowerCase() !== deliveryAreaFilter) return false;
       if (!search) return true;
       return [customer.name, customer.municipality, customer.address]
         .some((value) => String(value || "").toLowerCase().includes(search));
@@ -355,10 +357,9 @@ export default function AdminSettingsPage({ onChange }) {
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
-    cachedGet("/settings/delivery-customers", {}, { cacheMs: 10000, retries: 1 })
+    cachedGet("/settings/delivery-customers?summaryOnly=true", {}, { cacheMs: 10000, retries: 1 })
       .then(({ data }) => {
         if (cancelled) return;
-        setDeliveryCustomers(Array.isArray(data?.customers) ? data.customers : []);
         setDeliverySummary({
           nearby: Number(data?.summary?.nearby || 0),
           outside: Number(data?.summary?.outside || 0)
@@ -395,12 +396,13 @@ export default function AdminSettingsPage({ onChange }) {
     toastTimerRef.current = window.setTimeout(() => setToast(null), 3600);
   }
 
-  async function refreshDeliveryCustomers({ showLoading = false } = {}) {
+  async function refreshDeliveryCustomers({ showLoading = false, includeCustomers = deliveryAreasOpen } = {}) {
     if (showLoading) setDeliveryCustomersLoading(true);
     try {
-      clearGetCache("/settings/delivery-customers");
-      const { data } = await api.get("/settings/delivery-customers");
-      setDeliveryCustomers(Array.isArray(data?.customers) ? data.customers : []);
+      const url = includeCustomers ? "/settings/delivery-customers" : "/settings/delivery-customers?summaryOnly=true";
+      clearGetCache(url);
+      const { data } = await api.get(url);
+      if (includeCustomers) setDeliveryCustomers(Array.isArray(data?.customers) ? data.customers : []);
       setDeliverySummary({
         nearby: Number(data?.summary?.nearby || 0),
         outside: Number(data?.summary?.outside || 0)
@@ -410,6 +412,36 @@ export default function AdminSettingsPage({ onChange }) {
       setDeliveryCustomersError(getApiErrorMessage(error, "Could not load delivery-area customers."));
     } finally {
       if (showLoading) setDeliveryCustomersLoading(false);
+    }
+  }
+
+  function openDeliveryAreas() {
+    setDeliveryAreasOpen(true);
+    setDeliveryAreaFilter("all");
+    setDeliveryCustomerSearch("");
+    void refreshDeliveryCustomers({ showLoading: true, includeCustomers: true });
+  }
+
+  async function updateDeliveryAreaOverride(customerId, override) {
+    setDeliveryCustomerSaving(customerId);
+    try {
+      const { data } = await api.put(`/settings/delivery-customers/${customerId}`, { override });
+      if (data?.customer) {
+        setDeliveryCustomers((current) => current.map((customer) => (
+          Number(customer.id) === Number(customerId) ? data.customer : customer
+        )));
+      }
+      setDeliverySummary({
+        nearby: Number(data?.summary?.nearby || 0),
+        outside: Number(data?.summary?.outside || 0)
+      });
+      clearGetCache("/settings/delivery-customers");
+      clearGetCache("/settings/delivery-customers?summaryOnly=true");
+      pushToast("success", override ? "Customer delivery area updated." : "Automatic classification restored.");
+    } catch (error) {
+      pushToast("error", getApiErrorMessage(error, "Could not update the customer's delivery area."));
+    } finally {
+      setDeliveryCustomerSaving(null);
     }
   }
 
@@ -849,15 +881,10 @@ export default function AdminSettingsPage({ onChange }) {
 
             <DeliveryAreaSummary
               summary={deliverySummary}
-              customers={filteredDeliveryCustomers}
-              filter={deliveryAreaFilter}
-              search={deliveryCustomerSearch}
               loading={deliveryCustomersLoading}
               error={deliveryCustomersError}
-              outsideFee={settings.payment.outsideAreaShippingFee ?? 0}
-              onFilterChange={setDeliveryAreaFilter}
-              onSearchChange={setDeliveryCustomerSearch}
-              onRetry={() => refreshDeliveryCustomers({ showLoading: true })}
+              onManage={openDeliveryAreas}
+              onRetry={() => refreshDeliveryCustomers({ showLoading: true, includeCustomers: false })}
             />
 
             <section className="border-t border-white/10 pt-6">
@@ -997,6 +1024,21 @@ export default function AdminSettingsPage({ onChange }) {
             saving={saving === "gcashQrRemove"}
             onConfirm={removeGcashQr}
             onClose={() => setRemoveQrConfirmOpen(false)}
+          />
+        ) : null}
+        {deliveryAreasOpen ? (
+          <CustomerDeliveryAreasModal
+            customers={filteredDeliveryCustomers}
+            filter={deliveryAreaFilter}
+            search={deliveryCustomerSearch}
+            loading={deliveryCustomersLoading}
+            error={deliveryCustomersError}
+            savingCustomerId={deliveryCustomerSaving}
+            onFilterChange={setDeliveryAreaFilter}
+            onSearchChange={setDeliveryCustomerSearch}
+            onClassify={updateDeliveryAreaOverride}
+            onRetry={() => refreshDeliveryCustomers({ showLoading: true, includeCustomers: true })}
+            onClose={() => setDeliveryAreasOpen(false)}
           />
         ) : null}
       </AnimatePresence>
@@ -1253,79 +1295,176 @@ function ReadOnlySetting({ label, value, detail }) {
   );
 }
 
-function DeliveryAreaSummary({ summary, customers, filter, search, loading, error, outsideFee, onFilterChange, onSearchChange, onRetry }) {
+function DeliveryAreaSummary({ summary, loading, error, onManage, onRetry }) {
   return (
     <section className="grid gap-4 border-t border-white/10 pt-6">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-        <SettingsSectionHeading eyebrow="Delivery Area Summary" title="Customer Delivery Classification" />
-        <div className="grid grid-cols-2 gap-2 sm:min-w-72">
-          <SummaryCount label="Nearby / Free" value={summary.nearby} active={filter === "nearby"} onClick={() => onFilterChange("nearby")} />
-          <SummaryCount label="Outside" value={summary.outside} active={filter === "outside"} onClick={() => onFilterChange("outside")} />
+      <div>
+        <span className="text-xs font-bold uppercase tracking-[0.18em] text-neonbrand/70">Delivery Area Summary</span>
+        <div className="mt-3 grid grid-cols-2 gap-2 sm:max-w-md">
+          <SummaryCount label="Nearby / Free" value={loading ? "—" : summary.nearby} />
+          <SummaryCount label="Outside" value={loading ? "—" : summary.outside} />
         </div>
       </div>
-      <label className="flex min-h-12 items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-2 text-white focus-within:border-neonbrand/50 focus-within:ring-4 focus-within:ring-neonbrand/10">
-        <Search size={16} className="shrink-0 text-neonbrand" />
-        <input className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-white/35" value={search} onChange={(event) => onSearchChange(event.target.value)} placeholder="Search customer or municipality" />
-      </label>
-      {loading ? (
-        <div className="grid gap-2">
-          {[1, 2, 3].map((item) => <div key={item} className="skeleton min-h-16 rounded-2xl" />)}
-        </div>
-      ) : error ? (
+      {error ? (
         <div className="flex flex-col gap-3 rounded-2xl border border-rose-300/20 bg-rose-400/10 p-4 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-sm font-semibold text-rose-100">{error}</p>
           <button type="button" onClick={onRetry} className="inline-flex items-center justify-center gap-2 rounded-xl border border-rose-200/25 px-3 py-2 text-xs font-bold text-rose-100">
             <RefreshCw size={14} /> Retry
           </button>
         </div>
-      ) : customers.length ? (
-        <div className="max-h-80 overflow-y-auto rounded-2xl border border-white/10 bg-black/15">
-          {customers.map((customer) => {
-            const distance = Number(customer.distanceKm);
-            const hasDistance = customer.distanceKm !== null && customer.distanceKm !== undefined && customer.distanceKm !== "" && Number.isFinite(distance);
-            const outside = String(customer.zone || "").toLowerCase() === "outside";
-            const hasCustomerFee = customer.shippingFee !== null && customer.shippingFee !== undefined && customer.shippingFee !== "" && Number.isFinite(Number(customer.shippingFee));
-            const fee = hasCustomerFee ? Number(customer.shippingFee) : Number(outsideFee || 0);
-            return (
-              <div key={customer.id} className="grid gap-2 border-b border-white/[0.08] p-4 last:border-b-0 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
-                <div className="min-w-0">
-                  <strong className="block truncate text-sm text-white">{customer.name || "Customer"}</strong>
-                  <span className="mt-1 block break-words text-xs text-white/52">
-                    {customer.municipality || customer.address || "Location not provided"}{hasDistance ? ` | ${distance.toFixed(1)} km` : ""}
-                  </span>
-                  <span className="mt-1 block text-xs text-white/[0.38]">{shippingReasonLabel(customer.shippingRule || customer.reason, outside)}</span>
-                </div>
-                <strong className={`text-sm ${outside ? "text-white/80" : "text-neonbrand"}`}>{outside ? formatPhp(fee) : "FREE"}</strong>
-              </div>
-            );
-          })}
-        </div>
-      ) : (
-        <p className="rounded-2xl border border-dashed border-white/10 bg-white/[0.035] p-5 text-center text-sm text-white/45">No {filter === "nearby" ? "nearby" : "outside-area"} customers match this search.</p>
-      )}
+      ) : null}
+      <button type="button" onClick={onManage} className="gradient-btn inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-bold sm:w-fit">
+        <Users size={17} /> Manage Customer Delivery Areas
+      </button>
     </section>
   );
 }
 
-function SummaryCount({ label, value, active, onClick }) {
+function SummaryCount({ label, value }) {
+  const displayValue = typeof value === "number" ? Number(value || 0) : value;
   return (
-    <button type="button" onClick={onClick} className={`min-h-14 rounded-2xl border px-3 py-2 text-left transition ${active ? "border-neonbrand/40 bg-neonbrand/15 text-neonbrand" : "border-white/10 bg-white/[0.05] text-white/55 hover:border-neonbrand/25"}`} aria-pressed={active}>
+    <div className="min-h-16 rounded-2xl border border-white/10 bg-white/[0.05] px-3 py-2 text-left text-white/55">
       <span className="block text-[11px] font-bold uppercase tracking-[0.12em]">{label}</span>
-      <strong className="mt-1 block text-lg text-white">{Number(value || 0)}</strong>
-    </button>
+      <strong className="mt-1 block text-lg text-white">{displayValue}</strong>
+    </div>
   );
 }
 
-function shippingReasonLabel(reason, outside) {
-  const normalized = String(reason || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
-  if (["municipality", "free_municipality", "nearby_municipality"].includes(normalized)) return "Nearby delivery area";
-  if (["radius", "distance", "free_radius"].includes(normalized)) return "Within free delivery radius";
-  if (normalized === "outside_area" || normalized === "outside") return "Outside nearby delivery area";
-  return reason || (outside ? "Outside nearby delivery area" : "Nearby delivery area");
+function CustomerDeliveryAreasModal({ customers, filter, search, loading, error, savingCustomerId, onFilterChange, onSearchChange, onClassify, onRetry, onClose }) {
+  const searchInputRef = useRef(null);
+  const onCloseRef = useRef(onClose);
+  const savingCustomerRef = useRef(savingCustomerId);
+  onCloseRef.current = onClose;
+  savingCustomerRef.current = savingCustomerId;
+  useEffect(() => {
+    document.body.classList.add("retela-modal-open");
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const closeOnEscape = (event) => {
+      if (event.key === "Escape" && !savingCustomerRef.current) onCloseRef.current();
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    window.setTimeout(() => searchInputRef.current?.focus(), 80);
+    return () => {
+      document.body.classList.remove("retela-modal-open");
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, []);
+
+  const filters = [
+    ["all", "All"],
+    ["nearby", "Nearby / Free"],
+    ["outside", "Outside"]
+  ];
+  return (
+    <motion.div
+      className="delivery-areas-modal-backdrop fixed inset-0 z-[180] flex items-end justify-center bg-black/70 backdrop-blur-sm sm:items-center sm:p-5"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      onMouseDown={savingCustomerId ? undefined : onClose}
+    >
+      <motion.section
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="delivery-areas-title"
+        className="delivery-areas-modal flex max-h-[92dvh] w-full min-w-0 flex-col overflow-hidden rounded-t-[28px] border border-white/10 bg-[#101712] text-white shadow-[0_28px_90px_rgba(0,0,0,0.55)] sm:max-h-[85vh] sm:max-w-3xl sm:rounded-[28px]"
+        initial={{ opacity: 0, y: 32, scale: 0.98 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        exit={{ opacity: 0, y: 32, scale: 0.98 }}
+        transition={{ duration: 0.22, ease: "easeOut" }}
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <header className="flex shrink-0 items-start justify-between gap-4 border-b border-white/10 px-4 py-4 sm:px-6 sm:py-5">
+          <div className="min-w-0">
+            <span className="text-xs font-bold uppercase tracking-[0.18em] text-neonbrand/70">Delivery settings</span>
+            <h2 id="delivery-areas-title" className="mt-1 font-display text-xl font-bold sm:text-2xl">Customer Delivery Areas</h2>
+            <p className="mt-1 text-xs leading-5 text-white/50 sm:text-sm">Location is a suggestion. An admin selection is the shipping rule.</p>
+          </div>
+          <button type="button" onClick={onClose} disabled={Boolean(savingCustomerId)} aria-label="Close customer delivery areas" className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-white/10 bg-white/[0.06] text-white/70 transition hover:border-neonbrand/35 hover:text-neonbrand disabled:opacity-50">
+            <X size={18} />
+          </button>
+        </header>
+
+        <div className="grid shrink-0 gap-3 border-b border-white/[0.08] px-4 py-4 sm:px-6">
+          <label className="flex min-h-12 items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-4 text-white focus-within:border-neonbrand/50 focus-within:ring-4 focus-within:ring-neonbrand/10">
+            <Search size={16} className="shrink-0 text-neonbrand" />
+            <input ref={searchInputRef} className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-white/35" value={search} onChange={(event) => onSearchChange(event.target.value)} placeholder="Search customer, municipality, city, or address" />
+          </label>
+          <div className="grid grid-cols-3 gap-2" aria-label="Filter customer delivery areas">
+            {filters.map(([value, label]) => (
+              <button key={value} type="button" onClick={() => onFilterChange(value)} aria-pressed={filter === value} className={`min-h-10 rounded-xl border px-2 py-2 text-xs font-bold transition sm:text-sm ${filter === value ? "border-neonbrand/45 bg-neonbrand/15 text-neonbrand" : "border-white/10 bg-white/[0.04] text-white/55 hover:border-neonbrand/25"}`}>
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 sm:px-6">
+          {loading ? (
+            <div className="grid gap-3">{[1, 2, 3].map((item) => <div key={item} className="skeleton min-h-44 rounded-2xl" />)}</div>
+          ) : error ? (
+            <div className="grid justify-items-center gap-3 rounded-2xl border border-rose-300/20 bg-rose-400/10 p-5 text-center">
+              <p className="text-sm font-semibold text-rose-100">{error}</p>
+              <button type="button" onClick={onRetry} className="inline-flex items-center gap-2 rounded-xl border border-rose-200/25 px-3 py-2 text-xs font-bold text-rose-100"><RefreshCw size={14} /> Retry</button>
+            </div>
+          ) : customers.length ? (
+            <div className="grid gap-3">
+              {customers.map((customer) => (
+                <CustomerDeliveryAreaRow key={customer.id} customer={customer} saving={Number(savingCustomerId) === Number(customer.id)} disabled={Boolean(savingCustomerId)} onClassify={onClassify} />
+              ))}
+            </div>
+          ) : (
+            <p className="rounded-2xl border border-dashed border-white/10 bg-white/[0.035] p-6 text-center text-sm text-white/45">No customers match this search and filter.</p>
+          )}
+        </div>
+      </motion.section>
+    </motion.div>
+  );
 }
 
-function formatPhp(value) {
-  return `PHP ${Number(value || 0).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+function CustomerDeliveryAreaRow({ customer, saving, disabled, onClassify }) {
+  const override = String(customer.deliveryAreaOverride || "").toLowerCase();
+  const suggestedZone = String(customer.suggestedZone || "outside").toLowerCase();
+  const distance = Number(customer.distanceKm);
+  const hasDistance = customer.distanceKm !== null && customer.distanceKm !== undefined && customer.distanceKm !== "" && Number.isFinite(distance);
+  const options = [
+    ["nearby", "Nearby / Free"],
+    ["outside", "Outside"]
+  ];
+  return (
+    <article className="grid min-w-0 gap-3 rounded-2xl border border-white/10 bg-white/[0.045] p-4">
+      <div className="min-w-0">
+        <strong className="block break-words text-sm text-white sm:text-base">{customer.name || "Customer"}</strong>
+        <p className="mt-1 break-words text-xs leading-5 text-white/55">{customer.address || "Delivery address not provided"}</p>
+        <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] font-semibold text-white/40">
+          {customer.municipality ? <span>Municipality: {customer.municipality}</span> : null}
+          {hasDistance ? <span>Approx. distance: {distance.toFixed(1)} km</span> : null}
+        </div>
+      </div>
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/[0.08] bg-black/15 px-3 py-2 text-xs">
+        <span className="text-white/55">Suggested by location: <strong className="text-white">{suggestedZone === "nearby" ? "Nearby" : "Outside"}</strong></span>
+        <span className={override ? "font-bold text-neonbrand" : "font-semibold text-white/45"}>Current mode: {override ? "Manual" : "Automatic"}</span>
+      </div>
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2" role="radiogroup" aria-label={`Delivery area for ${customer.name || "customer"}`}>
+        {options.map(([value, label]) => {
+          const selected = override === value;
+          return (
+            <button key={value} type="button" role="radio" aria-checked={selected} disabled={disabled} onClick={() => onClassify(customer.id, value)} className={`inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border px-3 py-2 text-sm font-bold transition disabled:cursor-wait disabled:opacity-60 ${selected ? "border-neonbrand/55 bg-neonbrand/20 text-neonbrand shadow-[0_0_22px_rgba(56,255,136,0.1)]" : "border-white/10 bg-white/[0.04] text-white/65 hover:border-neonbrand/30 hover:text-white"}`}>
+              {saving && selected ? <Loader2 size={15} className="animate-spin" /> : selected ? <CheckCircle2 size={15} /> : null}
+              {label}
+            </button>
+          );
+        })}
+      </div>
+      {override ? (
+        <button type="button" disabled={disabled} onClick={() => onClassify(customer.id, null)} className="inline-flex w-fit items-center gap-1.5 rounded-lg px-1 py-1 text-xs font-bold text-white/50 transition hover:text-neonbrand disabled:cursor-wait disabled:opacity-50">
+          {saving ? <Loader2 size={13} className="animate-spin" /> : <RotateCcw size={13} />} Use Automatic
+        </button>
+      ) : null}
+    </article>
+  );
 }
 
 function FieldShell({ label, error, children, className = "" }) {
