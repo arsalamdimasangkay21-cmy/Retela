@@ -12873,7 +12873,16 @@ button {
   }
 }
 
-/* Final settings layout pass: independent columns and non-wrapping actions. */
+/* Settings layout: two real vertical stacks. Cards in opposite columns never
+   share a grid row, so a tall card cannot create a blank region beside it. */
+.settings-page,
+.settings-layout,
+.settings-column,
+.settings-layout__full {
+  min-width: 0;
+  width: 100%;
+}
+
 .settings-layout {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -12881,26 +12890,26 @@ button {
   gap: 24px;
 }
 
-.settings-layout > .settings-card {
+.settings-column,
+.settings-layout__full {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 24px;
+}
+
+.settings-layout__full {
+  grid-column: 1 / -1;
+}
+
+.settings-column > .settings-card,
+.settings-layout__full > .settings-card {
   width: 100%;
   height: auto !important;
   min-height: 0 !important;
-  align-self: auto;
+  align-self: stretch;
   margin: 0;
 }
-
-.settings-layout > .settings-card--general { grid-column: 1; grid-row: 1; }
-.settings-layout > .settings-card--ai { grid-column: 2; grid-row: 1; }
-.settings-layout > .settings-card--notifications { grid-column: 1; grid-row: 2; }
-.settings-layout > .settings-card--security { grid-column: 2; grid-row: 2; }
-.settings-layout > .settings-card--inventory { grid-column: 1; grid-row: 3; }
-.settings-layout > .settings-card--reports { grid-column: 2; grid-row: 3; }
-.settings-layout > .settings-card--appearance { grid-column: 1; grid-row: 4; }
-.settings-layout > .settings-card--customers { grid-column: 2; grid-row: 4; }
-.settings-layout > .settings-card--payment { grid-column: 1 / -1; grid-row: 5; }
-.settings-layout > .settings-card--about { grid-column: 1 / -1; grid-row: 6; }
-.settings-layout > .settings-card--dataManagement { grid-column: 1 / -1; grid-row: 7; }
-.settings-layout > .settings-card--backup { grid-column: 1 / -1; grid-row: 8; }
 
 .settings-card__heading {
   min-width: 0;
@@ -12957,15 +12966,29 @@ button {
 @media (max-width: 1100px) {
   .settings-layout {
     grid-template-columns: 1fr;
+    gap: 20px;
   }
 
-  .settings-layout > .settings-card {
+  .settings-column,
+  .settings-layout__full {
+    gap: 20px;
+  }
+
+  .settings-layout__full {
     grid-column: auto;
-    grid-row: auto;
   }
 }
 
 @media (max-width: 639px) {
+  .settings-layout {
+    gap: 16px;
+  }
+
+  .settings-column,
+  .settings-layout__full {
+    gap: 16px;
+  }
+
   .settings-card__actions {
     width: 100%;
     justify-content: flex-end;

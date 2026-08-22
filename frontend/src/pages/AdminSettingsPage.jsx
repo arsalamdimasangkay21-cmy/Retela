@@ -852,6 +852,7 @@ export default function AdminSettingsPage({ onChange }) {
       </section>
 
       <div className="settings-layout">
+        <div className="settings-column settings-column--left">
             <SettingsCard section="general" {...cardControls("general")} onSave={saveSettings} view={<GeneralSettingsView value={settings.general} logo={shopLogoPreview} onLocationEdit={openShopLocationModal} />}>
               <div className="grid gap-4 md:grid-cols-2">
                 <TextInput label="Shop Name" value={settings.general.shopName} error={errors["general.shopName"]} onChange={(value) => updateSetting("general", "shopName", value)} />
@@ -911,6 +912,9 @@ export default function AdminSettingsPage({ onChange }) {
                 <SelectInput label="Dashboard Layout" value={settings.appearance.dashboardLayout} options={["Comfortable", "Compact", "Analytics Focus"]} onChange={(value) => updateSetting("appearance", "dashboardLayout", value)} />
               </div>
             </SettingsCard>
+        </div>
+
+        <div className="settings-column settings-column--right">
             <SettingsCard section="ai" {...cardControls("ai")} onSave={saveSettings} view={<AISettingsView value={settings.ai} />}>
               <div className="grid gap-4">
                 <AIProviderSelector
@@ -964,6 +968,9 @@ export default function AdminSettingsPage({ onChange }) {
                 <ToggleSwitch label="Customer Broadcast Notifications" checked={settings.customers.customerBroadcastNotifications} onChange={(value) => updateSetting("customers", "customerBroadcastNotifications", value)} />
               </ToggleGrid>
             </SettingsCard>
+        </div>
+
+        <div className="settings-layout__full">
           <SettingsCard section="payment" {...cardControls("payment")} onSave={saveSettings} className="settings-card--wide" view={<PaymentSettingsView value={settings} qrPreview={gcashQrPreview} summary={deliverySummary} loading={deliveryCustomersLoading} error={deliveryCustomersError} onManage={openDeliveryAreas} onRetry={() => refreshDeliveryCustomers({ showLoading: true, includeCustomers: false })} />}>
           <div className="grid gap-6">
             <section className="grid gap-4">
@@ -1098,6 +1105,7 @@ export default function AdminSettingsPage({ onChange }) {
             </div>
           </div>
         </SettingsCard>
+        </div>
       </div>
 
       <AnimatePresence>
