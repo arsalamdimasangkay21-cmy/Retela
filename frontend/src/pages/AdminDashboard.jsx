@@ -4,7 +4,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { Bar, Doughnut, Line, Pie } from "react-chartjs-2";
 import { Chart as ChartJS, ArcElement, BarElement, CategoryScale, Filler, LinearScale, LineElement, PointElement, Tooltip, Legend } from "chart.js";
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip as RechartsTooltip, XAxis, YAxis } from "recharts";
-import { Activity, Archive, Barcode, Bot, Camera, Check, CheckCircle2, ChevronLeft, ChevronRight, Clock3, Download, Edit3, Eye, FileSpreadsheet, Loader2, MapPin, Megaphone, MessageSquare, MoreHorizontal, PackageCheck, PackagePlus, Plus, Printer, ReceiptText, RotateCcw, Save, Search, Send, Shirt, ShoppingBag, SlidersHorizontal, Sparkles, Star, Tags, Trash2, TrendingUp, Upload, UserRound, WalletCards, X, Zap } from "lucide-react";
+import { Activity, Archive, Barcode, Bot, Camera, Check, CheckCircle2, ChevronLeft, ChevronRight, Clock3, Download, Edit3, Eye, FileSpreadsheet, Loader2, MapPin, Megaphone, MessageSquare, PackageCheck, PackagePlus, Plus, Printer, ReceiptText, RotateCcw, Save, Search, Send, Shirt, ShoppingBag, SlidersHorizontal, Sparkles, Star, Tags, Trash2, TrendingUp, Upload, UserRound, WalletCards, X, Zap } from "lucide-react";
 import { api, API_URL, cachedGet, clearGetCache, getApiErrorMessage } from "../api/client";
 import JsBarcode from "jsbarcode";
 import { jsPDF } from "jspdf";
@@ -576,39 +576,6 @@ export default function AdminDashboard({ active, onChange }) {
     }
   }
 
-  async function updateStock(productOrId, change) {
-    if (String(productOrId?.id ?? productOrId).startsWith("sample-")) return;
-    const productId = validProductId(productOrId);
-    if (!productId) {
-      showProductToast("Cannot update stock because the product ID is missing.", "error");
-      return;
-    }
-    if (import.meta.env.DEV) {
-      console.log("[stock update]", {
-        productId,
-        requestedStock: null,
-        delta: change
-      });
-    }
-    const actionKey = `stock-${productId}`;
-    if (busyAction === actionKey) return;
-    setBusyAction(actionKey);
-    try {
-      const { data } = await api.patch(`/products/${productId}/stock`, { delta: change });
-      if (data?.id) {
-        const updatedItem = normalizeProductRows([data])[0];
-        setInventoryProducts((rows) => rows.map((product) => (validProductId(product) === productId ? updatedItem : product)));
-        setProducts((rows) => rows.map((product) => (validProductId(product) === productId ? updatedItem : product)));
-      }
-      await refreshProductLists();
-      showProductToast(change > 0 ? "Apparel item restocked successfully." : "Stock updated successfully.");
-    } catch (error) {
-      showProductToast(getApiErrorMessage(error, "Could not update stock."), "error");
-    } finally {
-      setBusyAction("");
-    }
-  }
-
   async function updateOrder(id, status) {
     const actionKey = `order-${id}`;
     if (busyAction === actionKey) return;
@@ -771,7 +738,6 @@ export default function AdminDashboard({ active, onChange }) {
           onEdit={editProduct}
           onDelete={deleteProduct}
           deletingProductIds={deletingProductIds}
-          onUpdateStock={updateStock}
           modalOpen={inventoryModalOpen}
           onCloseModal={() => {
             setInventoryModalOpen(false);
@@ -1306,7 +1272,6 @@ function PremiumInventoryPage({
   onEdit,
   onDelete,
   deletingProductIds = [],
-  onUpdateStock,
   modalOpen,
   onCloseModal,
   editingProductId,
@@ -1466,17 +1431,14 @@ function PremiumInventoryPage({
         </div>
       </Card>
 
-      <Card className="overflow-hidden p-0">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 px-4 py-4 sm:px-5">
+      <Card className="inventory-stock-list-card overflow-hidden p-0">
+        <div className="inventory-stock-list__header flex flex-wrap items-center justify-between gap-3 border-b border-white/10 px-4 py-4 sm:px-5">
           <div>
             <h2 className="font-display text-xl font-bold text-white">Stock List</h2>
             <p className="mt-1 text-sm text-white/45">Inventory is the source of truth for apparel, stock, and barcodes.</p>
           </div>
           <div className="flex flex-wrap items-center justify-end gap-2">
-            <span className="rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-xs font-bold text-white/55">Selected: {selectedBarcodeIds.length}</span>
-            <button type="button" onClick={selectAllBarcodes} disabled={!allBarcodeIds.length} className="rounded-xl border border-neonbrand/25 bg-neonbrand/10 px-3 py-2 text-xs font-bold text-neonbrand transition hover:bg-neonbrand hover:text-black disabled:cursor-not-allowed disabled:opacity-45">Select All</button>
-            <button type="button" onClick={clearSelectedBarcodes} disabled={!selectedBarcodeIds.length} className="rounded-xl border border-white/10 bg-white/[0.05] px-3 py-2 text-xs font-bold text-white/65 transition hover:border-neonbrand/30 hover:text-neonbrand disabled:cursor-not-allowed disabled:opacity-45">Clear</button>
-            <button type="button" onClick={() => setBarcodeModalOpen(true)} className="inline-flex items-center justify-center gap-2 rounded-2xl border border-neonbrand/30 bg-neonbrand/10 px-4 py-2.5 text-sm font-bold text-neonbrand transition hover:bg-neonbrand hover:text-black">
+            <button type="button" onClick={() => setBarcodeModalOpen(true)} className="inventory-barcode-button inline-flex items-center justify-center gap-2 rounded-2xl border border-neonbrand/30 bg-neonbrand/10 px-4 py-2.5 text-sm font-bold text-neonbrand transition hover:bg-neonbrand hover:text-black">
               <Barcode size={17} />
               Barcodes
             </button>
@@ -1484,24 +1446,22 @@ function PremiumInventoryPage({
         </div>
         {pageProducts.length ? (
           <>
-            <div className="hidden xl:block">
+            <div className="inventory-stock-list__table-wrap hidden xl:block">
               <table className="w-full table-fixed text-left text-sm">
                 <colgroup>
-                  <col className="w-[4%]" />
                   <col className="w-[8%]" />
+                  <col className="w-[15%]" />
                   <col className="w-[14%]" />
-                  <col className="w-[13%]" />
-                  <col className="w-[9%]" />
+                  <col className="w-[10%]" />
                   <col className="w-[7%]" />
-                  <col className="w-[9%]" />
+                  <col className="w-[10%]" />
                   <col className="w-[6%]" />
                   <col className="w-[8%]" />
-                  <col className="w-[9%]" />
-                  <col className="w-[13%]" />
+                  <col className="w-[7%]" />
+                  <col className="w-[15%]" />
                 </colgroup>
                 <thead>
-                  <tr className="border-b border-white/10 bg-white/[0.035] text-[11px] uppercase tracking-[0.08em] text-white/42">
-                    <th className="px-3 py-4"><span className="sr-only">Select</span></th>
+                  <tr className="inventory-stock-list__head-row border-b border-white/10 bg-white/[0.035] text-[11px] uppercase tracking-[0.08em] text-white/42">
                     <th className="px-3 py-4">Image</th>
                     <th className="px-3 py-4">Apparel</th>
                     <th className="px-3 py-4">Barcode/SKU</th>
@@ -1524,11 +1484,8 @@ function PremiumInventoryPage({
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ duration: 0.28, delay: index * 0.035 }}
                     >
-                      <td className="px-3 py-4 align-top">
-                        <input type="checkbox" checked={selectedBarcodeIds.includes(Number(product.id))} onChange={() => toggleBarcode(product.id)} aria-label={`Select barcode for ${product.name}`} className="mt-1 h-4 w-4 accent-emerald-500" />
-                      </td>
                       <td className="px-3 py-4">
-                        <div className="h-14 w-14 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.06] shadow-lg shadow-black/20">
+                        <div className="inventory-product-thumb h-14 w-14 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.06] shadow-lg shadow-black/20">
                           <ProductImage product={product} className="h-full w-full object-cover transition duration-500 group-hover:scale-105" alt={product.name} />
                         </div>
                       </td>
@@ -1538,7 +1495,7 @@ function PremiumInventoryPage({
                       </td>
                       <td className="px-3 py-4">
                         <div className="grid gap-1">
-                          <div className="h-9 overflow-hidden rounded-xl border border-white/10 bg-white p-1">
+                          <div className="inventory-barcode-preview h-9 overflow-hidden rounded-xl border border-white/10 bg-white p-1">
                             <BarcodeSvg value={productSku(product)} compact />
                           </div>
                           <span className="break-all text-[11px] font-bold text-neonbrand">{productSku(product)}</span>
@@ -1551,19 +1508,18 @@ function PremiumInventoryPage({
                       <td className="break-words px-3 py-4 font-bold text-white">PHP {Number(product.price || 0).toLocaleString()}</td>
                       <td className="px-3 py-4"><InventoryStatusBadge stock={product.stock} status={product.status} /></td>
                       <td className="px-3 py-4">
-                        <InventoryActions product={product} onEdit={onEdit} onUpdateStock={onUpdateStock} onDelete={onDelete} deletingProductIds={deletingProductIds} />
+                        <InventoryActions product={product} onEdit={onEdit} onDelete={onDelete} deletingProductIds={deletingProductIds} />
                       </td>
                     </motion.tr>
                   ))}
                 </tbody>
               </table>
             </div>
-            <div className="grid gap-3 p-4 xl:hidden">
+            <div className="inventory-stock-list__mobile grid gap-3 p-4 xl:hidden">
               {pageProducts.map((product) => (
-                <article key={product.id} data-inventory-sku={productSku(product)} className={`rounded-3xl border border-white/10 bg-white/[0.055] p-3 ${focusedSku.toLowerCase() === productSku(product).toLowerCase() ? "inventory-item-focus" : ""}`}>
+                <article key={product.id} data-inventory-sku={productSku(product)} className={`inventory-stock-mobile-card rounded-3xl border border-white/10 bg-white/[0.055] p-3 ${focusedSku.toLowerCase() === productSku(product).toLowerCase() ? "inventory-item-focus" : ""}`}>
                   <div className="flex gap-3">
-                    <input type="checkbox" checked={selectedBarcodeIds.includes(Number(product.id))} onChange={() => toggleBarcode(product.id)} aria-label={`Select barcode for ${product.name}`} className="mt-2 h-4 w-4 shrink-0 accent-emerald-500" />
-                    <div className="h-20 w-20 shrink-0 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.06]">
+                    <div className="inventory-product-thumb h-20 w-20 shrink-0 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.06]">
                       <ProductImage product={product} className="h-full w-full object-cover" alt={product.name} />
                     </div>
                     <div className="min-w-0 flex-1">
@@ -1576,7 +1532,7 @@ function PremiumInventoryPage({
                     </div>
                   </div>
                   <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                    <div className="rounded-2xl border border-white/10 bg-white p-2">
+                    <div className="inventory-barcode-preview rounded-2xl border border-white/10 bg-white p-2">
                       <div className="h-12">
                         <BarcodeSvg value={productSku(product)} compact />
                       </div>
@@ -1588,7 +1544,7 @@ function PremiumInventoryPage({
                     </div>
                   </div>
                   <div className="mt-3">
-                    <InventoryActions product={product} onEdit={onEdit} onUpdateStock={onUpdateStock} onDelete={onDelete} deletingProductIds={deletingProductIds} mobile />
+                    <InventoryActions product={product} onEdit={onEdit} onDelete={onDelete} deletingProductIds={deletingProductIds} mobile />
                   </div>
                 </article>
               ))}
@@ -1696,11 +1652,12 @@ function StockStatusBadge({ stock, status, compact = false, showQuantity = false
   const quantity = Number(stock || 0);
   const sold = quantity <= 0;
   if (sold) {
-    return <span className={`admin-sold-badge inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-1 font-bold ${compact ? "text-[11px]" : "text-xs"}`}><span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-current" />SOLD</span>;
+    return <span className={`admin-sold-badge inventory-status-badge inventory-status-badge--sold inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-1 font-bold ${compact ? "text-[11px]" : "text-xs"}`}><span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-current" />SOLD</span>;
   }
   const badgeStatus = status || (quantity <= 5 ? "Low Stock" : "In Stock");
   const tone = badgeStatus === "Low Stock" ? "border-orange-400/20 bg-orange-400/10 text-orange-300" : "border-emerald-400/20 bg-emerald-400/10 text-emerald-300";
-  return <span className={`inline-flex whitespace-nowrap rounded-full border px-2.5 py-1 font-bold ${compact ? "text-[11px]" : "text-xs"} ${tone}`}>{showQuantity ? `${quantity} stock` : badgeStatus}</span>;
+  const semanticTone = badgeStatus === "Low Stock" ? "inventory-status-badge--low" : "inventory-status-badge--available";
+  return <span className={`inventory-status-badge ${semanticTone} inline-flex whitespace-nowrap rounded-full border px-2.5 py-1 font-bold ${compact ? "text-[11px]" : "text-xs"} ${tone}`}>{showQuantity ? `${quantity} stock` : badgeStatus}</span>;
 }
 
 function InventoryStatusBadge({ stock, status }) {
@@ -1711,17 +1668,14 @@ function AdminStockBadge({ stock, compact = false }) {
   return <StockStatusBadge stock={stock} compact={compact} showQuantity />;
 }
 
-function InventoryActions({ product, onEdit, onUpdateStock, onDelete, deletingProductIds = [], mobile = false }) {
+function InventoryActions({ product, onEdit, onDelete, deletingProductIds = [], mobile = false }) {
   const deleting = isDeletingProduct(product, deletingProductIds);
   return (
-    <div className={mobile ? "grid grid-cols-2 gap-2" : "grid grid-cols-3 gap-2"}>
-      <InventoryActionButton tone="edit" icon={Edit3} onClick={() => onEdit(product)}>
+    <div className={mobile ? "grid grid-cols-2 gap-2" : "grid grid-cols-2 gap-2"}>
+      <InventoryActionButton tone="edit" icon={Edit3} title="Edit item" onClick={() => onEdit(product)}>
         Edit
       </InventoryActionButton>
-      <InventoryActionButton tone="more" icon={MoreHorizontal} disabled={!validProductId(product)} title={deleteDisabledReason(product)} onClick={() => onUpdateStock(product, Number(product.stock) <= 0 ? 1 : -1)}>
-        More
-      </InventoryActionButton>
-      <InventoryActionButton tone="delete" icon={Trash2} disabled={!validProductId(product) || deleting} title={deleteDisabledReason(product)} onClick={() => onDelete(product)} className={mobile ? "col-span-2" : ""}>
+      <InventoryActionButton tone="delete" icon={Trash2} disabled={!validProductId(product) || deleting} title={deleteDisabledReason(product) || "Delete item"} onClick={() => onDelete(product)}>
         {deleting ? "Deleting..." : "Delete"}
       </InventoryActionButton>
     </div>
@@ -1731,11 +1685,10 @@ function InventoryActions({ product, onEdit, onUpdateStock, onDelete, deletingPr
 function InventoryActionButton({ tone, icon: Icon, children, onClick, disabled = false, title = "", className = "" }) {
   const styles = {
     edit: "border-[#60A5FA] bg-[#DBEAFE] text-[#1D4ED8] hover:border-[#2563EB]",
-    more: "border-[#D1D5DB] bg-[#F3F4F6] text-[#374151] hover:border-[#9CA3AF]",
     delete: "border-[#fda29b] bg-[#fff1f0] text-[#b42318] hover:border-[#f97066] hover:bg-[#fee4e2] hover:text-[#912018] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[rgba(217,45,32,0.45)]"
   };
   return (
-    <button type="button" disabled={disabled} title={title} onClick={onClick} className={`inline-flex min-h-11 min-w-0 items-center justify-center gap-2 whitespace-nowrap rounded-[10px] border px-3 py-2 text-sm font-semibold leading-none shadow-sm transition duration-200 hover:-translate-y-0.5 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-45 ${styles[tone] || styles.more} ${className}`}>
+    <button type="button" disabled={disabled} title={title} onClick={onClick} className={`inventory-action-button inventory-action-button--${tone} inline-flex min-h-11 min-w-0 items-center justify-center gap-2 whitespace-nowrap rounded-[10px] border px-3 py-2 text-sm font-semibold leading-none shadow-sm transition duration-200 hover:-translate-y-0.5 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-45 ${styles[tone] || styles.edit} ${className}`}>
       {Icon ? <Icon size={16} className="shrink-0" /> : null}
       <span className="truncate">{children}</span>
     </button>
