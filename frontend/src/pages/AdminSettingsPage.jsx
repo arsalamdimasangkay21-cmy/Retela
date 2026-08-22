@@ -318,13 +318,16 @@ export default function AdminSettingsPage({ onChange }) {
   const [deliveryCustomerSaving, setDeliveryCustomerSaving] = useState(null);
   const [editingSection, setEditingSection] = useState(null);
   const [editSnapshot, setEditSnapshot] = useState(null);
+  const [shopLocationModalOpen, setShopLocationModalOpen] = useState(false);
+  const [shopLocationDraft, setShopLocationDraft] = useState(null);
+  const [shopLocationModalSnapshot, setShopLocationModalSnapshot] = useState(null);
+  const [shopLocationModalEditingSection, setShopLocationModalEditingSection] = useState(null);
   const [removeQrConfirmOpen, setRemoveQrConfirmOpen] = useState(false);
   const [gcashQrVersion, setGcashQrVersion] = useState(0);
   const [userTheme, setUserTheme] = useState(() => readUserTheme(user));
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
   const showBlockingLoader = useBlockingLoader(loading);
   const restoreInputRef = useRef(null);
-  const shopLocationRef = useRef(null);
   const toastTimerRef = useRef(null);
 
   const shopLogoPreview = useMemo(() => files.shopLogo ? URL.createObjectURL(files.shopLogo) : assetUrl(settings.general.shopLogoUrl), [files.shopLogo, settings.general.shopLogoUrl]);
@@ -558,9 +561,51 @@ export default function AdminSettingsPage({ onChange }) {
     updateSetting("payment", "freeDeliveryMunicipalities", currentMunicipalities.filter((_, itemIndex) => itemIndex !== index));
   }
 
-  function editShopLocation() {
-    shopLocationRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-    window.setTimeout(() => shopLocationRef.current?.querySelector("input")?.focus(), 350);
+  function openShopLocationModal() {
+    const location = {
+      shopAddress: settings.general.shopAddress || "",
+      shopMunicipality: settings.general.shopMunicipality || "",
+      shopProvince: settings.general.shopProvince || "",
+      shopRegion: settings.general.shopRegion || "",
+      shopPlaceId: settings.general.shopPlaceId || "",
+      shopLatitude: settings.general.shopLatitude ?? null,
+      shopLongitude: settings.general.shopLongitude ?? null
+    };
+    setShopLocationDraft(location);
+    setShopLocationModalSnapshot(location);
+    setShopLocationModalEditingSection(editingSection);
+    setShopLocationModalOpen(true);
+  }
+
+  function cancelShopLocationModal() {
+    if (shopLocationModalSnapshot) setShopLocationDraft(shopLocationModalSnapshot);
+    setShopLocationModalOpen(false);
+    setShopLocationModalSnapshot(null);
+    setShopLocationModalEditingSection(null);
+  }
+
+  async function saveShopLocationModal() {
+    if (!shopLocationDraft) return;
+    const nextSettings = {
+      ...settings,
+      general: {
+        ...settings.general,
+        ...shopLocationDraft
+      }
+    };
+    if (shopLocationModalEditingSection) {
+      setSettings(nextSettings);
+      setShopLocationModalOpen(false);
+      setShopLocationModalSnapshot(null);
+      setShopLocationModalEditingSection(null);
+      return;
+    }
+    const saved = await saveSettings("general", nextSettings);
+    if (saved) {
+      setShopLocationModalOpen(false);
+      setShopLocationModalSnapshot(null);
+      setShopLocationModalEditingSection(null);
+    }
   }
 
   async function removeGcashQr() {
@@ -617,8 +662,8 @@ export default function AdminSettingsPage({ onChange }) {
     emitUserThemeChange(user, nextTheme);
   }
 
-  function buildPayload(scope) {
-    const payload = JSON.parse(JSON.stringify(settings));
+  function buildPayload(scope, sourceSettings = settings) {
+    const payload = JSON.parse(JSON.stringify(sourceSettings));
     delete payload.databaseStatus;
     if (!payload.ai.openaiApiKey.trim()) payload.ai.openaiApiKey = "";
     payload.payment.freeDeliveryMunicipalities = Array.from(new Map(
@@ -642,18 +687,19 @@ export default function AdminSettingsPage({ onChange }) {
     return formData;
   }
 
-  async function saveSettings(scope = "all") {
-    const nextErrors = validateSettings(settings, scope);
+  async function saveSettings(scope = "all", settingsOverride = null) {
+    const sourceSettings = settingsOverride || settings;
+    const nextErrors = validateSettings(sourceSettings, scope);
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length) {
       pushToast("error", "Please fix the highlighted settings.");
-      return;
+      return false;
     }
 
     const replacingGcashQr = Boolean(files.gcashQr) && (scope === "all" || scope === "payment");
     setSaving(scope);
     try {
-      const { data } = await api.put("/settings", buildPayload(scope), { headers: { "Content-Type": "multipart/form-data" } });
+      const { data } = await api.put("/settings", buildPayload(scope, sourceSettings), { headers: { "Content-Type": "multipart/form-data" } });
       clearGetCache("/settings");
       const hydrated = withDefaults(data.settings);
       setSettings(hydrated);
@@ -669,8 +715,10 @@ export default function AdminSettingsPage({ onChange }) {
       setEditingSection(null);
       setEditSnapshot(null);
       pushToast("success", scope === "all" ? "All settings saved." : `${sectionTitles[scope] || titleCase(scope)} saved.`);
+      return true;
     } catch (error) {
       pushToast("error", getApiErrorMessage(error, "Could not save settings."));
+      return false;
     } finally {
       setSaving("");
     }
@@ -687,6 +735,9 @@ export default function AdminSettingsPage({ onChange }) {
       setErrors({});
       setEditingSection(null);
       setEditSnapshot(null);
+      setShopLocationModalOpen(false);
+      setShopLocationModalSnapshot(null);
+      setShopLocationModalEditingSection(null);
       localStorage.setItem("retela_sidebar_collapsed", String(hydrated.appearance.sidebarCollapse));
       window.dispatchEvent(new CustomEvent("retela:appearance-settings", { detail: { sidebarCollapse: hydrated.appearance.sidebarCollapse } }));
       window.dispatchEvent(new CustomEvent("retela:branding-settings", { detail: hydrated }));
@@ -801,9 +852,7 @@ export default function AdminSettingsPage({ onChange }) {
       </section>
 
       <div className="settings-layout">
-        <div className="settings-columns">
-          <div className="settings-column">
-            <SettingsCard section="general" {...cardControls("general")} onSave={saveSettings} view={<GeneralSettingsView value={settings.general} logo={shopLogoPreview} onLocationEdit={() => { beginEditing("general"); window.setTimeout(editShopLocation, 100); }} />}>
+            <SettingsCard section="general" {...cardControls("general")} onSave={saveSettings} view={<GeneralSettingsView value={settings.general} logo={shopLogoPreview} onLocationEdit={openShopLocationModal} />}>
               <div className="grid gap-4 md:grid-cols-2">
                 <TextInput label="Shop Name" value={settings.general.shopName} error={errors["general.shopName"]} onChange={(value) => updateSetting("general", "shopName", value)} />
                 <FileInput label="Shop Logo Upload" file={files.shopLogo} preview={shopLogoPreview} onChange={(file) => updateFile("shopLogo", file)} />
@@ -812,27 +861,13 @@ export default function AdminSettingsPage({ onChange }) {
                 <TextInput label="Email Address" type="email" value={settings.general.emailAddress} error={errors["general.emailAddress"]} onChange={(value) => updateSetting("general", "emailAddress", value)} />
                 <TextInput label="Shop Address" value={settings.general.shopAddress} onChange={(value) => updateShopLocationText("shopAddress", value)} className="md:col-span-2" />
                 <TextInput label="Shop Municipality" value={settings.general.shopMunicipality} onChange={(value) => updateShopLocationText("shopMunicipality", value)} placeholder="Example: Midsayap" />
-                <ShopLocationSetting
-                  containerRef={shopLocationRef}
-                  value={settings.general}
-                  error={errors["general.shopLocation"]}
-                  onChange={(next) => {
-                    setSettings((current) => ({
-                      ...current,
-                      general: {
-                        ...current.general,
-                        shopAddress: next.shopAddress,
-                        shopMunicipality: next.shopMunicipality,
-                        shopProvince: next.shopProvince,
-                        shopRegion: next.shopRegion,
-                        shopPlaceId: next.shopPlaceId,
-                        shopLatitude: next.shopLatitude,
-                        shopLongitude: next.shopLongitude
-                      }
-                    }));
-                    setErrors((current) => ({ ...current, "general.shopLocation": "" }));
-                  }}
-                />
+                <div className="settings-location-edit-row md:col-span-2">
+                  <div>
+                    <span className="settings-value__label">Exact Shop Location</span>
+                    <strong className="settings-value__text">{finiteCoordinate(settings.general.shopLatitude) !== null && finiteCoordinate(settings.general.shopLongitude) !== null ? "Exact pin saved" : "No exact pin saved"}</strong>
+                  </div>
+                  <button type="button" className="settings-inline-button" onClick={openShopLocationModal}><MapPin size={14} /> Edit Location</button>
+                </div>
                 <SelectInput label="Currency" value={settings.general.currency} options={["PHP"]} onChange={(value) => updateSetting("general", "currency", value)} />
                 <SelectInput label="Language" value={settings.general.language} options={["English", "Filipino"]} onChange={(value) => updateSetting("general", "language", value)} />
               </div>
@@ -876,9 +911,6 @@ export default function AdminSettingsPage({ onChange }) {
                 <SelectInput label="Dashboard Layout" value={settings.appearance.dashboardLayout} options={["Comfortable", "Compact", "Analytics Focus"]} onChange={(value) => updateSetting("appearance", "dashboardLayout", value)} />
               </div>
             </SettingsCard>
-          </div>
-
-          <div className="settings-column">
             <SettingsCard section="ai" {...cardControls("ai")} onSave={saveSettings} view={<AISettingsView value={settings.ai} />}>
               <div className="grid gap-4">
                 <AIProviderSelector
@@ -932,10 +964,6 @@ export default function AdminSettingsPage({ onChange }) {
                 <ToggleSwitch label="Customer Broadcast Notifications" checked={settings.customers.customerBroadcastNotifications} onChange={(value) => updateSetting("customers", "customerBroadcastNotifications", value)} />
               </ToggleGrid>
             </SettingsCard>
-          </div>
-        </div>
-
-        <div className="settings-wide-stack">
           <SettingsCard section="payment" {...cardControls("payment")} onSave={saveSettings} className="settings-card--wide" view={<PaymentSettingsView value={settings} qrPreview={gcashQrPreview} summary={deliverySummary} loading={deliveryCustomersLoading} error={deliveryCustomersError} onManage={openDeliveryAreas} onRetry={() => refreshDeliveryCustomers({ showLoading: true, includeCustomers: false })} />}>
           <div className="grid gap-6">
             <section className="grid gap-4">
@@ -954,7 +982,7 @@ export default function AdminSettingsPage({ onChange }) {
 
             <section className="grid gap-4 border-t border-white/10 pt-6">
               <SettingsSectionHeading eyebrow="Delivery & Shipping" title="Location-based Delivery" />
-              <ShopLocationSummary value={settings.general} onEdit={editShopLocation} />
+              <ShopLocationSummary value={settings.general} onEdit={openShopLocationModal} />
               <MunicipalityEditor
                 values={settings.payment.freeDeliveryMunicipalities || []}
                 draft={municipalityDraft}
@@ -1071,7 +1099,6 @@ export default function AdminSettingsPage({ onChange }) {
           </div>
         </SettingsCard>
       </div>
-      </div>
 
       <AnimatePresence>
         {toast ? <Toast key={toast.message} type={toast.type} message={toast.message} onClose={() => setToast(null)} /> : null}
@@ -1104,6 +1131,15 @@ export default function AdminSettingsPage({ onChange }) {
             onClose={() => setDeliveryAreasOpen(false)}
           />
         ) : null}
+        {shopLocationModalOpen && shopLocationDraft ? (
+          <ShopLocationModal
+            value={shopLocationDraft}
+            onChange={setShopLocationDraft}
+            saving={saving === "general"}
+            onSave={saveShopLocationModal}
+            onClose={cancelShopLocationModal}
+          />
+        ) : null}
       </AnimatePresence>
     </div>
   );
@@ -1113,7 +1149,7 @@ function SettingsCard({ section, saving, editing = false, disabled = false, dirt
   const Icon = sectionIcons[section];
   return (
     <motion.section
-      className={`settings-card premium-card min-w-0 p-4 sm:p-5 ${className}`}
+      className={`settings-card settings-card--${section} premium-card min-w-0 p-4 sm:p-5 ${className}`}
       initial={{ opacity: 0, y: 22 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.38, ease: "easeOut" }}
@@ -1205,10 +1241,13 @@ function GeneralSettingsView({ value, logo, onLocationEdit }) {
         <div className="settings-location-preview">
           <div className="settings-location-preview__copy">
             <MapPin size={18} />
-            <div><span className="settings-value__label">Exact Shop Location</span><strong className="settings-value__text">{hasPin ? "Exact pin saved" : "No exact pin saved"}</strong></div>
+            <div>
+              <span className="settings-value__label">Exact Shop Location</span>
+              <strong className="settings-value__text">{hasPin ? "Exact pin saved" : "No exact pin saved"}</strong>
+              <span className="settings-location-preview__address">{address}</span>
+            </div>
           </div>
           <button type="button" className="settings-inline-button" onClick={onLocationEdit}><MapPin size={14} /> Edit Location</button>
-          <SettingsMiniMap compact readOnly latitude={finiteCoordinate(value.shopLatitude) ?? defaultShopMapCenter.latitude} longitude={finiteCoordinate(value.shopLongitude) ?? defaultShopMapCenter.longitude} hasPin={hasPin} resolving={false} onSelect={() => {}} />
         </div>
       </div>
     </div>
@@ -1561,6 +1600,69 @@ function SummaryCount({ label, value }) {
   );
 }
 
+function ShopLocationModal({ value, onChange, saving, onSave, onClose }) {
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+
+  useEffect(() => {
+    document.body.classList.add("retela-modal-open");
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const closeOnEscape = (event) => {
+      if (event.key === "Escape" && !saving) closeRef.current();
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.body.classList.remove("retela-modal-open");
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [saving]);
+
+  return (
+    <motion.div
+      className="settings-location-modal-backdrop fixed inset-0 z-[190] flex items-end justify-center p-3 backdrop-blur-sm sm:items-center sm:p-5"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      onMouseDown={saving ? undefined : onClose}
+    >
+      <motion.section
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="shop-location-modal-title"
+        className="settings-location-modal flex max-h-[calc(100dvh-24px)] w-full flex-col overflow-hidden rounded-[24px] sm:max-h-[90vh]"
+        initial={{ opacity: 0, y: 28, scale: 0.98 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        exit={{ opacity: 0, y: 28, scale: 0.98 }}
+        transition={{ duration: 0.22, ease: "easeOut" }}
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <header className="settings-location-modal__header flex shrink-0 items-start justify-between gap-4 px-4 py-4 sm:px-6 sm:py-5">
+          <div className="min-w-0">
+            <span className="settings-location-modal__eyebrow">Shop location</span>
+            <h2 id="shop-location-modal-title" className="settings-location-modal__title mt-1 font-display text-xl font-bold sm:text-2xl">Edit Shop Location</h2>
+            <p className="settings-location-modal__subtitle mt-1 text-xs leading-5 sm:text-sm">Search for the shop, adjust the exact pin, and save the coordinates used for delivery routes.</p>
+          </div>
+          <button type="button" onClick={onClose} disabled={saving} aria-label="Close shop location editor" className="settings-location-modal__close grid h-11 w-11 shrink-0 place-items-center rounded-xl transition disabled:opacity-50">
+            <X size={18} />
+          </button>
+        </header>
+        <div className="settings-location-modal__body min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6">
+          <ShopLocationSetting value={value} onChange={onChange} />
+        </div>
+        <footer className="settings-location-modal__footer flex flex-wrap justify-end gap-2 px-4 py-4 sm:px-6">
+          <button type="button" disabled={saving} onClick={onClose} className="settings-location-modal__cancel">Cancel</button>
+          <button type="button" disabled={saving} onClick={onSave} className="settings-location-modal__save">
+            {saving ? <Loader2 size={17} className="animate-spin" /> : <Save size={17} />}
+            {saving ? "Saving..." : "Save Location"}
+          </button>
+        </footer>
+      </motion.section>
+    </motion.div>
+  );
+}
+
 function CustomerDeliveryAreasModal({ customers, filter, search, loading, error, savingCustomerId, onFilterChange, onSearchChange, onClassify, onRetry, onClose }) {
   const searchInputRef = useRef(null);
   const onCloseRef = useRef(onClose);
@@ -1785,7 +1887,7 @@ function parseGeocoderResult(item) {
   };
 }
 
-function ShopLocationSetting({ value, onChange, error, containerRef }) {
+function ShopLocationSetting({ value, onChange, error, containerRef, className = "" }) {
   const initialAddress = String(value.shopAddress || "");
   const savedLatitude = finiteCoordinate(value.shopLatitude);
   const savedLongitude = finiteCoordinate(value.shopLongitude);
@@ -1893,7 +1995,7 @@ function ShopLocationSetting({ value, onChange, error, containerRef }) {
   }
 
   return (
-    <div ref={containerRef} className="grid gap-3 rounded-[24px] border border-neonbrand/20 bg-neonbrand/10 p-4 md:col-span-2">
+    <div ref={containerRef} className={`settings-location-editor grid gap-3 rounded-[24px] border border-neonbrand/20 bg-neonbrand/10 p-4 md:col-span-2 ${className}`}>
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <p className="text-xs font-bold uppercase tracking-[0.16em] text-neonbrand/80">Exact Shop Location</p>

@@ -11358,6 +11358,296 @@ button {
   color: #b7cabe;
 }
 
+.settings-location-edit-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid #d8e8de;
+  border-radius: 14px;
+  background: #f4fbf6;
+  padding: 12px 14px;
+}
+
+.settings-location-preview__address {
+  display: block;
+  max-width: 38ch;
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+  color: #58675f;
+  font-size: 0.78rem;
+  font-weight: 650;
+  line-height: 1.4;
+}
+
+.settings-location-modal-backdrop {
+  background: rgba(18, 31, 23, 0.48);
+}
+
+.settings-location-modal {
+  border: 1px solid #d8e8de;
+  background: #ffffff;
+  color: #15221b;
+  box-shadow: 0 28px 90px rgba(24, 55, 36, 0.24);
+}
+
+.settings-location-modal__header,
+.settings-location-modal__footer {
+  border-color: #d8e8de;
+  background: #ffffff;
+}
+
+.settings-location-modal__header {
+  border-bottom: 1px solid #d8e8de;
+}
+
+.settings-location-modal__footer {
+  display: flex;
+  border-top: 1px solid #d8e8de;
+}
+
+.settings-location-modal__eyebrow {
+  color: #15803d;
+  font-size: 0.68rem;
+  font-weight: 850;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.settings-location-modal__title {
+  color: #15221b;
+}
+
+.settings-location-modal__subtitle {
+  color: #58675f;
+}
+
+.settings-location-modal__close,
+.settings-location-modal__cancel {
+  border: 1px solid #bfd5c5;
+  background: #ffffff;
+  color: #244232;
+}
+
+.settings-location-modal__close:hover,
+.settings-location-modal__close:focus-visible,
+.settings-location-modal__cancel:hover,
+.settings-location-modal__cancel:focus-visible {
+  border-color: #7db991;
+  background: #eff9f2;
+  color: #14532d;
+}
+
+.settings-location-modal__cancel,
+.settings-location-modal__save {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: 12px;
+  padding: 0 16px;
+  font-size: 0.82rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.settings-location-modal__save {
+  min-width: 140px;
+  border: 1px solid #16803e;
+  background: #16803e;
+  color: #ffffff;
+  box-shadow: 0 7px 16px rgba(22, 128, 62, 0.18);
+}
+
+.settings-location-modal__save:hover,
+.settings-location-modal__save:focus-visible {
+  background: #116b33;
+}
+
+.settings-location-modal__body {
+  background: #f2fbf5;
+}
+
+.settings-location-modal .settings-location-editor {
+  border-color: #d8e8de !important;
+  background: #ffffff !important;
+}
+
+.settings-location-modal .text-white {
+  color: #15221b !important;
+}
+
+.settings-location-modal .text-white\/35,
+.settings-location-modal .text-white\/45,
+.settings-location-modal .text-white\/48,
+.settings-location-modal .text-white\/55,
+.settings-location-modal .text-white\/70,
+.settings-location-modal .text-white\/75 {
+  color: #58675f !important;
+}
+
+.settings-location-modal .settings-location-editor label {
+  border-color: #cbded1 !important;
+  background: #ffffff !important;
+  color: #15221b !important;
+}
+
+.settings-location-modal .settings-location-editor input {
+  border: 0 !important;
+  background: transparent !important;
+  color: #15221b !important;
+}
+
+.settings-location-modal .settings-location-editor input::placeholder {
+  color: #687870 !important;
+  opacity: 1;
+}
+
+.settings-location-modal .settings-location-editor .bg-black\/20 {
+  border-color: #d8e8de !important;
+  background: #f4fbf6 !important;
+}
+
+.settings-location-modal .settings-location-editor button[class*="text-white"] {
+  color: #244232 !important;
+}
+
+.settings-location-modal .settings-location-editor button[class*="text-white"]:hover {
+  background: #eff9f2 !important;
+  color: #14532d !important;
+}
+
+@media (max-width: 639px) {
+  .settings-location-edit-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .settings-location-edit-row .settings-inline-button {
+    width: 100%;
+  }
+}
+
+.retela-dark .settings-location-edit-row,
+.premium-shell.retela-dark-shell .settings-location-edit-row {
+  border-color: #365244;
+  background: #203329;
+}
+
+.retela-dark .settings-location-preview__address,
+.premium-shell.retela-dark-shell .settings-location-preview__address {
+  color: #b9cdbf;
+}
+
+.retela-dark .settings-location-modal-backdrop,
+.premium-shell.retela-dark-shell .settings-location-modal-backdrop {
+  background: rgba(2, 8, 5, 0.72);
+}
+
+.retela-dark .settings-location-modal,
+.premium-shell.retela-dark-shell .settings-location-modal {
+  border-color: #365244;
+  background: #17251d;
+  color: #f2faf5;
+  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.45);
+}
+
+.retela-dark .settings-location-modal__header,
+.retela-dark .settings-location-modal__footer,
+.premium-shell.retela-dark-shell .settings-location-modal__header,
+.premium-shell.retela-dark-shell .settings-location-modal__footer {
+  border-color: #365244;
+  background: #17251d;
+}
+
+.retela-dark .settings-location-modal__title,
+.premium-shell.retela-dark-shell .settings-location-modal__title {
+  color: #f2faf5;
+}
+
+.retela-dark .settings-location-modal__subtitle,
+.premium-shell.retela-dark-shell .settings-location-modal__subtitle {
+  color: #b7cabe;
+}
+
+.retela-dark .settings-location-modal__close,
+.retela-dark .settings-location-modal__cancel,
+.premium-shell.retela-dark-shell .settings-location-modal__close,
+.premium-shell.retela-dark-shell .settings-location-modal__cancel {
+  border-color: #5e7767;
+  background: #1f3528;
+  color: #e0f0e4;
+}
+
+.retela-dark .settings-location-modal__close:hover,
+.retela-dark .settings-location-modal__close:focus-visible,
+.retela-dark .settings-location-modal__cancel:hover,
+.retela-dark .settings-location-modal__cancel:focus-visible,
+.premium-shell.retela-dark-shell .settings-location-modal__close:hover,
+.premium-shell.retela-dark-shell .settings-location-modal__close:focus-visible,
+.premium-shell.retela-dark-shell .settings-location-modal__cancel:hover,
+.premium-shell.retela-dark-shell .settings-location-modal__cancel:focus-visible {
+  border-color: #86efac;
+  background: #2b5538;
+  color: #ffffff;
+}
+
+.retela-dark .settings-location-modal__body,
+.premium-shell.retela-dark-shell .settings-location-modal__body {
+  background: #102019;
+}
+
+.retela-dark .settings-location-modal .settings-location-editor,
+.premium-shell.retela-dark-shell .settings-location-modal .settings-location-editor {
+  border-color: #365244 !important;
+  background: #1d3025 !important;
+}
+
+.retela-dark .settings-location-modal .text-white,
+.premium-shell.retela-dark-shell .settings-location-modal .text-white {
+  color: #f2faf5 !important;
+}
+
+.retela-dark .settings-location-modal .text-white\/35,
+.retela-dark .settings-location-modal .text-white\/45,
+.retela-dark .settings-location-modal .text-white\/48,
+.retela-dark .settings-location-modal .text-white\/55,
+.retela-dark .settings-location-modal .text-white\/70,
+.retela-dark .settings-location-modal .text-white\/75,
+.premium-shell.retela-dark-shell .settings-location-modal .text-white\/35,
+.premium-shell.retela-dark-shell .settings-location-modal .text-white\/45,
+.premium-shell.retela-dark-shell .settings-location-modal .text-white\/48,
+.premium-shell.retela-dark-shell .settings-location-modal .text-white\/55,
+.premium-shell.retela-dark-shell .settings-location-modal .text-white\/70,
+.premium-shell.retela-dark-shell .settings-location-modal .text-white\/75 {
+  color: #b7cabe !important;
+}
+
+.retela-dark .settings-location-modal .settings-location-editor label,
+.premium-shell.retela-dark-shell .settings-location-modal .settings-location-editor label {
+  border-color: #4a6855 !important;
+  background: #14231a !important;
+  color: #f2faf5 !important;
+}
+
+.retela-dark .settings-location-modal .settings-location-editor input,
+.premium-shell.retela-dark-shell .settings-location-modal .settings-location-editor input {
+  color: #f2faf5 !important;
+}
+
+.retela-dark .settings-location-modal .settings-location-editor input::placeholder,
+.premium-shell.retela-dark-shell .settings-location-modal .settings-location-editor input::placeholder {
+  color: #a9c0b0 !important;
+}
+
+.retela-dark .settings-location-modal .settings-location-editor .bg-black\/20,
+.premium-shell.retela-dark-shell .settings-location-modal .settings-location-editor .bg-black\/20 {
+  border-color: #365244 !important;
+  background: #102019 !important;
+}
+
 .retela-dark .settings-value__text,
 .premium-shell.retela-dark-shell .settings-value__text,
 .retela-dark .settings-color-value,
@@ -12032,38 +12322,32 @@ button {
 
 /* Final settings layout pass: independent columns and non-wrapping actions. */
 .settings-layout {
-  display: block;
-}
-
-.settings-columns {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   align-items: start;
   gap: 24px;
 }
 
-.settings-column,
-.settings-wide-stack {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 24px;
-}
-
-.settings-column > .settings-card,
-.settings-wide-stack > .settings-card {
+.settings-layout > .settings-card {
   width: 100%;
   height: auto !important;
   min-height: 0 !important;
   align-self: auto;
-  float: none;
-  clear: none;
   margin: 0;
 }
 
-.settings-wide-stack {
-  margin-top: 24px;
-}
+.settings-layout > .settings-card--general { grid-column: 1; grid-row: 1; }
+.settings-layout > .settings-card--ai { grid-column: 2; grid-row: 1; }
+.settings-layout > .settings-card--notifications { grid-column: 1; grid-row: 2; }
+.settings-layout > .settings-card--security { grid-column: 2; grid-row: 2; }
+.settings-layout > .settings-card--inventory { grid-column: 1; grid-row: 3; }
+.settings-layout > .settings-card--reports { grid-column: 2; grid-row: 3; }
+.settings-layout > .settings-card--appearance { grid-column: 1; grid-row: 4; }
+.settings-layout > .settings-card--customers { grid-column: 2; grid-row: 4; }
+.settings-layout > .settings-card--payment { grid-column: 1 / -1; grid-row: 5; }
+.settings-layout > .settings-card--about { grid-column: 1 / -1; grid-row: 6; }
+.settings-layout > .settings-card--dataManagement { grid-column: 1 / -1; grid-row: 7; }
+.settings-layout > .settings-card--backup { grid-column: 1 / -1; grid-row: 8; }
 
 .settings-card__heading {
   min-width: 0;
@@ -12118,12 +12402,13 @@ button {
 }
 
 @media (max-width: 1100px) {
-  .settings-columns {
+  .settings-layout {
     grid-template-columns: 1fr;
   }
 
-  .settings-wide-stack {
-    margin-top: 24px;
+  .settings-layout > .settings-card {
+    grid-column: auto;
+    grid-row: auto;
   }
 }
 
