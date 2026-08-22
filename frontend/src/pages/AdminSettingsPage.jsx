@@ -764,7 +764,7 @@ export default function AdminSettingsPage({ onChange }) {
 
   if (showBlockingLoader) {
     return (
-      <div className="settings-page-grid">
+      <div className="settings-loading-grid">
         {Array.from({ length: 6 }).map((_, index) => <div key={index} className="premium-card settings-card-skeleton skeleton rounded-[24px]" />)}
       </div>
     );
@@ -778,7 +778,7 @@ export default function AdminSettingsPage({ onChange }) {
           <h1 className="settings-hero__title mt-2 font-display text-3xl font-bold tracking-tight sm:text-4xl">Settings</h1>
           <p className="settings-hero__subtitle mt-2 text-sm font-semibold">Still loading settings...</p>
         </section>
-        <div className="settings-page-grid">
+        <div className="settings-loading-grid">
           {Array.from({ length: 4 }).map((_, index) => <div key={index} className="premium-card settings-card-skeleton skeleton rounded-[24px]" />)}
         </div>
       </div>
@@ -800,82 +800,143 @@ export default function AdminSettingsPage({ onChange }) {
         </div>
       </section>
 
-      <div className="settings-page-grid">
-        <SettingsCard section="general" {...cardControls("general")} onSave={saveSettings} view={<GeneralSettingsView value={settings.general} logo={shopLogoPreview} onLocationEdit={() => { beginEditing("general"); window.setTimeout(editShopLocation, 100); }} />}>
-          <div className="grid gap-4 md:grid-cols-2">
-            <TextInput label="Shop Name" value={settings.general.shopName} error={errors["general.shopName"]} onChange={(value) => updateSetting("general", "shopName", value)} />
-            <FileInput label="Shop Logo Upload" file={files.shopLogo} preview={shopLogoPreview} onChange={(file) => updateFile("shopLogo", file)} />
-            <TextArea label="Shop Description" value={settings.general.shopDescription} onChange={(value) => updateSetting("general", "shopDescription", value)} className="md:col-span-2" />
-            <TextInput label="Contact Number" value={settings.general.contactNumber} error={errors["general.contactNumber"]} onChange={(value) => updateSetting("general", "contactNumber", value)} />
-            <TextInput label="Email Address" type="email" value={settings.general.emailAddress} error={errors["general.emailAddress"]} onChange={(value) => updateSetting("general", "emailAddress", value)} />
-            <TextInput label="Shop Address" value={settings.general.shopAddress} onChange={(value) => updateShopLocationText("shopAddress", value)} className="md:col-span-2" />
-            <TextInput label="Shop Municipality" value={settings.general.shopMunicipality} onChange={(value) => updateShopLocationText("shopMunicipality", value)} placeholder="Example: Midsayap" />
-            <ShopLocationSetting
-              containerRef={shopLocationRef}
-              value={settings.general}
-              error={errors["general.shopLocation"]}
-              onChange={(next) => {
-                setSettings((current) => ({
-                  ...current,
-                  general: {
-                    ...current.general,
-                    shopAddress: next.shopAddress,
-                    shopMunicipality: next.shopMunicipality,
-                    shopProvince: next.shopProvince,
-                    shopRegion: next.shopRegion,
-                    shopPlaceId: next.shopPlaceId,
-                    shopLatitude: next.shopLatitude,
-                    shopLongitude: next.shopLongitude
-                  }
-                }));
-                setErrors((current) => ({ ...current, "general.shopLocation": "" }));
-              }}
-            />
-            <SelectInput label="Currency" value={settings.general.currency} options={["PHP"]} onChange={(value) => updateSetting("general", "currency", value)} />
-            <SelectInput label="Language" value={settings.general.language} options={["English", "Filipino"]} onChange={(value) => updateSetting("general", "language", value)} />
-          </div>
-        </SettingsCard>
-
-        <SettingsCard section="ai" {...cardControls("ai")} onSave={saveSettings} view={<AISettingsView value={settings.ai} />}>
-          <div className="grid gap-4">
-            <AIProviderSelector
-              value={settings.ai.aiProvider}
-              currentProvider={settings.ai.currentProvider}
-              lastProviderUsed={settings.ai.lastProviderUsed}
-              apiStatus={settings.ai.apiStatus}
-              providerStatus={settings.ai.providerStatus}
-              onChange={(value) => updateSetting("ai", "aiProvider", value)}
-            />
-            <div className="grid gap-3 md:grid-cols-3">
-              <ToggleSwitch label="AI Assistant" checked={settings.ai.aiAssistant} onChange={(value) => updateSetting("ai", "aiAssistant", value)} />
-              <ToggleSwitch label="AI Auto Reply" checked={settings.ai.aiAutoReply} onChange={(value) => updateSetting("ai", "aiAutoReply", value)} />
-              <ToggleSwitch label="AI Recommendation" checked={settings.ai.aiRecommendation} onChange={(value) => updateSetting("ai", "aiRecommendation", value)} />
-            </div>
-            <RangeInput label="AI Chat Temperature Slider" value={settings.ai.aiChatTemperature} min={0} max={2} step={0.05} error={errors["ai.aiChatTemperature"]} onChange={(value) => updateSetting("ai", "aiChatTemperature", Number(value))} />
-            <InlineNotice icon={LockKeyhole}>API keys are loaded only from the backend environment and are never sent to the browser.</InlineNotice>
-          </div>
-        </SettingsCard>
-
-        <SettingsCard section="notifications" {...cardControls("notifications")} onSave={saveSettings} view={<NotificationsSettingsView value={settings.notifications} />}>
-          <ToggleGrid>
-            <ToggleSwitch label="New Order Notifications" checked={settings.notifications.newOrderNotifications} onChange={(value) => updateSetting("notifications", "newOrderNotifications", value)} />
-            <ToggleSwitch label="Low Stock Alerts" checked={settings.notifications.lowStockAlerts} onChange={(value) => updateSetting("notifications", "lowStockAlerts", value)} />
-            <ToggleSwitch label="Out of Stock Alerts" checked={settings.notifications.outOfStockAlerts} onChange={(value) => updateSetting("notifications", "outOfStockAlerts", value)} />
-            <ToggleSwitch label="Refund Alerts" checked={settings.notifications.refundAlerts} onChange={(value) => updateSetting("notifications", "refundAlerts", value)} />
-            <ToggleSwitch label="Email Notifications" checked={settings.notifications.emailNotifications} onChange={(value) => updateSetting("notifications", "emailNotifications", value)} />
-            <ToggleSwitch label="Push Notifications" checked={settings.notifications.pushNotifications} onChange={(value) => updateSetting("notifications", "pushNotifications", value)} />
-            <ToggleSwitch label="Sound Notifications" checked={settings.notifications.soundNotifications} onChange={(value) => updateSetting("notifications", "soundNotifications", value)} />
-            <div className="settings-toggle-group md:col-span-2">
-              <p className="text-xs font-black uppercase tracking-[0.16em] text-neonbrand/80">Meetup Reminders</p>
-              <div className="mt-2 grid gap-3 sm:grid-cols-2">
-                <ToggleSwitch label="24 hours before" checked={settings.notifications.meetup24HourReminder !== false} onChange={(value) => updateSetting("notifications", "meetup24HourReminder", value)} />
-                <ToggleSwitch label="1 hour before" checked={settings.notifications.meetup1HourReminder !== false} onChange={(value) => updateSetting("notifications", "meetup1HourReminder", value)} />
+      <div className="settings-layout">
+        <div className="settings-columns">
+          <div className="settings-column">
+            <SettingsCard section="general" {...cardControls("general")} onSave={saveSettings} view={<GeneralSettingsView value={settings.general} logo={shopLogoPreview} onLocationEdit={() => { beginEditing("general"); window.setTimeout(editShopLocation, 100); }} />}>
+              <div className="grid gap-4 md:grid-cols-2">
+                <TextInput label="Shop Name" value={settings.general.shopName} error={errors["general.shopName"]} onChange={(value) => updateSetting("general", "shopName", value)} />
+                <FileInput label="Shop Logo Upload" file={files.shopLogo} preview={shopLogoPreview} onChange={(file) => updateFile("shopLogo", file)} />
+                <TextArea label="Shop Description" value={settings.general.shopDescription} onChange={(value) => updateSetting("general", "shopDescription", value)} className="md:col-span-2" />
+                <TextInput label="Contact Number" value={settings.general.contactNumber} error={errors["general.contactNumber"]} onChange={(value) => updateSetting("general", "contactNumber", value)} />
+                <TextInput label="Email Address" type="email" value={settings.general.emailAddress} error={errors["general.emailAddress"]} onChange={(value) => updateSetting("general", "emailAddress", value)} />
+                <TextInput label="Shop Address" value={settings.general.shopAddress} onChange={(value) => updateShopLocationText("shopAddress", value)} className="md:col-span-2" />
+                <TextInput label="Shop Municipality" value={settings.general.shopMunicipality} onChange={(value) => updateShopLocationText("shopMunicipality", value)} placeholder="Example: Midsayap" />
+                <ShopLocationSetting
+                  containerRef={shopLocationRef}
+                  value={settings.general}
+                  error={errors["general.shopLocation"]}
+                  onChange={(next) => {
+                    setSettings((current) => ({
+                      ...current,
+                      general: {
+                        ...current.general,
+                        shopAddress: next.shopAddress,
+                        shopMunicipality: next.shopMunicipality,
+                        shopProvince: next.shopProvince,
+                        shopRegion: next.shopRegion,
+                        shopPlaceId: next.shopPlaceId,
+                        shopLatitude: next.shopLatitude,
+                        shopLongitude: next.shopLongitude
+                      }
+                    }));
+                    setErrors((current) => ({ ...current, "general.shopLocation": "" }));
+                  }}
+                />
+                <SelectInput label="Currency" value={settings.general.currency} options={["PHP"]} onChange={(value) => updateSetting("general", "currency", value)} />
+                <SelectInput label="Language" value={settings.general.language} options={["English", "Filipino"]} onChange={(value) => updateSetting("general", "language", value)} />
               </div>
-            </div>
-          </ToggleGrid>
-        </SettingsCard>
+            </SettingsCard>
 
-        <SettingsCard section="payment" {...cardControls("payment")} onSave={saveSettings} className="settings-card--wide" view={<PaymentSettingsView value={settings} qrPreview={gcashQrPreview} summary={deliverySummary} loading={deliveryCustomersLoading} error={deliveryCustomersError} onManage={openDeliveryAreas} onRetry={() => refreshDeliveryCustomers({ showLoading: true, includeCustomers: false })} />}>
+            <SettingsCard section="notifications" {...cardControls("notifications")} onSave={saveSettings} view={<NotificationsSettingsView value={settings.notifications} />}>
+              <ToggleGrid>
+                <ToggleSwitch label="New Order Notifications" checked={settings.notifications.newOrderNotifications} onChange={(value) => updateSetting("notifications", "newOrderNotifications", value)} />
+                <ToggleSwitch label="Low Stock Alerts" checked={settings.notifications.lowStockAlerts} onChange={(value) => updateSetting("notifications", "lowStockAlerts", value)} />
+                <ToggleSwitch label="Out of Stock Alerts" checked={settings.notifications.outOfStockAlerts} onChange={(value) => updateSetting("notifications", "outOfStockAlerts", value)} />
+                <ToggleSwitch label="Refund Alerts" checked={settings.notifications.refundAlerts} onChange={(value) => updateSetting("notifications", "refundAlerts", value)} />
+                <ToggleSwitch label="Email Notifications" checked={settings.notifications.emailNotifications} onChange={(value) => updateSetting("notifications", "emailNotifications", value)} />
+                <ToggleSwitch label="Push Notifications" checked={settings.notifications.pushNotifications} onChange={(value) => updateSetting("notifications", "pushNotifications", value)} />
+                <ToggleSwitch label="Sound Notifications" checked={settings.notifications.soundNotifications} onChange={(value) => updateSetting("notifications", "soundNotifications", value)} />
+                <div className="settings-toggle-group md:col-span-2">
+                  <p className="text-xs font-black uppercase tracking-[0.16em] text-neonbrand/80">Meetup Reminders</p>
+                  <div className="mt-2 grid gap-3 sm:grid-cols-2">
+                    <ToggleSwitch label="24 hours before" checked={settings.notifications.meetup24HourReminder !== false} onChange={(value) => updateSetting("notifications", "meetup24HourReminder", value)} />
+                    <ToggleSwitch label="1 hour before" checked={settings.notifications.meetup1HourReminder !== false} onChange={(value) => updateSetting("notifications", "meetup1HourReminder", value)} />
+                  </div>
+                </div>
+              </ToggleGrid>
+            </SettingsCard>
+
+            <SettingsCard section="inventory" {...cardControls("inventory")} onSave={saveSettings} view={<InventorySettingsView value={settings.inventory} />}>
+              <div className="grid gap-4">
+                <NumberInput label="Low Stock Threshold" value={settings.inventory.lowStockThreshold} error={errors["inventory.lowStockThreshold"]} onChange={(value) => updateSetting("inventory", "lowStockThreshold", Number(value))} />
+                <ToggleGrid>
+                  <ToggleSwitch label="Auto Restock Alert" checked={settings.inventory.autoRestockAlert} onChange={(value) => updateSetting("inventory", "autoRestockAlert", value)} />
+                  <ToggleSwitch label="Barcode Toggle" checked={settings.inventory.barcodeEnabled} onChange={(value) => updateSetting("inventory", "barcodeEnabled", value)} />
+                  <ToggleSwitch label="SKU Generator Toggle" checked={settings.inventory.skuGeneratorEnabled} onChange={(value) => updateSetting("inventory", "skuGeneratorEnabled", value)} />
+                </ToggleGrid>
+              </div>
+            </SettingsCard>
+
+            <SettingsCard section="appearance" {...cardControls("appearance")} onSave={saveSettings} view={<AppearanceSettingsView value={settings.appearance} theme={userTheme} />}>
+              <div className="grid gap-4 md:grid-cols-2">
+                <ThemeModeSwitch theme={userTheme} onChange={updateUserTheme} />
+                <ToggleSwitch label="Sidebar Collapse Toggle" checked={settings.appearance.sidebarCollapse} onChange={(value) => updateSetting("appearance", "sidebarCollapse", value)} />
+                <ColorInput label="Theme Color" value={settings.appearance.themeColor} error={errors["appearance.themeColor"]} onChange={(value) => updateSetting("appearance", "themeColor", value)} />
+                <SelectInput label="Dashboard Layout" value={settings.appearance.dashboardLayout} options={["Comfortable", "Compact", "Analytics Focus"]} onChange={(value) => updateSetting("appearance", "dashboardLayout", value)} />
+              </div>
+            </SettingsCard>
+          </div>
+
+          <div className="settings-column">
+            <SettingsCard section="ai" {...cardControls("ai")} onSave={saveSettings} view={<AISettingsView value={settings.ai} />}>
+              <div className="grid gap-4">
+                <AIProviderSelector
+                  value={settings.ai.aiProvider}
+                  currentProvider={settings.ai.currentProvider}
+                  lastProviderUsed={settings.ai.lastProviderUsed}
+                  apiStatus={settings.ai.apiStatus}
+                  providerStatus={settings.ai.providerStatus}
+                  onChange={(value) => updateSetting("ai", "aiProvider", value)}
+                />
+                <div className="grid gap-3 md:grid-cols-3">
+                  <ToggleSwitch label="AI Assistant" checked={settings.ai.aiAssistant} onChange={(value) => updateSetting("ai", "aiAssistant", value)} />
+                  <ToggleSwitch label="AI Auto Reply" checked={settings.ai.aiAutoReply} onChange={(value) => updateSetting("ai", "aiAutoReply", value)} />
+                  <ToggleSwitch label="AI Recommendation" checked={settings.ai.aiRecommendation} onChange={(value) => updateSetting("ai", "aiRecommendation", value)} />
+                </div>
+                <RangeInput label="AI Chat Temperature Slider" value={settings.ai.aiChatTemperature} min={0} max={2} step={0.05} error={errors["ai.aiChatTemperature"]} onChange={(value) => updateSetting("ai", "aiChatTemperature", Number(value))} />
+                <InlineNotice icon={LockKeyhole}>API keys are loaded only from the backend environment and are never sent to the browser.</InlineNotice>
+              </div>
+            </SettingsCard>
+
+            <SettingsCard section="security" {...cardControls("security")} onSave={saveSettings} view={<SecuritySettingsView value={settings.security} onEdit={() => beginEditing("security")} />}>
+              <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.9fr)]">
+                <div className="grid gap-3 md:grid-cols-2">
+                  <ToggleSwitch label="Two Factor Authentication Toggle" checked={settings.security.twoFactorAuthentication} onChange={(value) => updateSetting("security", "twoFactorAuthentication", value)} />
+                  <ToggleSwitch label="Login Activity" checked={settings.security.loginActivity} onChange={(value) => updateSetting("security", "loginActivity", value)} />
+                  <ToggleSwitch label="Admin Access Control" checked={settings.security.adminAccessControl} onChange={(value) => updateSetting("security", "adminAccessControl", value)} />
+                  <NumberInput label="Session Timeout" suffix="minutes" value={settings.security.sessionTimeout} error={errors["security.sessionTimeout"]} onChange={(value) => updateSetting("security", "sessionTimeout", Number(value))} />
+                  <InlineNotice icon={Clock3} className="md:col-span-2">Active sessions use this timeout value for admin policy tracking.</InlineNotice>
+                </div>
+                <div className="rounded-[24px] border border-white/10 bg-black/20 p-4">
+                  <ChangePasswordForm />
+                </div>
+              </div>
+            </SettingsCard>
+
+            <SettingsCard section="reports" {...cardControls("reports")} onSave={saveSettings} view={<ReportsSettingsView value={settings.reports} />}>
+              <ToggleGrid>
+                <ToggleSwitch label="Auto Generate Reports" checked={settings.reports.autoGenerateReports} onChange={(value) => updateSetting("reports", "autoGenerateReports", value)} />
+                <ToggleSwitch label="Daily Reports" checked={settings.reports.dailyReports} onChange={(value) => updateSetting("reports", "dailyReports", value)} />
+                <ToggleSwitch label="Weekly Reports" checked={settings.reports.weeklyReports} onChange={(value) => updateSetting("reports", "weeklyReports", value)} />
+                <ToggleSwitch label="Monthly Reports" checked={settings.reports.monthlyReports} onChange={(value) => updateSetting("reports", "monthlyReports", value)} />
+                <ToggleSwitch label="Export PDF" checked={settings.reports.exportPdf} onChange={(value) => updateSetting("reports", "exportPdf", value)} />
+                <ToggleSwitch label="Export Excel" checked={settings.reports.exportExcel} onChange={(value) => updateSetting("reports", "exportExcel", value)} />
+              </ToggleGrid>
+            </SettingsCard>
+
+            <SettingsCard section="customers" {...cardControls("customers")} onSave={saveSettings} view={<CustomerSettingsView value={settings.customers} />}>
+              <ToggleGrid>
+                <ToggleSwitch label="Auto Welcome Message" checked={settings.customers.autoWelcomeMessage} onChange={(value) => updateSetting("customers", "autoWelcomeMessage", value)} />
+                <ToggleSwitch label="Loyalty Rewards Toggle" checked={settings.customers.loyaltyRewards} onChange={(value) => updateSetting("customers", "loyaltyRewards", value)} />
+                <ToggleSwitch label="Customer Broadcast Notifications" checked={settings.customers.customerBroadcastNotifications} onChange={(value) => updateSetting("customers", "customerBroadcastNotifications", value)} />
+              </ToggleGrid>
+            </SettingsCard>
+          </div>
+        </div>
+
+        <div className="settings-wide-stack">
+          <SettingsCard section="payment" {...cardControls("payment")} onSave={saveSettings} className="settings-card--wide" view={<PaymentSettingsView value={settings} qrPreview={gcashQrPreview} summary={deliverySummary} loading={deliveryCustomersLoading} error={deliveryCustomersError} onManage={openDeliveryAreas} onRetry={() => refreshDeliveryCustomers({ showLoading: true, includeCustomers: false })} />}>
           <div className="grid gap-6">
             <section className="grid gap-4">
               <SettingsSectionHeading eyebrow="GCash" title="GCash Payment Details" />
@@ -948,60 +1009,6 @@ export default function AdminSettingsPage({ onChange }) {
           </div>
         </SettingsCard>
 
-        <SettingsCard section="security" {...cardControls("security")} onSave={saveSettings} view={<SecuritySettingsView value={settings.security} onEdit={() => beginEditing("security")} />}>
-          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.9fr)]">
-            <div className="grid gap-3 md:grid-cols-2">
-              <ToggleSwitch label="Two Factor Authentication Toggle" checked={settings.security.twoFactorAuthentication} onChange={(value) => updateSetting("security", "twoFactorAuthentication", value)} />
-              <ToggleSwitch label="Login Activity" checked={settings.security.loginActivity} onChange={(value) => updateSetting("security", "loginActivity", value)} />
-              <ToggleSwitch label="Admin Access Control" checked={settings.security.adminAccessControl} onChange={(value) => updateSetting("security", "adminAccessControl", value)} />
-              <NumberInput label="Session Timeout" suffix="minutes" value={settings.security.sessionTimeout} error={errors["security.sessionTimeout"]} onChange={(value) => updateSetting("security", "sessionTimeout", Number(value))} />
-              <InlineNotice icon={Clock3} className="md:col-span-2">Active sessions use this timeout value for admin policy tracking.</InlineNotice>
-            </div>
-            <div className="rounded-[24px] border border-white/10 bg-black/20 p-4">
-              <ChangePasswordForm />
-            </div>
-          </div>
-        </SettingsCard>
-
-        <SettingsCard section="inventory" {...cardControls("inventory")} onSave={saveSettings} view={<InventorySettingsView value={settings.inventory} />}>
-          <div className="grid gap-4">
-            <NumberInput label="Low Stock Threshold" value={settings.inventory.lowStockThreshold} error={errors["inventory.lowStockThreshold"]} onChange={(value) => updateSetting("inventory", "lowStockThreshold", Number(value))} />
-            <ToggleGrid>
-              <ToggleSwitch label="Auto Restock Alert" checked={settings.inventory.autoRestockAlert} onChange={(value) => updateSetting("inventory", "autoRestockAlert", value)} />
-              <ToggleSwitch label="Barcode Toggle" checked={settings.inventory.barcodeEnabled} onChange={(value) => updateSetting("inventory", "barcodeEnabled", value)} />
-              <ToggleSwitch label="SKU Generator Toggle" checked={settings.inventory.skuGeneratorEnabled} onChange={(value) => updateSetting("inventory", "skuGeneratorEnabled", value)} />
-            </ToggleGrid>
-          </div>
-        </SettingsCard>
-
-        <SettingsCard section="reports" {...cardControls("reports")} onSave={saveSettings} view={<ReportsSettingsView value={settings.reports} />}>
-          <ToggleGrid>
-            <ToggleSwitch label="Auto Generate Reports" checked={settings.reports.autoGenerateReports} onChange={(value) => updateSetting("reports", "autoGenerateReports", value)} />
-            <ToggleSwitch label="Daily Reports" checked={settings.reports.dailyReports} onChange={(value) => updateSetting("reports", "dailyReports", value)} />
-            <ToggleSwitch label="Weekly Reports" checked={settings.reports.weeklyReports} onChange={(value) => updateSetting("reports", "weeklyReports", value)} />
-            <ToggleSwitch label="Monthly Reports" checked={settings.reports.monthlyReports} onChange={(value) => updateSetting("reports", "monthlyReports", value)} />
-            <ToggleSwitch label="Export PDF" checked={settings.reports.exportPdf} onChange={(value) => updateSetting("reports", "exportPdf", value)} />
-            <ToggleSwitch label="Export Excel" checked={settings.reports.exportExcel} onChange={(value) => updateSetting("reports", "exportExcel", value)} />
-          </ToggleGrid>
-        </SettingsCard>
-
-        <SettingsCard section="appearance" {...cardControls("appearance")} onSave={saveSettings} view={<AppearanceSettingsView value={settings.appearance} theme={userTheme} />}>
-          <div className="grid gap-4 md:grid-cols-2">
-            <ThemeModeSwitch theme={userTheme} onChange={updateUserTheme} />
-            <ToggleSwitch label="Sidebar Collapse Toggle" checked={settings.appearance.sidebarCollapse} onChange={(value) => updateSetting("appearance", "sidebarCollapse", value)} />
-            <ColorInput label="Theme Color" value={settings.appearance.themeColor} error={errors["appearance.themeColor"]} onChange={(value) => updateSetting("appearance", "themeColor", value)} />
-            <SelectInput label="Dashboard Layout" value={settings.appearance.dashboardLayout} options={["Comfortable", "Compact", "Analytics Focus"]} onChange={(value) => updateSetting("appearance", "dashboardLayout", value)} />
-          </div>
-        </SettingsCard>
-
-        <SettingsCard section="customers" {...cardControls("customers")} onSave={saveSettings} view={<CustomerSettingsView value={settings.customers} />}>
-          <ToggleGrid>
-            <ToggleSwitch label="Auto Welcome Message" checked={settings.customers.autoWelcomeMessage} onChange={(value) => updateSetting("customers", "autoWelcomeMessage", value)} />
-            <ToggleSwitch label="Loyalty Rewards Toggle" checked={settings.customers.loyaltyRewards} onChange={(value) => updateSetting("customers", "loyaltyRewards", value)} />
-            <ToggleSwitch label="Customer Broadcast Notifications" checked={settings.customers.customerBroadcastNotifications} onChange={(value) => updateSetting("customers", "customerBroadcastNotifications", value)} />
-          </ToggleGrid>
-        </SettingsCard>
-
         <SettingsCard section="about" {...cardControls("about")} onSave={saveSettings} className="settings-card--wide" view={<AboutSettingsView value={settings.about} />}>
           <div className="grid gap-4 md:grid-cols-2">
             <TextArea label="Mission" value={settings.about.mission} onChange={(value) => updateSetting("about", "mission", value)} />
@@ -1063,6 +1070,7 @@ export default function AdminSettingsPage({ onChange }) {
             </div>
           </div>
         </SettingsCard>
+      </div>
       </div>
 
       <AnimatePresence>
