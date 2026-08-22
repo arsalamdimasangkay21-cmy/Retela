@@ -162,6 +162,26 @@ function stockBadgeClass(stock) {
   return "border-emerald-200 bg-emerald-50 text-emerald-700";
 }
 
+function productIdentity(product) {
+  const id = product?.id;
+  if (id !== undefined && id !== null && String(id).trim()) return `id:${String(id).trim()}`;
+  const sku = product?.sku ?? product?.barcode ?? product?.barcodeValue;
+  if (sku !== undefined && sku !== null && String(sku).trim()) return `sku:${String(sku).trim().toLowerCase()}`;
+  return "";
+}
+
+function uniqueProductRows(rows = []) {
+  const seen = new Set();
+  return (Array.isArray(rows) ? rows : []).filter((product) => {
+    if (!product || typeof product !== "object") return false;
+    const identity = productIdentity(product);
+    if (!identity) return true;
+    if (seen.has(identity)) return false;
+    seen.add(identity);
+    return true;
+  });
+}
+
 function normalizeCartRows(rows = []) {
   return rows
     .filter((item) => item && item.name)
@@ -233,7 +253,10 @@ export default function CustomerDashboard({ active, onChange }) {
     cartRef.current = cart;
   }, [cart]);
 
-  const visibleProducts = useMemo(() => products.filter((item) => Number(item.stock || 0) > 0), [products]);
+  const visibleProducts = useMemo(
+    () => uniqueProductRows(products).filter((item) => Number(item.stock || 0) > 0),
+    [products]
+  );
   const filteredProducts = useMemo(() => {
     if (!shopProductIdsFilter.length) return visibleProducts;
     const productIds = new Set(shopProductIdsFilter.map(Number));
@@ -289,7 +312,7 @@ export default function CustomerDashboard({ active, onChange }) {
       cachedGet("/settings/promotions", {}, { cacheMs: 10000, retries: 1, force })
     ]);
     if (cancelled?.()) return;
-    setProducts((Array.isArray(productRes.data) ? productRes.data : []).filter((item) => Number(item.stock || 0) > 0));
+    setProducts(uniqueProductRows(productRes.data).filter((item) => Number(item.stock || 0) > 0));
     setFilterOptions(filterRes.data);
     setOrders(orderRes.data);
     setNotifications(customerNotificationRows(notificationRes.data));
@@ -337,7 +360,7 @@ export default function CustomerDashboard({ active, onChange }) {
     setFeaturedLoading(true);
     try {
       const { data } = await fetchFeaturedApparel({ force });
-      if (!cancelled?.()) setFeaturedApparel(Array.isArray(data) ? data : []);
+      if (!cancelled?.()) setFeaturedApparel(uniqueProductRows(data));
     } finally {
       if (!cancelled?.()) setFeaturedLoading(false);
     }
@@ -1287,7 +1310,10 @@ function DeliverySafetyPolicyCard({ policy, compact = false }) {
 function FeaturedApparelHero({ items, loading, onAddToCart, onBuyNow }) {
   const [selectedApparel, setSelectedApparel] = useState(null);
   const [quickViewProduct, setQuickViewProduct] = useState(null);
-  const availableItems = useMemo(() => items.filter((item) => Number(item.stock || 0) > 0), [items]);
+  const availableItems = useMemo(
+    () => uniqueProductRows(items).filter((item) => Number(item.stock || 0) > 0),
+    [items]
+  );
 
   function openDetails(item) {
     setSelectedApparel(item);
@@ -1366,7 +1392,7 @@ function FeaturedApparelHero({ items, loading, onAddToCart, onBuyNow }) {
             {availableItems.map((item) => {
               const image = item.images?.[0] || item.image_url;
               return (
-                <SwiperSlide key={item.id}>
+                <SwiperSlide key={item.id || item.sku || item.barcode}>
                   <div
                     role="button"
                     tabIndex={0}
@@ -1534,6 +1560,7 @@ function Shop({ products, addToCart, buyNow, filters, setFilters, filterOptions,
   const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
   const [isPhotoModalOpen, setIsPhotoModalOpen] = useState(false);
   const [quickViewProduct, setQuickViewProduct] = useState(null);
+  const uniqueProducts = useMemo(() => uniqueProductRows(products), [products]);
 
   function openDetails(item) {
     setSelectedApparel(item);
@@ -1570,7 +1597,7 @@ function Shop({ products, addToCart, buyNow, filters, setFilters, filterOptions,
 
   useEffect(() => {
     if (!selectedApparel) return;
-    const latest = products.find((item) => Number(item.id) === Number(selectedApparel.id));
+    const latest = uniqueProducts.find((item) => Number(item.id) === Number(selectedApparel.id));
     if (!latest) {
       setIsDetailsModalOpen(false);
       setIsPhotoModalOpen(false);
@@ -1578,17 +1605,17 @@ function Shop({ products, addToCart, buyNow, filters, setFilters, filterOptions,
       return;
     }
     if (latest !== selectedApparel) setSelectedApparel(latest);
-  }, [products, selectedApparel]);
+  }, [selectedApparel, uniqueProducts]);
 
   useEffect(() => {
     if (!focusProductId) return;
-    const target = products.find((item) => Number(item.id) === Number(focusProductId));
+    const target = uniqueProducts.find((item) => Number(item.id) === Number(focusProductId));
     if (!target) return;
     setSelectedApparel(target);
     setIsDetailsModalOpen(true);
     setIsPhotoModalOpen(false);
     onFocusProductHandled?.();
-  }, [focusProductId, onFocusProductHandled, products]);
+  }, [focusProductId, onFocusProductHandled, uniqueProducts]);
 
   return (
     <>
@@ -1604,15 +1631,15 @@ function Shop({ products, addToCart, buyNow, filters, setFilters, filterOptions,
             </button>
           </div>
           <CustomerFilters filters={filters} setFilters={setFilters} filterOptions={filterOptions} />
-          <p className="text-sm text-white/55">{products.length} apparel items found</p>
+          <p className="text-sm text-white/55">{uniqueProducts.length} apparel items found</p>
         </div>
         <div className="retela-shop-product-grid">
-          {products.map((p) => {
+          {uniqueProducts.map((p) => {
             const stock = Number(p.stock || 0);
             const outOfStock = stock <= 0;
             const status = stockStatus(p.stock);
             return (
-              <article key={p.id} className="retela-product-card flex h-full min-w-0 flex-col overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg">
+              <article key={p.id || p.sku || p.barcode} className="retela-product-card flex h-full min-w-0 flex-col overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg">
                 <div className="retela-product-card-image-wrap relative overflow-hidden bg-slate-100">
                   <ProductImage product={p} className="retela-shop-product-image h-full w-full object-cover" alt={p.name} />
                   <span className={`retela-product-stock-badge absolute right-2 top-2 rounded-full border font-black ${stockBadgeClass(p.stock)}`}>{status}</span>
