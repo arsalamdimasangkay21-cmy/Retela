@@ -1359,7 +1359,7 @@ function CustomerDeliveryAreasModal({ customers, filter, search, loading, error,
   ];
   return (
     <motion.div
-      className="delivery-areas-modal-backdrop fixed inset-0 z-[180] flex items-end justify-center bg-black/70 backdrop-blur-sm sm:items-center sm:p-5"
+      className="delivery-areas-modal-backdrop fixed inset-0 z-[180] flex items-end justify-center bg-black/70 p-3 backdrop-blur-sm sm:items-center sm:p-5"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
@@ -1369,45 +1369,45 @@ function CustomerDeliveryAreasModal({ customers, filter, search, loading, error,
         role="dialog"
         aria-modal="true"
         aria-labelledby="delivery-areas-title"
-        className="delivery-areas-modal flex max-h-[92dvh] w-full min-w-0 flex-col overflow-hidden rounded-t-[28px] border border-white/10 bg-[#101712] text-white shadow-[0_28px_90px_rgba(0,0,0,0.55)] sm:max-h-[85vh] sm:max-w-3xl sm:rounded-[28px]"
+        className="delivery-areas-modal flex max-h-[calc(100dvh-24px)] w-full min-w-0 flex-col overflow-hidden rounded-[24px] sm:max-h-[85vh]"
         initial={{ opacity: 0, y: 32, scale: 0.98 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
         exit={{ opacity: 0, y: 32, scale: 0.98 }}
         transition={{ duration: 0.22, ease: "easeOut" }}
         onMouseDown={(event) => event.stopPropagation()}
       >
-        <header className="flex shrink-0 items-start justify-between gap-4 border-b border-white/10 px-4 py-4 sm:px-6 sm:py-5">
+        <header className="delivery-areas-modal__header flex shrink-0 items-start justify-between gap-4 px-4 py-4 sm:px-6 sm:py-5">
           <div className="min-w-0">
-            <span className="text-xs font-bold uppercase tracking-[0.18em] text-neonbrand/70">Delivery settings</span>
-            <h2 id="delivery-areas-title" className="mt-1 font-display text-xl font-bold sm:text-2xl">Customer Delivery Areas</h2>
-            <p className="mt-1 text-xs leading-5 text-white/50 sm:text-sm">Location is a suggestion. An admin selection is the shipping rule.</p>
+            <span className="delivery-areas-modal__eyebrow">Delivery settings</span>
+            <h2 id="delivery-areas-title" className="delivery-areas-modal__title mt-1 font-display text-xl font-bold sm:text-2xl">Customer Delivery Areas</h2>
+            <p className="delivery-areas-modal__subtitle mt-1 text-xs leading-5 sm:text-sm">Location is a suggestion. An admin selection is the shipping rule.</p>
           </div>
-          <button type="button" onClick={onClose} disabled={Boolean(savingCustomerId)} aria-label="Close customer delivery areas" className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-white/10 bg-white/[0.06] text-white/70 transition hover:border-neonbrand/35 hover:text-neonbrand disabled:opacity-50">
+          <button type="button" onClick={onClose} disabled={Boolean(savingCustomerId)} aria-label="Close customer delivery areas" className="delivery-areas-modal__close grid h-11 w-11 shrink-0 place-items-center rounded-xl transition disabled:opacity-50">
             <X size={18} />
           </button>
         </header>
 
-        <div className="grid shrink-0 gap-3 border-b border-white/[0.08] px-4 py-4 sm:px-6">
-          <label className="flex min-h-12 items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-4 text-white focus-within:border-neonbrand/50 focus-within:ring-4 focus-within:ring-neonbrand/10">
-            <Search size={16} className="shrink-0 text-neonbrand" />
-            <input ref={searchInputRef} className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-white/35" value={search} onChange={(event) => onSearchChange(event.target.value)} placeholder="Search customer, municipality, city, or address" />
+        <div className="delivery-areas-modal__controls grid shrink-0 gap-3 px-4 py-4 sm:px-6">
+          <label className="delivery-areas-modal__search flex min-h-12 items-center gap-2 rounded-2xl px-4">
+            <Search size={16} className="delivery-areas-modal__search-icon shrink-0" />
+            <input ref={searchInputRef} className="delivery-areas-modal__search-input min-w-0 flex-1 bg-transparent text-sm outline-none" value={search} onChange={(event) => onSearchChange(event.target.value)} placeholder="Search customer, municipality, city, or address" />
           </label>
-          <div className="grid grid-cols-3 gap-2" aria-label="Filter customer delivery areas">
+          <div className="delivery-areas-modal__filters grid grid-cols-3 gap-2" aria-label="Filter customer delivery areas">
             {filters.map(([value, label]) => (
-              <button key={value} type="button" onClick={() => onFilterChange(value)} aria-pressed={filter === value} className={`min-h-10 rounded-xl border px-2 py-2 text-xs font-bold transition sm:text-sm ${filter === value ? "border-neonbrand/45 bg-neonbrand/15 text-neonbrand" : "border-white/10 bg-white/[0.04] text-white/55 hover:border-neonbrand/25"}`}>
+              <button key={value} type="button" onClick={() => onFilterChange(value)} aria-pressed={filter === value} className={`delivery-areas-filter min-h-10 rounded-xl px-2 py-2 text-xs font-bold sm:text-sm ${filter === value ? "delivery-areas-filter--selected" : ""}`}>
                 {label}
               </button>
             ))}
           </div>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 sm:px-6">
+        <div className="delivery-areas-modal__scroll min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 sm:px-6">
           {loading ? (
             <div className="grid gap-3">{[1, 2, 3].map((item) => <div key={item} className="skeleton min-h-44 rounded-2xl" />)}</div>
           ) : error ? (
-            <div className="grid justify-items-center gap-3 rounded-2xl border border-rose-300/20 bg-rose-400/10 p-5 text-center">
-              <p className="text-sm font-semibold text-rose-100">{error}</p>
-              <button type="button" onClick={onRetry} className="inline-flex items-center gap-2 rounded-xl border border-rose-200/25 px-3 py-2 text-xs font-bold text-rose-100"><RefreshCw size={14} /> Retry</button>
+            <div className="delivery-areas-modal__error grid justify-items-center gap-3 rounded-2xl p-5 text-center">
+              <p className="text-sm font-semibold">{error}</p>
+              <button type="button" onClick={onRetry} className="inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-bold"><RefreshCw size={14} /> Retry</button>
             </div>
           ) : customers.length ? (
             <div className="grid gap-3">
@@ -1416,7 +1416,7 @@ function CustomerDeliveryAreasModal({ customers, filter, search, loading, error,
               ))}
             </div>
           ) : (
-            <p className="rounded-2xl border border-dashed border-white/10 bg-white/[0.035] p-6 text-center text-sm text-white/45">No customers match this search and filter.</p>
+            <p className="delivery-areas-modal__empty rounded-2xl p-6 text-center text-sm">No customers match this search and filter.</p>
           )}
         </div>
       </motion.section>
@@ -1434,24 +1434,24 @@ function CustomerDeliveryAreaRow({ customer, saving, disabled, onClassify }) {
     ["outside", "Outside"]
   ];
   return (
-    <article className="grid min-w-0 gap-3 rounded-2xl border border-white/10 bg-white/[0.045] p-4">
+    <article className="delivery-customer-card grid min-w-0 gap-3 rounded-2xl p-4 sm:p-5">
       <div className="min-w-0">
-        <strong className="block break-words text-sm text-white sm:text-base">{customer.name || "Customer"}</strong>
-        <p className="mt-1 break-words text-xs leading-5 text-white/55">{customer.address || "Delivery address not provided"}</p>
-        <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] font-semibold text-white/40">
+        <strong className="delivery-customer-card__name block break-words text-sm sm:text-base">{customer.name || "Customer"}</strong>
+        <p className="delivery-customer-card__address mt-1 break-words text-xs leading-5">{customer.address || "Delivery address not provided"}</p>
+        <div className="delivery-customer-card__meta mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] font-semibold">
           {customer.municipality ? <span>Municipality: {customer.municipality}</span> : null}
           {hasDistance ? <span>Approx. distance: {distance.toFixed(1)} km</span> : null}
         </div>
       </div>
-      <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/[0.08] bg-black/15 px-3 py-2 text-xs">
-        <span className="text-white/55">Suggested by location: <strong className="text-white">{suggestedZone === "nearby" ? "Nearby" : "Outside"}</strong></span>
-        <span className={override ? "font-bold text-neonbrand" : "font-semibold text-white/45"}>Current mode: {override ? "Manual" : "Automatic"}</span>
+      <div className="delivery-customer-card__info flex flex-wrap items-center justify-between gap-2 rounded-xl px-3 py-2 text-xs">
+        <span className="delivery-customer-card__info-item"><span>Suggested by location</span><strong>{suggestedZone === "nearby" ? "Nearby" : "Outside"}</strong></span>
+        <span className={`delivery-customer-card__info-item ${override ? "delivery-customer-card__info-item--manual" : ""}`}><span>Current mode</span><strong>{override ? "Manual" : "Automatic"}</strong></span>
       </div>
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2" role="radiogroup" aria-label={`Delivery area for ${customer.name || "customer"}`}>
         {options.map(([value, label]) => {
           const selected = override === value;
           return (
-            <button key={value} type="button" role="radio" aria-checked={selected} disabled={disabled} onClick={() => onClassify(customer.id, value)} className={`inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border px-3 py-2 text-sm font-bold transition disabled:cursor-wait disabled:opacity-60 ${selected ? "border-neonbrand/55 bg-neonbrand/20 text-neonbrand shadow-[0_0_22px_rgba(56,255,136,0.1)]" : "border-white/10 bg-white/[0.04] text-white/65 hover:border-neonbrand/30 hover:text-white"}`}>
+            <button key={value} type="button" role="radio" aria-checked={selected} disabled={disabled} onClick={() => onClassify(customer.id, value)} className={`delivery-area-choice inline-flex min-h-11 items-center justify-center gap-2 rounded-xl px-3 py-2 text-sm font-bold disabled:cursor-wait disabled:opacity-60 ${selected ? "delivery-area-choice--selected" : ""}`}>
               {saving && selected ? <Loader2 size={15} className="animate-spin" /> : selected ? <CheckCircle2 size={15} /> : null}
               {label}
             </button>
@@ -1459,7 +1459,7 @@ function CustomerDeliveryAreaRow({ customer, saving, disabled, onClassify }) {
         })}
       </div>
       {override ? (
-        <button type="button" disabled={disabled} onClick={() => onClassify(customer.id, null)} className="inline-flex w-fit items-center gap-1.5 rounded-lg px-1 py-1 text-xs font-bold text-white/50 transition hover:text-neonbrand disabled:cursor-wait disabled:opacity-50">
+        <button type="button" disabled={disabled} onClick={() => onClassify(customer.id, null)} className="delivery-area-automatic inline-flex w-fit items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-bold disabled:cursor-wait disabled:opacity-50">
           {saving ? <Loader2 size={13} className="animate-spin" /> : <RotateCcw size={13} />} Use Automatic
         </button>
       ) : null}
