@@ -235,9 +235,9 @@ export default function PosPage() {
   }
 
   return (
-    <div className="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,1.1fr)_minmax(360px,0.9fr)]">
+    <div className="retela-pos-page grid min-w-0 gap-5 xl:grid-cols-[minmax(0,1.1fr)_minmax(360px,0.9fr)]">
       <section className="grid gap-5">
-        <div className="rounded-[26px] border border-emerald-100 bg-white p-5 shadow-xl shadow-slate-200/70">
+        <div className="retela-pos-card rounded-[26px] border border-emerald-100 bg-white p-5 shadow-xl shadow-slate-200/70">
           <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-center">
             <div>
               <p className="text-xs font-black uppercase tracking-[0.2em] text-emerald-700">In-store checkout</p>
@@ -284,7 +284,7 @@ export default function PosPage() {
 
         {lastProduct ? <ProductPreview product={lastProduct} /> : <EmptyScanState />}
 
-        <div className="rounded-[26px] border border-slate-200 bg-white p-5 shadow-xl shadow-slate-200/60">
+        <div className="retela-pos-card rounded-[26px] border border-slate-200 bg-white p-5 shadow-xl shadow-slate-200/60">
           <div className="mb-4 flex items-center justify-between gap-3">
             <div>
               <h2 className="font-display text-xl font-bold text-slate-950">POS Cart</h2>
@@ -296,7 +296,7 @@ export default function PosPage() {
             {cart.length ? cart.map((item) => (
               <CartLine key={item.id} item={item} onQuantity={updateQuantity} onRemove={(id) => setCart((items) => items.filter((entry) => entry.id !== id))} />
             )) : (
-              <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm font-semibold text-slate-500">Cart is empty.</div>
+              <div className="retela-pos-empty-cart rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm font-semibold text-slate-600">Cart is empty.</div>
             )}
           </div>
         </div>
@@ -329,7 +329,7 @@ export default function PosPage() {
 
 function ProductPreview({ product }) {
   return (
-    <article className="grid gap-4 rounded-[26px] border border-slate-200 bg-white p-5 shadow-xl shadow-slate-200/60 md:grid-cols-[160px_minmax(0,1fr)]">
+    <article className="retela-pos-card grid gap-4 rounded-[26px] border border-slate-200 bg-white p-5 shadow-xl shadow-slate-200/60 md:grid-cols-[160px_minmax(0,1fr)]">
       <ProductImage product={product} className="h-40 w-full rounded-2xl object-cover md:w-40" alt={product.name} />
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-2">
@@ -349,9 +349,9 @@ function ProductPreview({ product }) {
 
 function EmptyScanState() {
   return (
-    <div className="rounded-[26px] border border-dashed border-slate-200 bg-white p-8 text-center shadow-lg shadow-slate-200/50">
-      <Barcode className="mx-auto text-slate-300" size={42} />
-      <p className="mt-3 text-sm font-bold text-slate-500">Scan a barcode to display product details.</p>
+    <div className="retela-pos-empty-state rounded-[26px] border border-dashed border-slate-200 bg-white p-8 text-center shadow-lg shadow-slate-200/50">
+      <Barcode className="mx-auto text-slate-500" size={42} />
+      <p className="mt-3 text-sm font-bold text-slate-600">Scan a barcode to display product details.</p>
     </div>
   );
 }
@@ -446,11 +446,11 @@ function CartLine({ item, onQuantity, onRemove }) {
 
 function PaymentPanel({ method, setMethod, subtotal, quantity, cashReceived, setCashReceived, change, gcashReference, setGcashReference, settings, canCheckout, busy, onCheckout }) {
   return (
-    <div className="sticky top-28 rounded-[26px] border border-slate-200 bg-white p-5 shadow-xl shadow-slate-200/70">
+    <div className="retela-pos-card retela-pos-payment-card sticky top-28 rounded-[26px] border border-slate-200 bg-white p-5 shadow-xl shadow-slate-200/70">
       <h2 className="font-display text-xl font-bold text-slate-950">Payment</h2>
-      <div className="mt-4 grid grid-cols-2 gap-2 rounded-2xl bg-slate-100 p-1">
-        <button type="button" onClick={() => setMethod("cash")} className={`inline-flex h-12 items-center justify-center gap-2 rounded-xl text-sm font-black transition ${method === "cash" ? "bg-white text-emerald-700 shadow" : "text-slate-500"}`}><Banknote size={18} /> Cash</button>
-        <button type="button" onClick={() => setMethod("gcash")} className={`inline-flex h-12 items-center justify-center gap-2 rounded-xl text-sm font-black transition ${method === "gcash" ? "bg-white text-sky-700 shadow" : "text-slate-500"}`}><QrCode size={18} /> GCash</button>
+      <div className="retela-pos-payment-tabs mt-4 grid grid-cols-2 gap-2 rounded-2xl bg-slate-100 p-1">
+        <button type="button" onClick={() => setMethod("cash")} className={`retela-pos-payment-option inline-flex h-12 items-center justify-center gap-2 rounded-xl text-sm font-black transition ${method === "cash" ? "bg-white text-emerald-700 shadow" : "text-slate-600"}`}><Banknote size={18} /> Cash</button>
+        <button type="button" onClick={() => setMethod("gcash")} className={`retela-pos-payment-option inline-flex h-12 items-center justify-center gap-2 rounded-xl text-sm font-black transition ${method === "gcash" ? "bg-white text-sky-700 shadow" : "text-slate-600"}`}><QrCode size={18} /> GCash</button>
       </div>
 
       <div className="mt-5 grid gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
@@ -463,7 +463,7 @@ function PaymentPanel({ method, setMethod, subtotal, quantity, cashReceived, set
         <div className="mt-5 grid gap-3">
           <label className="text-sm font-bold text-slate-700">Cash Received</label>
           <input type="number" min="0" step="0.01" value={cashReceived} onChange={(event) => setCashReceived(event.target.value)} className="h-14 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-lg font-black text-slate-950 outline-none focus:border-emerald-300 focus:ring-4 focus:ring-emerald-100" />
-          <div className="rounded-2xl bg-emerald-50 p-4">
+          <div className="retela-pos-change rounded-2xl bg-emerald-50 p-4">
             <span className="block text-xs font-black uppercase tracking-[0.16em] text-emerald-700">Change</span>
             <strong className="mt-1 block text-2xl text-emerald-800">{money(change)}</strong>
           </div>
