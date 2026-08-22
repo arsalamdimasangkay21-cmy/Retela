@@ -6,6 +6,7 @@ import { Chart as ChartJS, ArcElement, BarElement, CategoryScale, Filler, Linear
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip as RechartsTooltip, XAxis, YAxis } from "recharts";
 import { Activity, Archive, Barcode, Bot, Check, CheckCircle2, ChevronLeft, ChevronRight, Clock3, Download, Edit3, Eye, FileSpreadsheet, Loader2, MapPin, Megaphone, MessageSquare, MoreHorizontal, PackageCheck, PackagePlus, Plus, Printer, ReceiptText, RotateCcw, Save, Search, Send, Shirt, ShoppingBag, SlidersHorizontal, Sparkles, Star, Tags, Trash2, TrendingUp, Upload, UserRound, WalletCards, X, Zap } from "lucide-react";
 import { api, API_URL, cachedGet, clearGetCache, getApiErrorMessage } from "../api/client";
+import JsBarcode from "jsbarcode";
 import { createApparelOption, deleteApparelOption, fetchApparelOptions } from "../api/apparelOptions";
 import { ChangePasswordForm } from "../components/ChangePasswordForm";
 import ConfirmDialog from "../components/ConfirmDialog";
@@ -2908,19 +2909,27 @@ function productSku(product) {
   return product?.sku || product?.barcode || "Barcode unavailable";
 }
 
-function barcodePattern(value) {
-  const text = String(value || "").toUpperCase();
-  const bits = [1, 0, 1, 0, 1, 0];
-  Array.from(text).forEach((char) => {
-    const code = char.charCodeAt(0);
-    for (let index = 0; index < 7; index += 1) bits.push((code >> index) & 1);
-    bits.push(0, 1);
-  });
-  bits.push(1, 0, 1, 0, 1);
-  return bits;
-}
-
 function BarcodeSvg({ value, compact = false }) {
+  const svgRef = useRef(null);
+  const unavailable = !value || value === "Barcode unavailable";
+
+  useEffect(() => {
+    if (unavailable || !svgRef.current) return;
+    try {
+      JsBarcode(svgRef.current, String(value), {
+        format: "CODE128",
+        displayValue: false,
+        width: compact ? 1.1 : 1.35,
+        height: compact ? 30 : 42,
+        margin: 0,
+        background: "#ffffff",
+        lineColor: "#000000"
+      });
+    } catch {
+      svgRef.current.replaceChildren();
+    }
+  }, [compact, unavailable, value]);
+
   if (!value || value === "Barcode unavailable") {
     return (
       <div className="grid h-full w-full place-items-center rounded-md bg-white text-center text-[10px] font-black uppercase tracking-[0.08em] text-slate-400">
@@ -2928,15 +2937,8 @@ function BarcodeSvg({ value, compact = false }) {
       </div>
     );
   }
-  const bits = barcodePattern(value);
-  const barWidth = compact ? 2 : 3;
-  const height = compact ? 38 : 56;
-  const width = bits.length * barWidth;
   return (
-    <svg viewBox={`0 0 ${width} ${height}`} className="h-full w-full" role="img" aria-label={`Barcode ${value}`} preserveAspectRatio="none">
-      <rect width={width} height={height} rx="6" fill="#ffffff" />
-      {bits.map((bit, index) => bit ? <rect key={index} x={index * barWidth} y={compact ? 7 : 10} width={barWidth} height={compact ? 24 : 34} fill="#111827" /> : null)}
-    </svg>
+    <svg ref={svgRef} className="h-full w-full" role="img" aria-label={`CODE128 barcode ${value}`} />
   );
 }
 
@@ -2945,12 +2947,27 @@ function barcodeSvgMarkup(value) {
   if (!value || value === "Barcode unavailable") {
     return `<div style="display:grid;place-items:center;width:360px;height:118px;border:1px solid #d1d5db;border-radius:10px;color:#6b7280;font:700 12px Arial,sans-serif;text-transform:uppercase;letter-spacing:0.08em;">${safeValue}</div>`;
   }
-  const bits = barcodePattern(value);
-  const barWidth = 3;
-  const height = 74;
-  const width = bits.length * barWidth;
-  const bars = bits.map((bit, index) => bit ? `<rect x="${index * barWidth}" y="12" width="${barWidth}" height="42" fill="#111827" />` : "").join("");
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="360" height="118" role="img" aria-label="Barcode ${safeValue}"><rect width="${width}" height="${height}" rx="8" fill="#ffffff" />${bars}<text x="${width / 2}" y="68" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" font-weight="700" fill="#111827">${safeValue}</text></svg>`;
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  try {
+    JsBarcode(svg, String(value), {
+      format: "CODE128",
+      displayValue: false,
+      width: 1.15,
+      height: 40,
+      margin: 0,
+      background: "#ffffff",
+      lineColor: "#000000"
+    });
+    svg.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+    svg.setAttribute("width", "44mm");
+    svg.setAttribute("height", "11mm");
+    svg.setAttribute("role", "img");
+    svg.setAttribute("aria-label", `CODE128 barcode ${safeValue}`);
+    svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
+    return new XMLSerializer().serializeToString(svg);
+  } catch {
+    return `<div class="barcode-error">${safeValue}</div>`;
+  }
 }
 
 function escapePrintHtml(value) {
@@ -2964,40 +2981,7 @@ function escapePrintHtml(value) {
 }
 
 function printProductBarcode(product) {
-  const sku = productSku(product);
-  const name = escapePrintHtml(product?.name || "RETELA Product");
-  const category = escapePrintHtml(product?.category || "Apparel");
-  const size = escapePrintHtml(product?.size || "Free Size");
-  const status = escapePrintHtml(product?.status || "In Stock");
-  const printWindow = window.open("", "_blank", "width=520,height=620");
-  if (!printWindow) return;
-  printWindow.document.write(`
-    <html>
-      <head>
-        <title>${sku} Barcode</title>
-        <style>
-          body { font-family: Arial, sans-serif; margin: 0; padding: 28px; color: #102018; }
-          .sheet { border: 1px solid #DDEFE5; border-radius: 18px; padding: 22px; text-align: center; }
-          h1 { margin: 0 0 6px; font-size: 22px; }
-          p { margin: 4px 0; color: #4b6356; }
-          .sku { margin-top: 14px; font-size: 18px; font-weight: 800; letter-spacing: 0.08em; color: #14532D; }
-          .meta { margin-top: 12px; font-size: 14px; }
-          @media print { body { padding: 0; } .sheet { border: 0; } }
-        </style>
-      </head>
-      <body>
-        <div class="sheet">
-          <h1>${name}</h1>
-          <p>${category} | ${size}</p>
-          ${barcodeSvgMarkup(sku)}
-          <div class="sku">${sku}</div>
-          <div class="meta">PHP ${Number(product?.price || 0).toLocaleString()} | Stock: ${Number(product?.stock || 0)} | ${status}</div>
-        </div>
-        <script>window.onload = () => { window.print(); window.setTimeout(() => window.close(), 300); };</script>
-      </body>
-    </html>
-  `);
-  printWindow.document.close();
+  printProductBarcodes([product]);
 }
 
 function printProductBarcodes(products) {
@@ -3026,19 +3010,22 @@ function printProductBarcodes(products) {
           @page { size: A4; margin: 10mm; }
           * { box-sizing: border-box; }
           body { margin: 0; font-family: Arial, sans-serif; color: #102018; background: #ffffff; }
-          .sheet { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8mm 5mm; padding: 0; }
-          .label { min-height: 43mm; break-inside: avoid; page-break-inside: avoid; border: 1px solid #CFEBDD; border-radius: 10px; padding: 5mm 4mm; text-align: center; }
-          .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 800; color: #102018; }
-          .brand { margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 9px; font-weight: 700; color: #527062; }
-          .barcode { margin-top: 3mm; height: 20mm; overflow: hidden; }
-          .barcode svg { width: 100%; height: 100%; }
-          .sku { margin-top: 2mm; font-size: 10px; font-weight: 900; letter-spacing: 0.06em; color: #14532D; }
+          .sheet { display: grid; grid-template-columns: repeat(3, 50mm); gap: 4mm; justify-content: center; padding: 0; }
+          .label { width: 50mm; height: 30mm; break-inside: avoid; page-break-inside: avoid; border: 0.2mm solid #D1D5DB; padding: 2mm 3mm; text-align: center; overflow: hidden; }
+          .name, .brand { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .name { font-size: 9pt; line-height: 1.1; font-weight: 800; color: #000000; }
+          .brand { margin-top: 1mm; font-size: 7.5pt; line-height: 1.1; font-weight: 700; color: #222222; }
+          .barcode { width: 44mm; height: 11mm; margin: 2mm auto 0; overflow: hidden; background: #ffffff; }
+          .barcode svg { display: block; width: 44mm; height: 11mm; }
+          .barcode-error { display: grid; place-items: center; width: 44mm; height: 11mm; color: #000000; font-size: 7pt; }
+          .sku { margin-top: 1.2mm; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 7.5pt; line-height: 1.1; font-weight: 900; letter-spacing: 0.04em; color: #000000; }
           @media screen { body { padding: 16px; background: #EEF7F1; } .sheet { max-width: 210mm; margin: 0 auto; padding: 10mm; background: white; box-shadow: 0 18px 60px rgba(16,32,24,0.16); } }
+          @media print { body { background: #ffffff; } .sheet { margin: 0; } .label { background: #ffffff; color: #000000; } }
         </style>
       </head>
       <body>
         <main class="sheet">${labels}</main>
-        <script>window.onload = () => { window.print(); window.setTimeout(() => window.close(), 400); };</script>
+        <script>window.addEventListener("load", () => { window.requestAnimationFrame(() => { window.print(); window.setTimeout(() => window.close(), 400); }); });</script>
       </body>
     </html>
   `);
