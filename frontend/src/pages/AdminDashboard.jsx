@@ -7,6 +7,7 @@ import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip as Rechart
 import { Activity, Archive, Barcode, Bot, Camera, Check, CheckCircle2, ChevronLeft, ChevronRight, Clock3, Download, Edit3, Eye, FileSpreadsheet, Loader2, MapPin, Megaphone, MessageSquare, MoreHorizontal, PackageCheck, PackagePlus, Plus, Printer, ReceiptText, RotateCcw, Save, Search, Send, Shirt, ShoppingBag, SlidersHorizontal, Sparkles, Star, Tags, Trash2, TrendingUp, Upload, UserRound, WalletCards, X, Zap } from "lucide-react";
 import { api, API_URL, cachedGet, clearGetCache, getApiErrorMessage } from "../api/client";
 import JsBarcode from "jsbarcode";
+import { jsPDF } from "jspdf";
 import { createApparelOption, deleteApparelOption, fetchApparelOptions } from "../api/apparelOptions";
 import { ChangePasswordForm } from "../components/ChangePasswordForm";
 import ConfirmDialog from "../components/ConfirmDialog";
@@ -1340,7 +1341,7 @@ function PremiumInventoryPage({
   const totalPages = Math.max(1, Math.ceil(visibleProducts.length / pageSize));
   const pageProducts = visibleProducts.slice((page - 1) * pageSize, page * pageSize);
   const scannedProduct = useMemo(() => findProductByBarcode(sourceProducts, barcodeQuery), [sourceProducts, barcodeQuery]);
-  const allBarcodeIds = useMemo(() => sourceProducts.map((product) => Number(product.id)).filter(Boolean), [sourceProducts]);
+  const allBarcodeIds = useMemo(() => visibleProducts.map((product) => Number(product.id)).filter(Boolean), [visibleProducts]);
   const selectedBarcodeProducts = useMemo(() => sourceProducts.filter((product) => selectedBarcodeIds.includes(Number(product.id))), [sourceProducts, selectedBarcodeIds]);
   const stats = [
     { title: "T-Shirts Stock", value: stockByCategory(sourceProducts, "T-Shirts"), subtitle: "Available tees", icon: PackageCheck },
@@ -1411,7 +1412,7 @@ function PremiumInventoryPage({
   }
 
   function selectAllBarcodes() {
-    setSelectedBarcodeIds(allBarcodeIds);
+    setSelectedBarcodeIds((ids) => [...new Set([...ids, ...allBarcodeIds])]);
   }
 
   function clearSelectedBarcodes() {
@@ -1471,29 +1472,36 @@ function PremiumInventoryPage({
             <h2 className="font-display text-xl font-bold text-white">Stock List</h2>
             <p className="mt-1 text-sm text-white/45">Inventory is the source of truth for apparel, stock, and barcodes.</p>
           </div>
-          <button type="button" onClick={() => setBarcodeModalOpen(true)} className="inline-flex items-center justify-center gap-2 rounded-2xl border border-neonbrand/30 bg-neonbrand/10 px-4 py-2.5 text-sm font-bold text-neonbrand transition hover:bg-neonbrand hover:text-black">
-            <Barcode size={17} />
-            Barcodes
-          </button>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <span className="rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-xs font-bold text-white/55">Selected: {selectedBarcodeIds.length}</span>
+            <button type="button" onClick={selectAllBarcodes} disabled={!allBarcodeIds.length} className="rounded-xl border border-neonbrand/25 bg-neonbrand/10 px-3 py-2 text-xs font-bold text-neonbrand transition hover:bg-neonbrand hover:text-black disabled:cursor-not-allowed disabled:opacity-45">Select All</button>
+            <button type="button" onClick={clearSelectedBarcodes} disabled={!selectedBarcodeIds.length} className="rounded-xl border border-white/10 bg-white/[0.05] px-3 py-2 text-xs font-bold text-white/65 transition hover:border-neonbrand/30 hover:text-neonbrand disabled:cursor-not-allowed disabled:opacity-45">Clear</button>
+            <button type="button" onClick={() => setBarcodeModalOpen(true)} className="inline-flex items-center justify-center gap-2 rounded-2xl border border-neonbrand/30 bg-neonbrand/10 px-4 py-2.5 text-sm font-bold text-neonbrand transition hover:bg-neonbrand hover:text-black">
+              <Barcode size={17} />
+              Barcodes
+            </button>
+          </div>
         </div>
         {pageProducts.length ? (
           <>
             <div className="hidden xl:block">
               <table className="w-full table-fixed text-left text-sm">
                 <colgroup>
+                  <col className="w-[4%]" />
                   <col className="w-[8%]" />
-                  <col className="w-[15%]" />
                   <col className="w-[14%]" />
-                  <col className="w-[10%]" />
-                  <col className="w-[8%]" />
-                  <col className="w-[10%]" />
+                  <col className="w-[13%]" />
+                  <col className="w-[9%]" />
                   <col className="w-[7%]" />
                   <col className="w-[9%]" />
+                  <col className="w-[6%]" />
                   <col className="w-[8%]" />
-                  <col className="w-[14%]" />
+                  <col className="w-[9%]" />
+                  <col className="w-[13%]" />
                 </colgroup>
                 <thead>
                   <tr className="border-b border-white/10 bg-white/[0.035] text-[11px] uppercase tracking-[0.08em] text-white/42">
+                    <th className="px-3 py-4"><span className="sr-only">Select</span></th>
                     <th className="px-3 py-4">Image</th>
                     <th className="px-3 py-4">Apparel</th>
                     <th className="px-3 py-4">Barcode/SKU</th>
@@ -1516,6 +1524,9 @@ function PremiumInventoryPage({
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ duration: 0.28, delay: index * 0.035 }}
                     >
+                      <td className="px-3 py-4 align-top">
+                        <input type="checkbox" checked={selectedBarcodeIds.includes(Number(product.id))} onChange={() => toggleBarcode(product.id)} aria-label={`Select barcode for ${product.name}`} className="mt-1 h-4 w-4 accent-emerald-500" />
+                      </td>
                       <td className="px-3 py-4">
                         <div className="h-14 w-14 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.06] shadow-lg shadow-black/20">
                           <ProductImage product={product} className="h-full w-full object-cover transition duration-500 group-hover:scale-105" alt={product.name} />
@@ -1551,6 +1562,7 @@ function PremiumInventoryPage({
               {pageProducts.map((product) => (
                 <article key={product.id} data-inventory-sku={productSku(product)} className={`rounded-3xl border border-white/10 bg-white/[0.055] p-3 ${focusedSku.toLowerCase() === productSku(product).toLowerCase() ? "inventory-item-focus" : ""}`}>
                   <div className="flex gap-3">
+                    <input type="checkbox" checked={selectedBarcodeIds.includes(Number(product.id))} onChange={() => toggleBarcode(product.id)} aria-label={`Select barcode for ${product.name}`} className="mt-2 h-4 w-4 shrink-0 accent-emerald-500" />
                     <div className="h-20 w-20 shrink-0 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.06]">
                       <ProductImage product={product} className="h-full w-full object-cover" alt={product.name} />
                     </div>
@@ -1599,14 +1611,28 @@ function PremiumInventoryPage({
 
       {barcodeModalOpen ? (
         <BarcodeSelectionModal
-          products={sourceProducts}
+          products={visibleProducts}
           selectedIds={selectedBarcodeIds}
           selectedProducts={selectedBarcodeProducts}
-          allSelected={Boolean(allBarcodeIds.length) && selectedBarcodeIds.length === allBarcodeIds.length}
+          allSelected={Boolean(allBarcodeIds.length) && allBarcodeIds.every((id) => selectedBarcodeIds.includes(id))}
           onToggle={toggleBarcode}
           onSelectAll={selectAllBarcodes}
           onClear={clearSelectedBarcodes}
           onPrintSelected={() => printProductBarcodes(selectedBarcodeProducts)}
+          onSavePdf={async () => {
+            if (!selectedBarcodeProducts.length) {
+              showProductToast("Select at least one barcode first.", "error", "top-right");
+              return;
+            }
+            showProductToast("Preparing barcode PDF...", "success", "top-right");
+            try {
+              await saveProductBarcodesPdf(selectedBarcodeProducts);
+              showProductToast("Barcode PDF saved successfully.", "success", "top-right");
+            } catch (error) {
+              console.error("[barcode-pdf] export failed", error);
+              showProductToast("Unable to save barcode PDF.", "error", "top-right");
+            }
+          }}
           onClose={() => setBarcodeModalOpen(false)}
         />
       ) : null}
@@ -1666,25 +1692,23 @@ function InventorySelect({ label, value, onChange, options }) {
   );
 }
 
+function StockStatusBadge({ stock, status, compact = false, showQuantity = false }) {
+  const quantity = Number(stock || 0);
+  const sold = quantity <= 0;
+  if (sold) {
+    return <span className={`admin-sold-badge inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-1 font-bold ${compact ? "text-[11px]" : "text-xs"}`}><span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-current" />SOLD</span>;
+  }
+  const badgeStatus = status || (quantity <= 5 ? "Low Stock" : "In Stock");
+  const tone = badgeStatus === "Low Stock" ? "border-orange-400/20 bg-orange-400/10 text-orange-300" : "border-emerald-400/20 bg-emerald-400/10 text-emerald-300";
+  return <span className={`inline-flex whitespace-nowrap rounded-full border px-2.5 py-1 font-bold ${compact ? "text-[11px]" : "text-xs"} ${tone}`}>{showQuantity ? `${quantity} stock` : badgeStatus}</span>;
+}
+
 function InventoryStatusBadge({ stock, status }) {
-  const badgeStatus = status || (Number(stock) <= 0 ? "Out of Stock" : Number(stock) <= 5 ? "Low Stock" : "In Stock");
-  const styles = {
-    "In Stock": "border-emerald-400/20 bg-emerald-400/10 text-emerald-300",
-    "Low Stock": "border-orange-400/20 bg-orange-400/10 text-orange-300",
-    "Out of Stock": "border-rose-400/20 bg-rose-400/10 text-rose-300"
-  };
-  return <span className={`inline-flex rounded-full border px-3 py-1 text-xs font-bold ${styles[badgeStatus]}`}>{badgeStatus}</span>;
+  return <StockStatusBadge stock={stock} status={status} />;
 }
 
 function AdminStockBadge({ stock, compact = false }) {
-  const quantity = Number(stock || 0);
-  const sold = quantity <= 0;
-  const tone = sold
-    ? "border-rose-300/50 bg-rose-500/15 text-rose-200"
-    : quantity <= 5
-      ? "border-orange-400/20 bg-orange-400/10 text-orange-300"
-      : "border-emerald-400/20 bg-emerald-400/10 text-emerald-300";
-  return <span className={`inline-flex rounded-full border px-2.5 py-1 font-bold ${compact ? "text-[11px]" : "text-xs"} ${tone}`}>{sold ? "SOLD" : `${quantity} stock`}</span>;
+  return <StockStatusBadge stock={stock} compact={compact} showQuantity />;
 }
 
 function InventoryActions({ product, onEdit, onUpdateStock, onDelete, deletingProductIds = [], mobile = false }) {
@@ -3176,6 +3200,71 @@ function printProductBarcodes(products) {
   printWindow.document.close();
 }
 
+function barcodeSvgDataUrl(value) {
+  const svg = barcodeSvgMarkup(value);
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
+function loadBarcodeImage(value) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = 880;
+      canvas.height = 220;
+      const context = canvas.getContext("2d");
+      context.fillStyle = "#ffffff";
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      context.imageSmoothingEnabled = false;
+      context.drawImage(image, 0, 0, canvas.width, canvas.height);
+      resolve(canvas.toDataURL("image/png"));
+    };
+    image.onerror = () => reject(new Error("Barcode image could not be rendered."));
+    image.src = barcodeSvgDataUrl(value);
+  });
+}
+
+async function saveProductBarcodesPdf(products) {
+  const selectedProducts = products.filter(Boolean);
+  if (!selectedProducts.length) return;
+  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+  const labelWidth = 50;
+  const labelHeight = 30;
+  const gap = 4;
+  const marginX = (210 - (labelWidth * 3 + gap * 2)) / 2;
+  const marginY = 10;
+  const rowsPerPage = Math.floor((297 - marginY * 2 + gap) / (labelHeight + gap));
+  const barcodeImages = await Promise.all(selectedProducts.map((product) => loadBarcodeImage(productSku(product))));
+
+  selectedProducts.forEach((product, index) => {
+    if (index && index % (rowsPerPage * 3) === 0) doc.addPage();
+    const pageIndex = index % (rowsPerPage * 3);
+    const column = pageIndex % 3;
+    const row = Math.floor(pageIndex / 3);
+    const x = marginX + column * (labelWidth + gap);
+    const y = marginY + row * (labelHeight + gap);
+    const sku = productSku(product);
+    doc.setDrawColor(209, 213, 219);
+    doc.setLineWidth(0.2);
+    doc.rect(x, y, labelWidth, labelHeight);
+    doc.setTextColor(0, 0, 0);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9);
+    doc.text(String(product.name || "RETELA Product").slice(0, 26), x + labelWidth / 2, y + 4.5, { align: "center" });
+    doc.setFontSize(7.5);
+    doc.text(String(product.brand || "Other").slice(0, 30), x + labelWidth / 2, y + 8, { align: "center" });
+    doc.addImage(barcodeImages[index], "PNG", x + 3, y + 10, 44, 11, undefined, "FAST");
+    doc.setFontSize(7.5);
+    doc.text(String(sku).slice(0, 28), x + labelWidth / 2, y + 25.5, { align: "center" });
+  });
+
+  const date = new Date().toISOString().slice(0, 10);
+  const filename = selectedProducts.length === 1
+    ? `RETELA-${productSku(selectedProducts[0])}-Barcode.pdf`
+    : `RETELA-Barcodes-${date}.pdf`;
+  doc.save(filename);
+}
+
 function findProductByBarcode(products, value) {
   const queryText = String(value || "").trim().toLowerCase();
   if (!queryText) return null;
@@ -4138,7 +4227,7 @@ function ProductGallery({ products, filters, setFilters, optionValues, onAdd, on
   );
 }
 
-function BarcodeSelectionModal({ products, selectedIds, selectedProducts, allSelected, onToggle, onSelectAll, onClear, onPrintSelected, onClose }) {
+function BarcodeSelectionModal({ products, selectedIds, selectedProducts, allSelected, onToggle, onSelectAll, onClear, onPrintSelected, onSavePdf, onClose }) {
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -4186,6 +4275,10 @@ function BarcodeSelectionModal({ products, selectedIds, selectedProducts, allSel
             <button type="button" onClick={onPrintSelected} disabled={!selectedProducts.length} className="inline-flex items-center gap-2 rounded-2xl border border-neonbrand/25 bg-neonbrand/10 px-4 py-2.5 text-sm font-bold text-neonbrand transition hover:bg-neonbrand hover:text-black disabled:cursor-not-allowed disabled:opacity-45">
               <Printer size={16} />
               Print Selected Barcodes
+            </button>
+            <button type="button" onClick={onSavePdf} disabled={!selectedProducts.length} className="inline-flex items-center gap-2 rounded-2xl border border-sky-300/25 bg-sky-300/10 px-4 py-2.5 text-sm font-bold text-sky-200 transition hover:bg-sky-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-45">
+              <Download size={16} />
+              Save as PDF
             </button>
             <button type="button" onClick={onClose} className="grid h-10 w-10 place-items-center rounded-2xl border border-white/10 bg-white/[0.06] text-white/70 transition hover:border-neonbrand/35 hover:text-neonbrand" aria-label="Close barcode manager">
               <X size={18} />
