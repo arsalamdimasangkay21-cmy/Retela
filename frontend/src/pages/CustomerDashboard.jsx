@@ -18,11 +18,19 @@ import NotificationPreviewPanel from "../components/NotificationPreviewPanel";
 import OrderDeliveryInfo from "../components/OrderDeliveryInfo";
 import ProductImage from "../components/ProductImage";
 import ProductQuickView from "../components/ProductQuickView";
+import StructuredLocationPicker from "../components/StructuredLocationPicker";
 import { Button, Card, Field } from "../components/ui";
 import { resolveAssetUrl } from "../config/branding";
-import { osmTileUrl } from "../config/maps";
 import { useAuth } from "../context/AuthContext";
 import useBlockingLoader from "../hooks/useBlockingLoader";
+import {
+  formatDistanceKm,
+  hasLocationCoordinates,
+  locationFromProfile,
+  locationValidationMessage,
+  normalizeStructuredLocation,
+  profileFieldsFromLocation
+} from "../utils/location";
 import { emitUserThemeChange, readUserTheme, saveUserTheme } from "../utils/userTheme";
 import { orderStatusLabel as sharedOrderStatusLabel } from "../utils/orderStatus";
 
@@ -37,7 +45,6 @@ const returnFlow = ["pending", "under_review", "approved", "rejected", "refunded
 const onlinePaymentMethods = ["gcash", "debit", "credit", "maya"];
 const defaultReturnShippingFee = 50;
 const defaultCustomerFilters = { search: "", brand: "all", category: "all", size: "all", stock: "all", minPrice: "", maxPrice: "", sortBy: "latest" };
-const defaultDeliveryCenter = { latitude: 7.1907, longitude: 124.5308 };
 const defaultDeliverySafetyPolicy = "For everyone's safety, customers and delivery personnel should meet only at the confirmed delivery or meeting location shown in the order. Verify the order and customer/delivery identity before handing over or accepting an item. Avoid changing the meetup location through unofficial messages. Keep communication inside RETELA whenever possible. Do not share OTPs, passwords, or sensitive account information. If the location feels unsafe, contact the other party through RETELA and arrange a safer public meeting point before completing the order.";
 const paymentNumberLabels = {
   gcash: "GCash mobile number",
@@ -77,19 +84,8 @@ function paymentCheckoutUrl(payload) {
   return payload?.checkoutUrl || payload?.checkout_url || payload?.url || "";
 }
 
-function finiteCoordinate(value) {
-  const number = Number(value);
-  return Number.isFinite(number) ? number : null;
-}
-
 function normalizeDeliveryLocation(value = {}) {
-  return {
-    address: String(value.address ?? value.delivery_address ?? value.location ?? "").trim(),
-    latitude: finiteCoordinate(value.latitude ?? value.delivery_latitude),
-    longitude: finiteCoordinate(value.longitude ?? value.delivery_longitude),
-    landmark: String(value.landmark ?? value.delivery_landmark ?? "").trim(),
-    notes: String(value.notes ?? value.delivery_notes ?? "").trim()
-  };
+  return normalizeStructuredLocation(value);
 }
 
 function hasDeliveryLocation(value) {
@@ -97,29 +93,15 @@ function hasDeliveryLocation(value) {
 }
 
 function hasDeliveryCoordinates(value) {
-  const location = normalizeDeliveryLocation(value);
-  return location.latitude !== null && location.longitude !== null;
+  return hasLocationCoordinates(value);
 }
 
 function deliveryLocationFromProfile(profile) {
-  return normalizeDeliveryLocation({
-    address: profile?.location,
-    latitude: profile?.delivery_latitude,
-    longitude: profile?.delivery_longitude,
-    landmark: profile?.delivery_landmark,
-    notes: profile?.delivery_notes
-  });
+  return locationFromProfile(profile);
 }
 
 function deliveryLocationFromOrder(order) {
-  const location = normalizeDeliveryLocation({
-    address: order?.delivery_address || order?.location,
-    latitude: order?.delivery_latitude,
-    longitude: order?.delivery_longitude,
-    landmark: order?.delivery_landmark,
-    notes: order?.delivery_notes
-  });
-  return location;
+  return normalizeDeliveryLocation(order);
 }
 
 function deliveryMapUrl(location) {
@@ -133,12 +115,28 @@ function deliveryMapUrl(location) {
   return "";
 }
 
-function deliveryLocationStorageKey(userId) {
-  return `retela_delivery_location_${userId || "guest"}`;
-}
-
 function deliverySafetyPolicyFromShop(shop) {
   return String(shop?.about?.deliverySafetyPolicy || defaultDeliverySafetyPolicy).trim() || defaultDeliverySafetyPolicy;
+}
+
+function normalizeShippingQuote(value = {}) {
+  const fee = Number(value.shippingFee ?? value.shipping_fee ?? 0);
+  const rawDistance = value.distanceKm ?? value.distance_km ?? value.shippingDistanceKm ?? value.shipping_distance_km;
+  const distance = rawDistance === null || rawDistance === undefined || rawDistance === "" ? Number.NaN : Number(rawDistance);
+  const zone = String(value.shippingZone ?? value.shipping_zone ?? "").trim().toLowerCase();
+  return {
+    shippingFee: Number.isFinite(fee) ? Math.max(0, fee) : 0,
+    shippingZone: zone,
+    shippingRule: String(value.shippingRule ?? value.shipping_rule ?? "").trim(),
+    distanceKm: Number.isFinite(distance) && distance >= 0 ? distance : null,
+    reason: String(value.reason || value.shippingReason || value.shipping_reason || (zone === "nearby" ? "Nearby delivery area" : zone === "outside" ? "Outside nearby delivery area" : "")).trim()
+  };
+}
+
+function shippingFeeText(quote, loading = false) {
+  if (loading && !quote) return "Calculating...";
+  if (!quote) return "Pending";
+  return Number(quote.shippingFee || 0) <= 0 ? "FREE" : money(quote.shippingFee);
 }
 
 function setModalBodyLock(active) {
@@ -210,12 +208,16 @@ export default function CustomerDashboard({ active, onChange }) {
   const [profilePhoto, setProfilePhoto] = useState(null);
   const [deliveryLocation, setDeliveryLocation] = useState(null);
   const [locationSelectorOpen, setLocationSelectorOpen] = useState(false);
+  const [shippingQuote, setShippingQuote] = useState(null);
+  const [shippingQuoteLoading, setShippingQuoteLoading] = useState(false);
+  const [shippingQuoteError, setShippingQuoteError] = useState("");
   const [deactivating, setDeactivating] = useState(false);
   const [deactivateConfirmOpen, setDeactivateConfirmOpen] = useState(false);
   const filtersRef = useRef(filters);
   const cartRef = useRef(cart);
   const stockRefreshTimerRef = useRef(null);
   const checkoutInFlightRef = useRef(false);
+  const shippingQuoteRequestRef = useRef(0);
 
   useEffect(() => {
     filtersRef.current = filters;
@@ -300,6 +302,31 @@ export default function CustomerDashboard({ active, onChange }) {
     setSelectedCartIds(nextCart.filter((item) => item.selected).map((item) => Number(item.product_id)));
   }
 
+  const loadShippingQuote = useCallback(async ({ method = "delivery", coupon = "" } = {}) => {
+    const requestId = shippingQuoteRequestRef.current + 1;
+    shippingQuoteRequestRef.current = requestId;
+    setShippingQuote(null);
+    setShippingQuoteLoading(true);
+    setShippingQuoteError("");
+    try {
+      const { data } = await api.post("/settings/shipping/quote", {
+        fulfillmentMethod: method,
+        couponCode: coupon
+      });
+      if (shippingQuoteRequestRef.current !== requestId) return null;
+      const nextQuote = normalizeShippingQuote(data);
+      setShippingQuote(nextQuote);
+      return nextQuote;
+    } catch (error) {
+      if (shippingQuoteRequestRef.current !== requestId) return null;
+      setShippingQuote(null);
+      setShippingQuoteError(error?.response?.data?.message || "Shipping could not be calculated right now.");
+      return null;
+    } finally {
+      if (shippingQuoteRequestRef.current === requestId) setShippingQuoteLoading(false);
+    }
+  }, []);
+
   const loadFeaturedApparel = useCallback(async ({ cancelled, force = false } = {}) => {
     setFeaturedLoading(true);
     try {
@@ -363,20 +390,50 @@ export default function CustomerDashboard({ active, onChange }) {
   useEffect(() => {
     if (!profile?.id) return;
     const profileLocation = deliveryLocationFromProfile(profile);
-    const stored = localStorage.getItem(deliveryLocationStorageKey(profile.id));
-    if (stored) {
-      try {
-        const parsed = normalizeDeliveryLocation(JSON.parse(stored));
-        if (hasDeliveryLocation(parsed)) {
-          setDeliveryLocation(parsed);
-          return;
-        }
-      } catch {
-        localStorage.removeItem(deliveryLocationStorageKey(profile.id));
-      }
-    }
     setDeliveryLocation(hasDeliveryLocation(profileLocation) ? profileLocation : null);
-  }, [profile?.id, profile?.location, profile?.delivery_latitude, profile?.delivery_longitude, profile?.delivery_landmark, profile?.delivery_notes]);
+  }, [
+    profile?.id,
+    profile?.location,
+    profile?.formatted_address,
+    profile?.delivery_barangay,
+    profile?.delivery_municipality,
+    profile?.delivery_province,
+    profile?.delivery_region,
+    profile?.delivery_postal_code,
+    profile?.delivery_place_id,
+    profile?.delivery_latitude,
+    profile?.delivery_longitude,
+    profile?.delivery_location_source,
+    profile?.delivery_landmark,
+    profile?.delivery_notes
+  ]);
+
+  useEffect(() => {
+    if (!profile?.id) return;
+    const savedLocation = deliveryLocationFromProfile(profile);
+    if (fulfillmentMethod === "delivery" && !hasDeliveryLocation(savedLocation)) {
+      setShippingQuote(null);
+      setShippingQuoteError("");
+      return;
+    }
+    void loadShippingQuote({ method: fulfillmentMethod, coupon: appliedCoupon?.code || "" });
+  }, [
+    appliedCoupon?.code,
+    fulfillmentMethod,
+    loadShippingQuote,
+    profile?.id,
+    profile?.location,
+    profile?.formatted_address,
+    profile?.delivery_barangay,
+    profile?.delivery_municipality,
+    profile?.delivery_province,
+    profile?.delivery_region,
+    profile?.delivery_postal_code,
+    profile?.delivery_place_id,
+    profile?.delivery_latitude,
+    profile?.delivery_longitude,
+    profile?.delivery_location_source
+  ]);
 
   function notifyCart(message, type = "success") {
     dispatchCustomerToast({ type, message });
@@ -473,13 +530,16 @@ export default function CustomerDashboard({ active, onChange }) {
         .catch(() => {
           if (!cancelled) setPromotions({ shipping: { type: "fixed", fee: 0 }, coupons: [], sales: [] });
         });
+      if (profile?.id) {
+        void loadShippingQuote({ method: fulfillmentMethod, coupon: appliedCoupon?.code || "" });
+      }
     }
     window.addEventListener("retela:shipping-change", refreshShipping);
     return () => {
       cancelled = true;
       window.removeEventListener("retela:shipping-change", refreshShipping);
     };
-  }, [loadPromotions]);
+  }, [appliedCoupon?.code, fulfillmentMethod, loadPromotions, loadShippingQuote, profile?.id]);
 
   async function toggleCartSelection(productId) {
     const id = Number(productId);
@@ -508,7 +568,10 @@ export default function CustomerDashboard({ active, onChange }) {
   }
 
   const selectedCartItems = useMemo(() => cart.filter((item) => selectedCartIds.includes(Number(item.product_id))), [cart, selectedCartIds]);
-  const cartPricing = useMemo(() => calculateCartPricing(selectedCartItems, promotions, appliedCoupon, fulfillmentMethod), [selectedCartItems, promotions, appliedCoupon, fulfillmentMethod]);
+  const cartPricing = useMemo(
+    () => calculateCartPricing(selectedCartItems, promotions, appliedCoupon, fulfillmentMethod, shippingQuote),
+    [selectedCartItems, promotions, appliedCoupon, fulfillmentMethod, shippingQuote]
+  );
   const cartTotal = cartPricing.total;
 
   async function applyCoupon() {
@@ -527,6 +590,8 @@ export default function CustomerDashboard({ active, onChange }) {
         items: selectedCartItems.map(({ product_id, quantity }) => ({ product_id, quantity }))
       });
       setAppliedCoupon(data.coupon);
+      setShippingQuote(normalizeShippingQuote(data));
+      setShippingQuoteError("");
       setCouponCode(data.coupon?.code || code.toUpperCase());
       notifyCart("Coupon applied.");
     } catch (error) {
@@ -619,6 +684,18 @@ export default function CustomerDashboard({ active, onChange }) {
         notifyCart("Please select at least one item.", "warning");
         return;
       }
+      if (fulfillmentMethod === "delivery") {
+        const displayedShippingFee = Number(shippingQuote?.shippingFee || 0);
+        const latestQuote = await loadShippingQuote({ method: fulfillmentMethod, coupon: appliedCoupon?.code || "" });
+        if (!latestQuote) {
+          notifyCart("Shipping could not be recalculated. Please try again.", "error");
+          return;
+        }
+        if (Math.abs(Number(latestQuote.shippingFee || 0) - displayedShippingFee) > 0.009) {
+          notifyCart("Shipping was updated. Review the new total, then confirm checkout again.", "info");
+          return;
+        }
+      }
       const { data } = await api.post("/orders", {
         payment_method: paymentMethod,
         fulfillment_method: fulfillmentMethod,
@@ -678,7 +755,7 @@ export default function CustomerDashboard({ active, onChange }) {
     }
   }
 
-  function openCheckoutSummary() {
+  async function openCheckoutSummary() {
     if (!selectedCartItems.length) {
       setCouponError("Please select at least one item.");
       notifyCart("Please select at least one item.", "warning");
@@ -689,40 +766,46 @@ export default function CustomerDashboard({ active, onChange }) {
       setLocationSelectorOpen(true);
       return;
     }
+    if (fulfillmentMethod === "delivery" && shippingQuoteLoading) {
+      notifyCart("Shipping is still being calculated.", "info");
+      return;
+    }
+    if (fulfillmentMethod === "delivery") {
+      const quote = await loadShippingQuote({ method: fulfillmentMethod, coupon: appliedCoupon?.code || "" });
+      if (!quote) {
+        notifyCart("Shipping could not be calculated. Please try again.", "error");
+        return;
+      }
+    }
     setCheckoutSummaryOpen(true);
   }
 
-  async function saveCheckoutDeliveryLocation(nextLocation, { saveAsDefault = false } = {}) {
+  async function saveCheckoutDeliveryLocation(nextLocation) {
     const normalized = normalizeDeliveryLocation(nextLocation);
-    if (!hasDeliveryLocation(normalized)) {
-      notifyCart("Please choose a delivery address first.", "warning");
-      return;
+    const validationMessage = locationValidationMessage(normalized);
+    if (validationMessage) {
+      notifyCart(validationMessage, "warning");
+      return false;
     }
-    setDeliveryLocation(normalized);
-    if (profile?.id) {
-      localStorage.setItem(deliveryLocationStorageKey(profile.id), JSON.stringify(normalized));
-    }
-    setLocationSelectorOpen(false);
-    if (saveAsDefault) {
-      try {
-        const { data } = await api.patch("/users/me", {
-          location: normalized.address,
-          delivery_latitude: normalized.latitude,
-          delivery_longitude: normalized.longitude,
-          delivery_landmark: normalized.landmark,
-          delivery_notes: normalized.notes
-        });
-        clearGetCache("/users/me");
-        localStorage.setItem("retela_user", JSON.stringify(data));
-        setUser(data);
-        setProfile(data);
-        setProfileInitial(data);
-        notifyCart("Delivery location saved as default.");
-      } catch (error) {
-        notifyCart(error?.response?.data?.message || "Delivery location was selected, but could not be saved as default.", "error");
-      }
-    } else {
-      notifyCart("Delivery location selected.");
+    try {
+      const { data } = await api.patch("/users/me", {
+        ...profileFieldsFromLocation(normalized),
+        delivery_landmark: normalized.landmark || null,
+        delivery_notes: normalized.notes || null
+      });
+      clearGetCache("/users/me");
+      localStorage.setItem("retela_user", JSON.stringify(data));
+      setUser(data);
+      setProfile(data);
+      setProfileInitial(data);
+      setDeliveryLocation(deliveryLocationFromProfile(data));
+      setLocationSelectorOpen(false);
+      await loadShippingQuote({ method: fulfillmentMethod, coupon: appliedCoupon?.code || "" });
+      notifyCart("Delivery location saved.");
+      return true;
+    } catch (error) {
+      notifyCart(error?.response?.data?.message || "Could not save the delivery location.", "error");
+      return false;
     }
   }
 
@@ -808,6 +891,10 @@ export default function CustomerDashboard({ active, onChange }) {
           applyCoupon={applyCoupon}
           promotions={promotions}
           deliveryLocation={deliveryLocation}
+          shippingQuote={shippingQuote}
+          shippingQuoteLoading={shippingQuoteLoading}
+          shippingQuoteError={shippingQuoteError}
+          retryShippingQuote={() => loadShippingQuote({ method: fulfillmentMethod, coupon: appliedCoupon?.code || "" })}
           deliverySafetyPolicy={deliverySafetyPolicyFromShop(shopInfo)}
           onOpenLocationSelector={() => setLocationSelectorOpen(true)}
           paymentMethod={paymentMethod}
@@ -832,6 +919,9 @@ export default function CustomerDashboard({ active, onChange }) {
             paymentError={paymentError}
             updatePaymentNumber={updatePaymentNumber}
             deliveryLocation={deliveryLocation}
+            shippingQuote={shippingQuote}
+            shippingQuoteLoading={shippingQuoteLoading}
+            fulfillmentMethod={fulfillmentMethod}
             deliverySafetyPolicy={deliverySafetyPolicyFromShop(shopInfo)}
             checkout={checkout}
             checkoutLoading={checkoutLoading}
@@ -972,7 +1062,7 @@ export default function CustomerDashboard({ active, onChange }) {
   if (active === "Returns") return <ReturnForm orders={orders} returnRequests={returnRequests} onSaved={() => load(filtersRef.current, { force: true })} />;
   return (
     <>
-      <Profile profile={profile} profilePhoto={profilePhoto} setProfilePhoto={setProfilePhoto} saveProfile={saveProfile} onDeactivate={deactivateAccount} deactivating={deactivating} />
+      <Profile profile={profile} profilePhoto={profilePhoto} setProfilePhoto={setProfilePhoto} saveProfile={saveProfile} shippingQuote={shippingQuote} shippingQuoteLoading={shippingQuoteLoading} onDeactivate={deactivateAccount} deactivating={deactivating} />
       <ConfirmDialog
         open={deactivateConfirmOpen}
         title="Deactivate your account?"
@@ -1004,6 +1094,10 @@ function CartPage({
   applyCoupon,
   promotions,
   deliveryLocation,
+  shippingQuote,
+  shippingQuoteLoading,
+  shippingQuoteError,
+  retryShippingQuote,
   deliverySafetyPolicy,
   onOpenLocationSelector,
   paymentMethod,
@@ -1020,6 +1114,7 @@ function CartPage({
   const selectedCount = selectedItems.length;
   const normalizedDeliveryLocation = normalizeDeliveryLocation(deliveryLocation);
   const hasLocation = hasDeliveryLocation(normalizedDeliveryLocation);
+  const distanceLabel = formatDistanceKm(shippingQuote?.distanceKm);
   return (
     <div className="retela-customer-checkout-layout grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
       <Card>
@@ -1095,6 +1190,9 @@ function CartPage({
                 <strong>{normalizedDeliveryLocation.address}</strong>
                 <span>{hasDeliveryCoordinates(normalizedDeliveryLocation) ? "Exact location saved" : "Address saved. Add an exact pin when available."}</span>
                 {normalizedDeliveryLocation.landmark ? <span>{normalizedDeliveryLocation.landmark}</span> : null}
+                {distanceLabel ? <span>Distance from shop: {distanceLabel}</span> : null}
+                {shippingQuote ? <span>Shipping: {shippingFeeText(shippingQuote)}</span> : shippingQuoteLoading ? <span>Calculating shipping...</span> : null}
+                {shippingQuote?.reason ? <span>Reason: {shippingQuote.reason}</span> : null}
               </>
             ) : (
               <>
@@ -1141,14 +1239,20 @@ function CartPage({
             <strong className="text-emerald-700">-{money(pricing.saleDiscount)}</strong>
           </div>
           <div className="retela-order-summary-row flex items-center justify-between text-sm text-slate-600">
-            <span>Shipping Fee</span>
-            <strong className="text-slate-900">{money(pricing.shippingFee)}</strong>
+            <span>Shipping</span>
+            <strong className={shippingQuote && Number(shippingQuote.shippingFee || 0) <= 0 ? "text-emerald-700" : "text-slate-900"}>{shippingFeeText(shippingQuote, shippingQuoteLoading)}</strong>
           </div>
           <div className="retela-order-summary-row retela-order-summary-total flex items-center justify-between border-t border-slate-200 pt-3">
             <span className="text-sm font-bold text-slate-700">Total</span>
             <strong className="font-display text-2xl text-emerald-700">{money(pricing.total)}</strong>
           </div>
         </div>
+        {shippingQuoteError ? (
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm font-bold text-amber-700">
+            <span>{shippingQuoteError}</span>
+            <button type="button" className="rounded-xl border border-amber-300 bg-white px-3 py-1.5 text-xs" onClick={retryShippingQuote}>Retry</button>
+          </div>
+        ) : null}
         <DeliverySafetyPolicyCard policy={deliverySafetyPolicy} compact />
         {!selectedCount ? <p className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm font-bold text-amber-700">Please select at least one item.</p> : null}
         <Button className="retela-checkout-button mt-4 w-full" disabled={!selectedCount || checkoutLoading} onClick={openCheckoutSummary}>
@@ -1700,7 +1804,7 @@ function saleForItem(item, promotions) {
   return (promotions?.sales || []).find((sale) => (sale.productIds || []).map(Number).includes(id));
 }
 
-function calculateCartPricing(items, promotions, coupon, fulfillmentMethod = "delivery") {
+function calculateCartPricing(items, promotions, coupon, fulfillmentMethod = "delivery", shippingQuote = null) {
   let subtotal = 0;
   let saleDiscount = 0;
   const itemSummaries = items.map((item) => {
@@ -1713,7 +1817,9 @@ function calculateCartPricing(items, promotions, coupon, fulfillmentMethod = "de
   });
   const couponBase = Math.max(0, subtotal - saleDiscount);
   const couponDiscount = coupon ? couponBase * (Number(coupon.discountPercent || 0) / 100) : 0;
-  const shippingFee = fulfillmentMethod === "delivery" && promotions?.shipping?.type !== "free" && !coupon?.freeShipping ? Number(promotions?.shipping?.fee || 0) : 0;
+  const shippingFee = fulfillmentMethod === "delivery" && shippingQuote
+    ? Math.max(0, Number(shippingQuote.shippingFee || 0))
+    : 0;
   return {
     items: itemSummaries,
     subtotal,
@@ -1734,91 +1840,23 @@ function SelectionCircle({ selected }) {
 
 function DeliveryLocationSelector({ initialLocation, onClose, onSave }) {
   const [draft, setDraft] = useState(() => normalizeDeliveryLocation(initialLocation));
-  const [query, setQuery] = useState(normalizeDeliveryLocation(initialLocation).address || "");
-  const [results, setResults] = useState([]);
-  const [searching, setSearching] = useState(false);
-  const [locating, setLocating] = useState(false);
-  const [resolving, setResolving] = useState(false);
-  const [saveAsDefault, setSaveAsDefault] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [validationError, setValidationError] = useState("");
 
-  async function reverseGeocode(latitude, longitude) {
-    setResolving(true);
-    try {
-      const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(latitude)}&lon=${encodeURIComponent(longitude)}&zoom=18&addressdetails=1`);
-      if (!response.ok) throw new Error("Reverse geocoding failed");
-      const data = await response.json();
-      const address = String(data?.display_name || "").trim();
-      if (address) {
-        setDraft((current) => ({ ...current, address, latitude, longitude }));
-        setQuery(address);
-      } else {
-        setDraft((current) => ({ ...current, latitude, longitude }));
-      }
-    } catch {
-      setDraft((current) => ({ ...current, latitude, longitude }));
-      dispatchCustomerToast({ type: "warning", message: "Location pin updated, but the address could not be resolved." });
-    } finally {
-      setResolving(false);
-    }
-  }
-
-  async function searchLocation(event) {
-    event?.preventDefault();
-    const text = query.trim();
-    if (!text) return;
-    setSearching(true);
-    try {
-      const response = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=5&countrycodes=ph&q=${encodeURIComponent(text)}`);
-      if (!response.ok) throw new Error("Search failed");
-      const data = await response.json();
-      setResults((Array.isArray(data) ? data : []).map((item) => ({
-        id: item.place_id,
-        address: item.display_name,
-        latitude: Number(item.lat),
-        longitude: Number(item.lon)
-      })).filter((item) => item.address && Number.isFinite(item.latitude) && Number.isFinite(item.longitude)));
-    } catch {
-      dispatchCustomerToast({ type: "error", message: "Could not search that address right now." });
-    } finally {
-      setSearching(false);
-    }
-  }
-
-  function useCurrentLocation() {
-    if (!navigator.geolocation) {
-      dispatchCustomerToast({ type: "error", message: "Current location is not supported by this browser." });
-      return;
-    }
-    setLocating(true);
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const latitude = Number(position.coords.latitude);
-        const longitude = Number(position.coords.longitude);
-        setLocating(false);
-        void reverseGeocode(latitude, longitude);
-      },
-      () => {
-        setLocating(false);
-        dispatchCustomerToast({ type: "error", message: "Unable to access your current location. You can search for an address or select a location manually." });
-      },
-      { enableHighAccuracy: true, timeout: 12000, maximumAge: 60000 }
-    );
-  }
-
-  function selectSearchResult(result) {
-    setDraft((current) => ({ ...current, address: result.address, latitude: result.latitude, longitude: result.longitude }));
-    setQuery(result.address);
-    setResults([]);
-  }
-
-  function submitLocation(event) {
+  async function submitLocation(event) {
     event.preventDefault();
     const next = normalizeDeliveryLocation(draft);
-    if (!next.address) {
-      dispatchCustomerToast({ type: "warning", message: "Please choose a delivery address first." });
+    const message = locationValidationMessage(next);
+    if (message) {
+      setValidationError(message);
       return;
     }
-    onSave(next, { saveAsDefault });
+    setSaving(true);
+    try {
+      await onSave(next);
+    } finally {
+      setSaving(false);
+    }
   }
 
   return createPortal(
@@ -1835,50 +1873,18 @@ function DeliveryLocationSelector({ initialLocation, onClose, onSave }) {
         </div>
 
         <div className="retela-location-selector-body">
-          <div className="retela-location-search-panel">
-            <div className="retela-location-search-row">
-              <label className="retela-location-search-input">
-                <Search size={17} />
-                <input
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") {
-                      event.preventDefault();
-                      void searchLocation(event);
-                    }
-                  }}
-                  placeholder="Search for street, barangay, city, landmark..."
-                />
-              </label>
-              <button type="button" onClick={searchLocation} disabled={searching}>
-                {searching ? <Loader2 size={16} className="animate-spin" /> : <Search size={16} />}
-                Search
-              </button>
-            </div>
-            <button type="button" className="retela-location-current-button" onClick={useCurrentLocation} disabled={locating}>
-              {locating ? <Loader2 size={16} className="animate-spin" /> : <MapPin size={16} />}
-              Use My Current Location
-            </button>
-            {results.length ? (
-              <div className="retela-location-search-results">
-                {results.map((result) => (
-                  <button type="button" key={result.id} onClick={() => selectSearchResult(result)}>
-                    <MapPin size={15} />
-                    <span>{result.address}</span>
-                  </button>
-                ))}
-              </div>
-            ) : null}
-          </div>
-
-          <LightweightDeliveryMap location={draft} resolving={resolving} onSelect={(latitude, longitude) => reverseGeocode(latitude, longitude)} />
+          <StructuredLocationPicker
+            value={draft}
+            onChange={(location) => {
+              setValidationError("");
+              setDraft((current) => ({ ...location, landmark: current.landmark, notes: current.notes }));
+            }}
+            error={validationError}
+            label="Search delivery location"
+            placeholder="Street, barangay, municipality..."
+          />
 
           <div className="retela-location-fields">
-            <label>
-              <span>Selected Address</span>
-              <textarea value={draft.address} onChange={(event) => setDraft((current) => ({ ...current, address: event.target.value }))} placeholder="Selected delivery address" rows={2} />
-            </label>
             <label>
               <span>House / Building / Landmark</span>
               <input value={draft.landmark} onChange={(event) => setDraft((current) => ({ ...current, landmark: event.target.value }))} placeholder="Green gate beside barangay hall" />
@@ -1887,100 +1893,18 @@ function DeliveryLocationSelector({ initialLocation, onClose, onSave }) {
               <span>Delivery Notes</span>
               <input value={draft.notes} onChange={(event) => setDraft((current) => ({ ...current, notes: event.target.value }))} placeholder="Call when outside." />
             </label>
-            <label className="retela-location-default-toggle">
-              <input type="checkbox" checked={saveAsDefault} onChange={(event) => setSaveAsDefault(event.target.checked)} />
-              <span>Save as my default delivery location</span>
-            </label>
+            <p className="retela-location-persistence-note">This location will be saved to your customer profile and used for delivery pricing.</p>
           </div>
         </div>
 
         <div className="retela-location-selector-footer">
-          <button type="button" onClick={onClose}>Cancel</button>
-          <button type="submit"><Save size={16} /> Save Location</button>
+          <button type="button" onClick={onClose} disabled={saving}>Cancel</button>
+          <button type="submit" disabled={saving}>{saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />} {saving ? "Saving..." : "Save Location"}</button>
         </div>
       </motion.form>
     </motion.div>,
     document.body
   );
-}
-
-function LightweightDeliveryMap({ location, resolving, onSelect }) {
-  const [zoom, setZoom] = useState(16);
-  const [tileState, setTileState] = useState("loading");
-  const [tileVersion, setTileVersion] = useState(0);
-  const normalized = normalizeDeliveryLocation(location);
-  const latitude = normalized.latitude ?? defaultDeliveryCenter.latitude;
-  const longitude = normalized.longitude ?? defaultDeliveryCenter.longitude;
-  const center = projectToTile(latitude, longitude, zoom);
-  const tileX = Math.floor(center.x);
-  const tileY = Math.floor(center.y);
-  const offsetX = center.x - tileX;
-  const offsetY = center.y - tileY;
-  const tiles = [];
-  for (let y = -1; y <= 1; y += 1) {
-    for (let x = -1; x <= 1; x += 1) {
-      tiles.push({ x, y, tileX: tileX + x, tileY: tileY + y });
-    }
-  }
-
-  function handleMapClick(event) {
-    const rect = event.currentTarget.getBoundingClientRect();
-    const dx = (event.clientX - rect.left - rect.width / 2) / 256;
-    const dy = (event.clientY - rect.top - rect.height / 2) / 256;
-    const next = unprojectFromTile(center.x + dx, center.y + dy, zoom);
-    onSelect(next.latitude, next.longitude);
-  }
-
-  function retryTiles() {
-    setTileState("loading");
-    setTileVersion((value) => value + 1);
-  }
-
-  return (
-    <div className="retela-delivery-map-card">
-      <div className="retela-delivery-map" onClick={handleMapClick} role="button" tabIndex={0} aria-label="Tap map to move delivery pin">
-        {tileState !== "error" && tiles.map((tile) => (
-          <img
-            key={`${tile.tileX}-${tile.tileY}-${zoom}-${tileVersion}`}
-            src={osmTileUrl(zoom, tile.tileX, tile.tileY, tileVersion)}
-            alt=""
-            loading="lazy"
-            onLoad={() => setTileState((state) => state === "loading" ? "ready" : state)}
-            onError={() => { if (import.meta.env.DEV) console.warn("[map] tile load error"); setTileState("error"); }}
-            style={{
-              left: `calc(50% + ${(tile.x - offsetX) * 256}px)`,
-              top: `calc(50% + ${(tile.y - offsetY) * 256}px)`
-            }}
-          />
-        ))}
-        {tileState === "error" ? <div className="retela-map-status-overlay"><span>Map could not be loaded.</span><button type="button" onClick={(event) => { event.stopPropagation(); retryTiles(); }}>Retry</button></div> : null}
-        {tileState === "loading" ? <div className="retela-map-status-overlay is-loading"><Loader2 size={16} className="animate-spin" /> Loading map...</div> : null}
-        {tileState === "ready" ? <span className="retela-delivery-map-pin"><MapPin size={30} /></span> : null}
-        <div className="retela-delivery-map-tools">
-          <button type="button" onClick={(event) => { event.stopPropagation(); setZoom((value) => Math.min(18, value + 1)); }}>+</button>
-          <button type="button" onClick={(event) => { event.stopPropagation(); setZoom((value) => Math.max(12, value - 1)); }}>-</button>
-        </div>
-        {resolving ? <span className="retela-delivery-map-status"><Loader2 size={14} className="animate-spin" /> Resolving address</span> : null}
-      </div>
-      <p>Tap the map to move the pin. Use search or current location for faster positioning.</p>
-    </div>
-  );
-}
-
-function projectToTile(latitude, longitude, zoom) {
-  const latRad = (latitude * Math.PI) / 180;
-  const scale = 2 ** zoom;
-  return {
-    x: ((longitude + 180) / 360) * scale,
-    y: ((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * scale
-  };
-}
-
-function unprojectFromTile(x, y, zoom) {
-  const scale = 2 ** zoom;
-  const longitude = (x / scale) * 360 - 180;
-  const latitude = (Math.atan(Math.sinh(Math.PI * (1 - (2 * y) / scale))) * 180) / Math.PI;
-  return { latitude, longitude };
 }
 
 function PaymentDetailsPanel({ method, value, error, onChange }) {
@@ -2009,8 +1933,10 @@ function PaymentDetailsPanel({ method, value, error, onChange }) {
   );
 }
 
-function CheckoutSummaryModal({ items, pricing, paymentMethod, paymentDetails, paymentError, updatePaymentNumber, deliveryLocation, deliverySafetyPolicy, checkout, checkoutLoading, onClose }) {
+function CheckoutSummaryModal({ items, pricing, paymentMethod, paymentDetails, paymentError, updatePaymentNumber, deliveryLocation, shippingQuote, shippingQuoteLoading, fulfillmentMethod, deliverySafetyPolicy, checkout, checkoutLoading, onClose }) {
   const normalizedDeliveryLocation = normalizeDeliveryLocation(deliveryLocation);
+  const distanceLabel = formatDistanceKm(shippingQuote?.distanceKm);
+  const shippingUnavailable = fulfillmentMethod === "delivery" && (shippingQuoteLoading || !shippingQuote);
   return createPortal(
     <motion.div
       className="retela-checkout-modal-backdrop fixed inset-0 z-[175] grid place-items-center overflow-y-auto bg-black/45 p-4 backdrop-blur-xl"
@@ -2050,7 +1976,7 @@ function CheckoutSummaryModal({ items, pricing, paymentMethod, paymentDetails, p
           <SummaryLine label="Subtotal" value={money(pricing.subtotal)} />
           <SummaryLine label="Coupon Discount" value={`-${money(pricing.couponDiscount)}`} highlight />
           <SummaryLine label="Sales Discount" value={`-${money(pricing.saleDiscount)}`} highlight />
-          <SummaryLine label="Shipping Fee" value={money(pricing.shippingFee)} />
+          <SummaryLine label="Shipping" value={shippingFeeText(shippingQuote, shippingQuoteLoading)} />
           <SummaryLine label="Final Total" value={money(pricing.total)} strong />
         </div>
 
@@ -2060,6 +1986,9 @@ function CheckoutSummaryModal({ items, pricing, paymentMethod, paymentDetails, p
           {normalizedDeliveryLocation.landmark ? <p className="mt-2 break-words text-xs font-semibold text-white/58">Landmark: {normalizedDeliveryLocation.landmark}</p> : null}
           {normalizedDeliveryLocation.notes ? <p className="mt-1 break-words text-xs font-semibold text-white/58">Notes: {normalizedDeliveryLocation.notes}</p> : null}
           {hasDeliveryCoordinates(normalizedDeliveryLocation) ? <p className="mt-2 text-xs font-bold text-neonbrand">Exact map pin saved for this order.</p> : null}
+          {distanceLabel ? <p className="mt-2 text-xs font-semibold text-white/70">Distance from shop: {distanceLabel}</p> : null}
+          <p className="mt-1 text-xs font-bold text-neonbrand">Shipping: {shippingFeeText(shippingQuote, shippingQuoteLoading)}</p>
+          {shippingQuote?.reason ? <p className="mt-1 text-xs font-semibold text-white/70">Reason: {shippingQuote.reason}</p> : null}
         </div>
         <DeliverySafetyPolicyCard policy={deliverySafetyPolicy} compact />
 
@@ -2080,9 +2009,9 @@ function CheckoutSummaryModal({ items, pricing, paymentMethod, paymentDetails, p
 
         <div className="retela-checkout-modal-actions mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           <button type="button" onClick={onClose} disabled={checkoutLoading} className="rounded-2xl border border-white/10 bg-white/[0.06] px-5 py-3 text-sm font-bold text-white transition hover:text-neonbrand disabled:opacity-60">Cancel</button>
-          <Button type="button" onClick={checkout} disabled={checkoutLoading}>
-            {checkoutLoading ? <Loader2 size={17} className="animate-spin" /> : <ShoppingCart size={17} />}
-            {checkoutLoading && paymentMethod !== "cod" ? `Redirecting to ${paymentLabel(paymentMethod)}...` : checkoutLoading ? "Processing..." : "Confirm Checkout"}
+          <Button type="button" onClick={checkout} disabled={checkoutLoading || shippingUnavailable}>
+            {checkoutLoading || shippingUnavailable ? <Loader2 size={17} className="animate-spin" /> : <ShoppingCart size={17} />}
+            {shippingUnavailable ? "Updating shipping..." : checkoutLoading && paymentMethod !== "cod" ? `Redirecting to ${paymentLabel(paymentMethod)}...` : checkoutLoading ? "Processing..." : "Confirm Checkout"}
           </Button>
         </div>
       </motion.section>
@@ -3557,7 +3486,7 @@ function ReturnPolicyNotice() {
     { icon: CalendarDays, title: "Return Period", body: "Returns allowed within 7 days." },
     { icon: PackageCheck, title: "Item Condition", body: "Apparel must not be heavily damaged." },
     { icon: ShieldCheck, title: "Approval", body: "Refund approval depends on admin verification." },
-    { icon: WalletCards, title: "Fixed Shipping Fee", body: "Within your city: ₱50. Within your province: ₱80-₱100. Other regions: ₱120-₱180." }
+    { icon: WalletCards, title: "Location-based Shipping", body: "Nearby configured delivery areas may receive free shipping. The current outside-area fee is shown at checkout from your saved delivery location." }
   ];
   return (
     <div className="rounded-[20px] border border-emerald-100 bg-emerald-50/55 p-4">
@@ -3802,10 +3731,11 @@ function CustomerThemeSwitch({ theme, onChange }) {
   );
 }
 
-function Profile({ profile, profilePhoto, setProfilePhoto, saveProfile, onDeactivate, deactivating }) {
+function Profile({ profile, profilePhoto, setProfilePhoto, saveProfile, shippingQuote, shippingQuoteLoading, onDeactivate, deactivating }) {
   const [editing, setEditing] = useState(false);
   const [draftProfile, setDraftProfile] = useState(profile || {});
   const [savingProfile, setSavingProfile] = useState(false);
+  const [profileLocationError, setProfileLocationError] = useState("");
   const [photoPreview, setPhotoPreview] = useState("");
   const [verificationRecovery, setVerificationRecovery] = useState({ loading: true, verification: null, error: "", message: "" });
   const [governmentIdUploading, setGovernmentIdUploading] = useState(false);
@@ -3869,8 +3799,9 @@ function Profile({ profile, profilePhoto, setProfilePhoto, saveProfile, onDeacti
   }
 
   function startEditing() {
-    setDraftProfile(profile || {});
+    setDraftProfile({ ...(profile || {}), ...profileFieldsFromLocation(deliveryLocationFromProfile(profile)) });
     setProfilePhoto(null);
+    setProfileLocationError("");
     setEditing(true);
   }
 
@@ -3878,7 +3809,18 @@ function Profile({ profile, profilePhoto, setProfilePhoto, saveProfile, onDeacti
     if (savingProfile) return;
     setDraftProfile(profile || {});
     setProfilePhoto(null);
+    setProfileLocationError("");
     setEditing(false);
+  }
+
+  function updateDraftLocation(location) {
+    setDraftProfile((draft) => ({
+      ...draft,
+      ...profileFieldsFromLocation(location),
+      delivery_landmark: draft.delivery_landmark || "",
+      delivery_notes: draft.delivery_notes || ""
+    }));
+    setProfileLocationError("");
   }
 
   async function submitProfile(event) {
@@ -3891,6 +3833,12 @@ function Profile({ profile, profilePhoto, setProfilePhoto, saveProfile, onDeacti
     }
     if (nextUsername.length < 3 || nextUsername.length > 80) {
       dispatchCustomerToast({ type: "error", message: "Username must be 3 to 80 characters." });
+      return;
+    }
+    const locationError = locationValidationMessage(normalizeDeliveryLocation(draftProfile));
+    if (locationError) {
+      setProfileLocationError(locationError);
+      dispatchCustomerToast({ type: "error", message: locationError });
       return;
     }
     setSavingProfile(true);
@@ -4022,7 +3970,28 @@ function Profile({ profile, profilePhoto, setProfilePhoto, saveProfile, onDeacti
               <CustomerProfileField label="Phone Number" value={current.phone_number || ""} editing={editing} onChange={(value) => updateDraft("phone_number", value)} placeholder="Phone number" empty="Not set" />
               <CustomerProfileField label="Birthday" value={editing ? formatDateInput(current.birthday) : (current.birthday ? formatDate(current.birthday) : "")} editing={editing} onChange={(value) => updateDraft("birthday", value)} type="date" empty="Not set" />
               <CustomerProfileField label="Gender" value={current.gender || ""} editing={editing} onChange={(value) => updateDraft("gender", value)} select options={["Female", "Male", "Non-binary", "Prefer not to say"]} placeholder="Select gender" empty="Not set" />
-              <CustomerProfileField label="Complete Address / Location" value={current.location || ""} editing={editing} onChange={(value) => updateDraft("location", value)} placeholder="House/Street, Barangay, City, Province" empty="Not set" wide />
+              {editing ? (
+                <div className="customer-profile-field is-wide">
+                  <StructuredLocationPicker
+                    value={normalizeDeliveryLocation(draftProfile)}
+                    onChange={updateDraftLocation}
+                    error={profileLocationError}
+                    compact
+                    label="Complete Address / Location"
+                    placeholder="Search street, barangay, municipality..."
+                  />
+                </div>
+              ) : (
+                <CustomerProfileField label="Complete Address / Location" value={current.formatted_address || current.location || ""} editing={false} empty="Not set" wide />
+              )}
+              {!editing && (shippingQuote || shippingQuoteLoading) ? (
+                <div className="customer-profile-field is-wide">
+                  <span>Current Shipping</span>
+                  <strong>{shippingFeeText(shippingQuote, shippingQuoteLoading)}</strong>
+                  {formatDistanceKm(shippingQuote?.distanceKm) ? <small>{formatDistanceKm(shippingQuote.distanceKm)} from the shop</small> : null}
+                  {shippingQuote?.reason ? <small>{shippingQuote.reason}</small> : null}
+                </div>
+              ) : null}
             </div>
           </form>
 

@@ -17,6 +17,7 @@ import {
   Moon,
   Package,
   Palette,
+  Plus,
   RefreshCw,
   RotateCcw,
   Save,
@@ -29,7 +30,8 @@ import {
   Trash2,
   Upload,
   Users,
-  WalletCards
+  WalletCards,
+  X
 } from "lucide-react";
 import { api, API_URL, cachedGet, clearGetCache, getApiErrorMessage } from "../api/client";
 import { osmTileUrl } from "../config/maps";
@@ -47,6 +49,9 @@ const defaultSettings = {
     emailAddress: "",
     shopAddress: "",
     shopMunicipality: "",
+    shopProvince: "",
+    shopRegion: "",
+    shopPlaceId: "",
     shopLatitude: null,
     shopLongitude: null,
     currency: "PHP",
@@ -87,6 +92,9 @@ const defaultSettings = {
     paymentVerificationAutomation: true,
     shippingFeeType: "fixed",
     shippingFee: 0,
+    freeDeliveryMunicipalities: ["Midsayap", "Libungan", "Pigcawayan"],
+    freeDeliveryRadiusKm: 15,
+    outsideAreaShippingFee: 89,
     coupons: []
   },
   security: {
@@ -250,6 +258,22 @@ function validateSettings(settings, scope = "all") {
     if (!settings.payment.codEnabled && !settings.payment.onlinePaymentEnabled) {
       errors["payment.methods"] = "Enable at least one payment method.";
     }
+    const freeRadius = Number(settings.payment.freeDeliveryRadiusKm);
+    if (!Number.isFinite(freeRadius) || freeRadius < 0 || freeRadius > 1000) {
+      errors["payment.freeDeliveryRadiusKm"] = "Free delivery radius must be between 0 and 1,000 km.";
+    }
+    const outsideFee = Number(settings.payment.outsideAreaShippingFee);
+    if (!Number.isFinite(outsideFee) || outsideFee < 0 || outsideFee > 99999) {
+      errors["payment.outsideAreaShippingFee"] = "Outside shipping fee must be between PHP 0 and PHP 99,999.";
+    }
+    const municipalities = Array.isArray(settings.payment.freeDeliveryMunicipalities)
+      ? settings.payment.freeDeliveryMunicipalities
+      : [];
+    if (municipalities.length > 100) {
+      errors["payment.freeDeliveryMunicipalities"] = "Add no more than 100 municipalities.";
+    } else if (municipalities.some((municipality) => !String(municipality || "").trim() || String(municipality).trim().length > 120)) {
+      errors["payment.freeDeliveryMunicipalities"] = "Municipality names must be 1 to 120 characters.";
+    }
   }
 
   if (includes("security")) {
@@ -281,14 +305,38 @@ export default function AdminSettingsPage({ onChange }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState("");
   const [toast, setToast] = useState(null);
+  const [municipalityDraft, setMunicipalityDraft] = useState("");
+  const [deliveryAreaFilter, setDeliveryAreaFilter] = useState("nearby");
+  const [deliveryCustomerSearch, setDeliveryCustomerSearch] = useState("");
+  const [deliveryCustomers, setDeliveryCustomers] = useState([]);
+  const [deliverySummary, setDeliverySummary] = useState({ nearby: 0, outside: 0 });
+  const [deliveryCustomersLoading, setDeliveryCustomersLoading] = useState(true);
+  const [deliveryCustomersError, setDeliveryCustomersError] = useState("");
+  const [removeQrConfirmOpen, setRemoveQrConfirmOpen] = useState(false);
+  const [gcashQrVersion, setGcashQrVersion] = useState(0);
   const [userTheme, setUserTheme] = useState(() => readUserTheme(user));
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
   const showBlockingLoader = useBlockingLoader(loading);
   const restoreInputRef = useRef(null);
+  const shopLocationRef = useRef(null);
   const toastTimerRef = useRef(null);
 
   const shopLogoPreview = useMemo(() => files.shopLogo ? URL.createObjectURL(files.shopLogo) : assetUrl(settings.general.shopLogoUrl), [files.shopLogo, settings.general.shopLogoUrl]);
-  const gcashQrPreview = useMemo(() => files.gcashQr ? URL.createObjectURL(files.gcashQr) : assetUrl(settings.payment.gcashQrUrl), [files.gcashQr, settings.payment.gcashQrUrl]);
+  const gcashQrPreview = useMemo(() => {
+    if (files.gcashQr) return URL.createObjectURL(files.gcashQr);
+    const savedUrl = assetUrl(settings.payment.gcashQrUrl);
+    if (!savedUrl || !gcashQrVersion) return savedUrl;
+    return `${savedUrl}${savedUrl.includes("?") ? "&" : "?"}v=${gcashQrVersion}`;
+  }, [files.gcashQr, gcashQrVersion, settings.payment.gcashQrUrl]);
+  const filteredDeliveryCustomers = useMemo(() => {
+    const search = deliveryCustomerSearch.trim().toLowerCase();
+    return deliveryCustomers.filter((customer) => {
+      if (String(customer.zone || "").toLowerCase() !== deliveryAreaFilter) return false;
+      if (!search) return true;
+      return [customer.name, customer.municipality, customer.address]
+        .some((value) => String(value || "").toLowerCase().includes(search));
+    });
+  }, [deliveryAreaFilter, deliveryCustomerSearch, deliveryCustomers]);
 
   useEffect(() => {
     let cancelled = false;
@@ -306,6 +354,22 @@ export default function AdminSettingsPage({ onChange }) {
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
+      });
+    cachedGet("/settings/delivery-customers", {}, { cacheMs: 10000, retries: 1 })
+      .then(({ data }) => {
+        if (cancelled) return;
+        setDeliveryCustomers(Array.isArray(data?.customers) ? data.customers : []);
+        setDeliverySummary({
+          nearby: Number(data?.summary?.nearby || 0),
+          outside: Number(data?.summary?.outside || 0)
+        });
+        setDeliveryCustomersError("");
+      })
+      .catch((error) => {
+        if (!cancelled) setDeliveryCustomersError(getApiErrorMessage(error, "Could not load delivery-area customers."));
+      })
+      .finally(() => {
+        if (!cancelled) setDeliveryCustomersLoading(false);
       });
     return () => {
       cancelled = true;
@@ -331,6 +395,24 @@ export default function AdminSettingsPage({ onChange }) {
     toastTimerRef.current = window.setTimeout(() => setToast(null), 3600);
   }
 
+  async function refreshDeliveryCustomers({ showLoading = false } = {}) {
+    if (showLoading) setDeliveryCustomersLoading(true);
+    try {
+      clearGetCache("/settings/delivery-customers");
+      const { data } = await api.get("/settings/delivery-customers");
+      setDeliveryCustomers(Array.isArray(data?.customers) ? data.customers : []);
+      setDeliverySummary({
+        nearby: Number(data?.summary?.nearby || 0),
+        outside: Number(data?.summary?.outside || 0)
+      });
+      setDeliveryCustomersError("");
+    } catch (error) {
+      setDeliveryCustomersError(getApiErrorMessage(error, "Could not load delivery-area customers."));
+    } finally {
+      if (showLoading) setDeliveryCustomersLoading(false);
+    }
+  }
+
   function updateSetting(section, key, value) {
     setSettings((current) => {
       const next = { ...current, [section]: { ...current[section], [key]: value } };
@@ -343,8 +425,76 @@ export default function AdminSettingsPage({ onChange }) {
     setErrors((current) => ({ ...current, [`${section}.${key}`]: "" }));
   }
 
+  function updateShopLocationText(key, value) {
+    setSettings((current) => ({
+      ...current,
+      general: {
+        ...current.general,
+        [key]: value,
+        shopPlaceId: "",
+        shopLatitude: null,
+        shopLongitude: null
+      }
+    }));
+    setErrors((current) => ({ ...current, "general.shopLocation": "" }));
+  }
+
   function updateFile(key, file) {
     setFiles((current) => ({ ...current, [key]: file }));
+  }
+
+  function addFreeDeliveryMunicipality(event) {
+    event?.preventDefault();
+    const municipality = municipalityDraft.trim().replace(/\s+/g, " ");
+    if (!municipality) return;
+    if (municipality.length > 120) {
+      setErrors((current) => ({ ...current, "payment.freeDeliveryMunicipalities": "Municipality names must be 1 to 120 characters." }));
+      return;
+    }
+    const currentMunicipalities = Array.isArray(settings.payment.freeDeliveryMunicipalities)
+      ? settings.payment.freeDeliveryMunicipalities
+      : [];
+    if (currentMunicipalities.length >= 100) {
+      setErrors((current) => ({ ...current, "payment.freeDeliveryMunicipalities": "Add no more than 100 municipalities." }));
+      return;
+    }
+    if (currentMunicipalities.some((entry) => String(entry).trim().toLowerCase() === municipality.toLowerCase())) {
+      setErrors((current) => ({ ...current, "payment.freeDeliveryMunicipalities": `${municipality} is already included.` }));
+      return;
+    }
+    updateSetting("payment", "freeDeliveryMunicipalities", [...currentMunicipalities, municipality]);
+    setMunicipalityDraft("");
+  }
+
+  function removeFreeDeliveryMunicipality(index) {
+    const currentMunicipalities = Array.isArray(settings.payment.freeDeliveryMunicipalities)
+      ? settings.payment.freeDeliveryMunicipalities
+      : [];
+    updateSetting("payment", "freeDeliveryMunicipalities", currentMunicipalities.filter((_, itemIndex) => itemIndex !== index));
+  }
+
+  function editShopLocation() {
+    shopLocationRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    window.setTimeout(() => shopLocationRef.current?.querySelector("input")?.focus(), 350);
+  }
+
+  async function removeGcashQr() {
+    setSaving("gcashQrRemove");
+    try {
+      const { data } = await api.delete("/settings/gcash-qr");
+      clearGetCache("/settings");
+      const hydrated = withDefaults(data.settings);
+      setSettings(hydrated);
+      setFiles((current) => ({ ...current, gcashQr: null }));
+      setGcashQrVersion(0);
+      setRemoveQrConfirmOpen(false);
+      window.dispatchEvent(new CustomEvent("retela:branding-settings", { detail: hydrated }));
+      pushToast("success", "GCash QR removed.");
+    } catch (error) {
+      pushToast("error", getApiErrorMessage(error, "Could not remove the GCash QR."));
+    } finally {
+      setSaving("");
+    }
   }
 
   function updateCoupon(index, key, value) {
@@ -386,6 +536,17 @@ export default function AdminSettingsPage({ onChange }) {
     const payload = JSON.parse(JSON.stringify(settings));
     delete payload.databaseStatus;
     if (!payload.ai.openaiApiKey.trim()) payload.ai.openaiApiKey = "";
+    payload.payment.freeDeliveryMunicipalities = Array.from(new Map(
+      (Array.isArray(payload.payment.freeDeliveryMunicipalities) ? payload.payment.freeDeliveryMunicipalities : [])
+        .map((value) => String(value || "").trim().replace(/\s+/g, " "))
+        .filter(Boolean)
+        .map((value) => [value.toLowerCase(), value])
+    ).values());
+    payload.payment.freeDeliveryRadiusKm = Number(payload.payment.freeDeliveryRadiusKm || 0);
+    payload.payment.outsideAreaShippingFee = Number(payload.payment.outsideAreaShippingFee || 0);
+    payload.payment.shippingFeeType = "fixed";
+    payload.payment.shippingFeeEnabled = true;
+    payload.payment.shippingFee = payload.payment.outsideAreaShippingFee;
     if (Array.isArray(payload.payment?.coupons)) {
       payload.payment.coupons = payload.payment.coupons.filter((coupon) => String(coupon.code || "").trim());
     }
@@ -404,6 +565,7 @@ export default function AdminSettingsPage({ onChange }) {
       return;
     }
 
+    const replacingGcashQr = Boolean(files.gcashQr) && (scope === "all" || scope === "payment");
     setSaving(scope);
     try {
       const { data } = await api.put("/settings", buildPayload(scope), { headers: { "Content-Type": "multipart/form-data" } });
@@ -414,9 +576,11 @@ export default function AdminSettingsPage({ onChange }) {
         shopLogo: scope === "all" || scope === "general" ? null : current.shopLogo,
         gcashQr: scope === "all" || scope === "payment" ? null : current.gcashQr
       }));
+      if (replacingGcashQr) setGcashQrVersion(Date.now());
       localStorage.setItem("retela_sidebar_collapsed", String(hydrated.appearance.sidebarCollapse));
       window.dispatchEvent(new CustomEvent("retela:appearance-settings", { detail: { sidebarCollapse: hydrated.appearance.sidebarCollapse } }));
       window.dispatchEvent(new CustomEvent("retela:branding-settings", { detail: hydrated }));
+      if (scope === "all" || scope === "general" || scope === "payment") void refreshDeliveryCustomers();
       pushToast("success", scope === "all" ? "All settings saved." : `${sectionTitles[scope] || titleCase(scope)} saved.`);
     } catch (error) {
       pushToast("error", getApiErrorMessage(error, "Could not save settings."));
@@ -437,6 +601,7 @@ export default function AdminSettingsPage({ onChange }) {
       localStorage.setItem("retela_sidebar_collapsed", String(hydrated.appearance.sidebarCollapse));
       window.dispatchEvent(new CustomEvent("retela:appearance-settings", { detail: { sidebarCollapse: hydrated.appearance.sidebarCollapse } }));
       window.dispatchEvent(new CustomEvent("retela:branding-settings", { detail: hydrated }));
+      void refreshDeliveryCustomers();
       pushToast("success", "Settings reset to defaults.");
     } catch (error) {
       pushToast("error", getApiErrorMessage(error, "Could not reset settings."));
@@ -556,9 +721,10 @@ export default function AdminSettingsPage({ onChange }) {
             <TextArea label="Shop Description" value={settings.general.shopDescription} onChange={(value) => updateSetting("general", "shopDescription", value)} className="md:col-span-2" />
             <TextInput label="Contact Number" value={settings.general.contactNumber} error={errors["general.contactNumber"]} onChange={(value) => updateSetting("general", "contactNumber", value)} />
             <TextInput label="Email Address" type="email" value={settings.general.emailAddress} error={errors["general.emailAddress"]} onChange={(value) => updateSetting("general", "emailAddress", value)} />
-            <TextInput label="Shop Address" value={settings.general.shopAddress} onChange={(value) => updateSetting("general", "shopAddress", value)} className="md:col-span-2" />
-            <TextInput label="Shop Municipality" value={settings.general.shopMunicipality} onChange={(value) => updateSetting("general", "shopMunicipality", value)} placeholder="Example: Midsayap" />
+            <TextInput label="Shop Address" value={settings.general.shopAddress} onChange={(value) => updateShopLocationText("shopAddress", value)} className="md:col-span-2" />
+            <TextInput label="Shop Municipality" value={settings.general.shopMunicipality} onChange={(value) => updateShopLocationText("shopMunicipality", value)} placeholder="Example: Midsayap" />
             <ShopLocationSetting
+              containerRef={shopLocationRef}
               value={settings.general}
               error={errors["general.shopLocation"]}
               onChange={(next) => {
@@ -567,6 +733,10 @@ export default function AdminSettingsPage({ onChange }) {
                   general: {
                     ...current.general,
                     shopAddress: next.shopAddress,
+                    shopMunicipality: next.shopMunicipality,
+                    shopProvince: next.shopProvince,
+                    shopRegion: next.shopRegion,
+                    shopPlaceId: next.shopPlaceId,
                     shopLatitude: next.shopLatitude,
                     shopLongitude: next.shopLongitude
                   }
@@ -618,19 +788,81 @@ export default function AdminSettingsPage({ onChange }) {
           </ToggleGrid>
         </SettingsCard>
 
-        <SettingsCard section="payment" saving={saving} onSave={saveSettings}>
-          <div className="grid gap-4 md:grid-cols-2">
-            <TextInput label="GCash Number" value={settings.payment.gcashNumber} error={errors["payment.gcashNumber"]} onChange={(value) => updateSetting("payment", "gcashNumber", value)} />
-            <FileInput label="GCash QR Upload" file={files.gcashQr} preview={gcashQrPreview} onChange={(file) => updateFile("gcashQr", file)} />
-            <SelectInput label="Shipping Fee Type" value={settings.payment.shippingFeeType || "fixed"} options={["fixed", "free"]} onChange={(value) => updateSetting("payment", "shippingFeeType", value)} />
-            <NumberInput label="Fixed Shipping Fee" value={settings.payment.shippingFee ?? 0} onChange={(value) => updateSetting("payment", "shippingFee", value)} />
-            <div className="settings-toggle-grid md:col-span-2 md:grid-cols-3">
-              <ToggleSwitch label="COD" description="Cash on Delivery" checked={settings.payment.codEnabled} onChange={(value) => updateSetting("payment", "codEnabled", value)} />
-              <ToggleSwitch label="Online Payment" description="PayMongo / GCash" checked={settings.payment.onlinePaymentEnabled} onChange={(value) => updateSetting("payment", "onlinePaymentEnabled", value)} />
-              <ToggleSwitch label="Payment Verification" description="Automatic verification" checked={settings.payment.paymentVerificationAutomation} onChange={(value) => updateSetting("payment", "paymentVerificationAutomation", value)} />
-            </div>
-            <CouponManager coupons={settings.payment.coupons || []} onAdd={addCoupon} onRemove={removeCoupon} onChange={updateCoupon} />
-            {errors["payment.methods"] ? <ErrorText className="md:col-span-2">{errors["payment.methods"]}</ErrorText> : null}
+        <SettingsCard section="payment" saving={saving} onSave={saveSettings} className="xl:col-span-2">
+          <div className="grid gap-6">
+            <section className="grid gap-4">
+              <SettingsSectionHeading eyebrow="GCash" title="GCash Payment Details" />
+              <div className="grid gap-4 lg:grid-cols-[minmax(240px,0.8fr)_minmax(0,1.2fr)]">
+                <TextInput label="GCash Number" value={settings.payment.gcashNumber} error={errors["payment.gcashNumber"]} onChange={(value) => updateSetting("payment", "gcashNumber", value)} />
+                <GcashQrInput
+                  file={files.gcashQr}
+                  preview={gcashQrPreview}
+                  hasPersistedQr={Boolean(settings.payment.gcashQrUrl)}
+                  onChange={(file) => updateFile("gcashQr", file)}
+                  onRemove={() => setRemoveQrConfirmOpen(true)}
+                />
+              </div>
+            </section>
+
+            <section className="grid gap-4 border-t border-white/10 pt-6">
+              <SettingsSectionHeading eyebrow="Delivery & Shipping" title="Location-based Delivery" />
+              <ShopLocationSummary value={settings.general} onEdit={editShopLocation} />
+              <MunicipalityEditor
+                values={settings.payment.freeDeliveryMunicipalities || []}
+                draft={municipalityDraft}
+                error={errors["payment.freeDeliveryMunicipalities"]}
+                onDraftChange={(value) => {
+                  setMunicipalityDraft(value);
+                  setErrors((current) => ({ ...current, "payment.freeDeliveryMunicipalities": "" }));
+                }}
+                onAdd={addFreeDeliveryMunicipality}
+                onRemove={removeFreeDeliveryMunicipality}
+              />
+              <div className="grid gap-4 md:grid-cols-3">
+                <ReadOnlySetting label="Nearby Shipping Fee" value="PHP 0.00" detail="Free delivery area" />
+                <NumberInput
+                  label="Free Delivery Radius"
+                  suffix="km"
+                  value={settings.payment.freeDeliveryRadiusKm ?? 15}
+                  error={errors["payment.freeDeliveryRadiusKm"]}
+                  onChange={(value) => updateSetting("payment", "freeDeliveryRadiusKm", Number(value))}
+                />
+                <NumberInput
+                  label="Outside Area Shipping Fee"
+                  prefix="PHP"
+                  value={settings.payment.outsideAreaShippingFee ?? 89}
+                  error={errors["payment.outsideAreaShippingFee"]}
+                  onChange={(value) => updateSetting("payment", "outsideAreaShippingFee", Number(value))}
+                />
+              </div>
+            </section>
+
+            <section className="grid gap-4 border-t border-white/10 pt-6">
+              <SettingsSectionHeading eyebrow="Payment Options" title="Available Checkout Methods" />
+              <div className="settings-toggle-grid md:grid-cols-3">
+                <ToggleSwitch label="COD" description="Cash on Delivery" checked={settings.payment.codEnabled} onChange={(value) => updateSetting("payment", "codEnabled", value)} />
+                <ToggleSwitch label="Online Payment" description="PayMongo / GCash" checked={settings.payment.onlinePaymentEnabled} onChange={(value) => updateSetting("payment", "onlinePaymentEnabled", value)} />
+                <ToggleSwitch label="Payment Verification" description="Automatic verification" checked={settings.payment.paymentVerificationAutomation} onChange={(value) => updateSetting("payment", "paymentVerificationAutomation", value)} />
+              </div>
+              {errors["payment.methods"] ? <ErrorText>{errors["payment.methods"]}</ErrorText> : null}
+            </section>
+
+            <DeliveryAreaSummary
+              summary={deliverySummary}
+              customers={filteredDeliveryCustomers}
+              filter={deliveryAreaFilter}
+              search={deliveryCustomerSearch}
+              loading={deliveryCustomersLoading}
+              error={deliveryCustomersError}
+              outsideFee={settings.payment.outsideAreaShippingFee ?? 0}
+              onFilterChange={setDeliveryAreaFilter}
+              onSearchChange={setDeliveryCustomerSearch}
+              onRetry={() => refreshDeliveryCustomers({ showLoading: true })}
+            />
+
+            <section className="border-t border-white/10 pt-6">
+              <CouponManager coupons={settings.payment.coupons || []} onAdd={addCoupon} onRemove={removeCoupon} onChange={updateCoupon} />
+            </section>
           </div>
         </SettingsCard>
 
@@ -760,6 +992,13 @@ export default function AdminSettingsPage({ onChange }) {
             onClose={() => setClearConfirmOpen(false)}
           />
         ) : null}
+        {removeQrConfirmOpen ? (
+          <RemoveQrModal
+            saving={saving === "gcashQrRemove"}
+            onConfirm={removeGcashQr}
+            onClose={() => setRemoveQrConfirmOpen(false)}
+          />
+        ) : null}
       </AnimatePresence>
     </div>
   );
@@ -859,8 +1098,234 @@ function ClearDemoDataModal({ saving, onConfirm, onClose }) {
   );
 }
 
+function RemoveQrModal({ saving, onConfirm, onClose }) {
+  return (
+    <motion.div
+      className="retela-modal-backdrop z-[175] bg-black/70"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      onMouseDown={saving ? undefined : onClose}
+    >
+      <motion.div
+        className="retela-modal-card retela-modal-dark modal-sm"
+        initial={{ opacity: 0, scale: 0.94, y: 18 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.94, y: 18 }}
+        transition={{ duration: 0.22, ease: "easeOut" }}
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="retela-modal-body flex items-start gap-4">
+          <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl border border-rose-300/25 bg-rose-300/10 text-rose-200">
+            <Trash2 size={22} />
+          </span>
+          <div className="min-w-0">
+            <p className="text-xs font-bold uppercase tracking-[0.18em] text-rose-200/75">GCash payment</p>
+            <h3 className="mt-2 font-display text-2xl font-bold">Remove GCash QR?</h3>
+            <p className="mt-2 text-sm leading-6 text-white/58">The saved QR will be removed from Payment Settings. This does not change PayMongo, QRPh, or other payment options.</p>
+          </div>
+        </div>
+        <div className="retela-modal-footer">
+          <button type="button" disabled={saving} onClick={onClose} className="rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm font-bold text-white transition hover:border-neonbrand/45 hover:text-neonbrand disabled:cursor-not-allowed disabled:opacity-60">
+            Cancel
+          </button>
+          <button type="button" disabled={saving} onClick={onConfirm} className="inline-flex items-center justify-center gap-2 rounded-2xl border border-rose-300/30 bg-rose-400/15 px-4 py-3 text-sm font-bold text-rose-100 transition hover:bg-rose-400/25 disabled:cursor-not-allowed disabled:opacity-60">
+            {saving ? <Loader2 size={17} className="animate-spin" /> : <Trash2 size={17} />}
+            {saving ? "Removing..." : "Remove QR"}
+          </button>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
 function ToggleGrid({ children }) {
   return <div className="settings-toggle-grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3">{children}</div>;
+}
+
+function SettingsSectionHeading({ eyebrow, title }) {
+  return (
+    <div>
+      <p className="text-xs font-bold uppercase tracking-[0.16em] text-neonbrand/75">{eyebrow}</p>
+      <h3 className="mt-1 text-lg font-bold text-white">{title}</h3>
+    </div>
+  );
+}
+
+function GcashQrInput({ file, preview, hasPersistedQr, onChange, onRemove }) {
+  return (
+    <div className="grid min-w-0 gap-2">
+      <span className="text-xs font-bold uppercase tracking-[0.16em] text-white/45">GCash QR</span>
+      <div className="flex min-w-0 flex-col gap-4 rounded-2xl border border-neonbrand/20 bg-neonbrand/5 p-4 sm:flex-row sm:items-center">
+        {preview ? (
+          <img src={preview} className="h-28 w-28 shrink-0 rounded-2xl border border-white/10 bg-white object-contain p-2" alt="Saved GCash QR code" />
+        ) : (
+          <span className="grid h-28 w-28 shrink-0 place-items-center rounded-2xl border border-dashed border-white/15 bg-black/20 text-white/35">
+            <Upload size={24} />
+          </span>
+        )}
+        <div className="min-w-0 flex-1">
+          <strong className="block break-words text-sm text-white">
+            {file ? file.name : hasPersistedQr ? "Saved GCash QR" : "No GCash QR uploaded"}
+          </strong>
+          <span className="mt-1 block text-xs leading-5 text-white/45">
+            {file ? "New QR ready to save." : hasPersistedQr ? "Loaded from saved Payment Settings." : "PNG, JPG, or WEBP up to 5MB."}
+          </span>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <label className="relative inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-neonbrand/30 bg-neonbrand/10 px-3 py-2 text-xs font-bold text-neonbrand transition hover:bg-neonbrand/15">
+              <Upload size={15} />
+              {preview ? "Replace QR" : "Upload QR"}
+              <input type="file" accept="image/png,image/jpeg,image/webp" className="absolute inset-0 cursor-pointer opacity-0" onChange={(event) => onChange(event.target.files?.[0] || null)} />
+            </label>
+            {hasPersistedQr ? (
+              <button type="button" onClick={onRemove} className="inline-flex items-center justify-center gap-2 rounded-xl border border-rose-300/25 bg-rose-300/10 px-3 py-2 text-xs font-bold text-rose-200 transition hover:bg-rose-300/20">
+                <Trash2 size={15} /> Remove QR
+              </button>
+            ) : null}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ShopLocationSummary({ value, onEdit }) {
+  const latitude = finiteCoordinate(value.shopLatitude);
+  const longitude = finiteCoordinate(value.shopLongitude);
+  const hasExactPin = latitude !== null && longitude !== null;
+  const area = [value.shopMunicipality, value.shopProvince, value.shopRegion].map((item) => String(item || "").trim()).filter(Boolean).join(", ");
+  const address = String(value.shopAddress || area || "No shop location set").trim();
+  return (
+    <div className="flex flex-col gap-3 rounded-2xl border border-neonbrand/20 bg-neonbrand/10 p-4 sm:flex-row sm:items-center">
+      <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl border border-neonbrand/25 bg-black/20 text-neonbrand">
+        <MapPin size={20} />
+      </span>
+      <div className="min-w-0 flex-1">
+        <span className="block text-xs font-bold uppercase tracking-[0.16em] text-neonbrand/70">Shop Location</span>
+        <strong className="mt-1 block break-words text-sm text-white">{address}</strong>
+        <span className="mt-1 block text-xs text-white/48">{hasExactPin ? "Exact map pin saved" : "Set an exact map pin for distance calculations"}</span>
+      </div>
+      <button type="button" onClick={onEdit} className="inline-flex min-h-10 shrink-0 items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.07] px-3 py-2 text-xs font-bold text-white transition hover:border-neonbrand/40 hover:text-neonbrand">
+        <MapPin size={15} /> {hasExactPin ? "Edit Shop Location" : "Set Shop Location"}
+      </button>
+    </div>
+  );
+}
+
+function MunicipalityEditor({ values, draft, error, onDraftChange, onAdd, onRemove }) {
+  const municipalities = Array.isArray(values) ? values : [];
+  return (
+    <div className="grid gap-3 rounded-2xl border border-white/10 bg-white/[0.045] p-4">
+      <div>
+        <span className="block text-xs font-bold uppercase tracking-[0.16em] text-white/45">Free / Nearby Delivery Area</span>
+        <p className="mt-1 text-sm text-white/55">Customers in these municipalities qualify for free delivery.</p>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {municipalities.length ? municipalities.map((municipality, index) => (
+          <span key={`${municipality}-${index}`} className="inline-flex min-h-9 items-center gap-2 rounded-xl border border-neonbrand/25 bg-neonbrand/10 px-3 py-1.5 text-sm font-bold text-neonbrand">
+            {municipality}
+            <button type="button" onClick={() => onRemove(index)} className="rounded-lg p-0.5 text-neonbrand/70 transition hover:bg-neonbrand/15 hover:text-neonbrand" aria-label={`Remove ${municipality}`}>
+              <X size={14} />
+            </button>
+          </span>
+        )) : <span className="text-sm text-white/45">No municipalities added. The radius rule will still apply.</span>}
+      </div>
+      <form className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]" onSubmit={onAdd}>
+        <input className={controlClasses(error)} value={draft} onChange={(event) => onDraftChange(event.target.value)} placeholder="Add municipality" maxLength={120} />
+        <button type="submit" className="gradient-btn inline-flex min-h-12 items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-bold">
+          <Plus size={16} /> Add municipality
+        </button>
+      </form>
+      {error ? <ErrorText>{error}</ErrorText> : null}
+    </div>
+  );
+}
+
+function ReadOnlySetting({ label, value, detail }) {
+  return (
+    <div className="grid min-w-0 gap-2">
+      <span className="text-xs font-bold uppercase tracking-[0.16em] text-white/45">{label}</span>
+      <div className="flex min-h-12 items-center justify-between gap-3 rounded-2xl border border-neonbrand/20 bg-neonbrand/10 px-4 py-3">
+        <strong className="text-sm text-neonbrand">{value}</strong>
+        <span className="text-xs font-semibold text-white/45">{detail}</span>
+      </div>
+    </div>
+  );
+}
+
+function DeliveryAreaSummary({ summary, customers, filter, search, loading, error, outsideFee, onFilterChange, onSearchChange, onRetry }) {
+  return (
+    <section className="grid gap-4 border-t border-white/10 pt-6">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+        <SettingsSectionHeading eyebrow="Delivery Area Summary" title="Customer Delivery Classification" />
+        <div className="grid grid-cols-2 gap-2 sm:min-w-72">
+          <SummaryCount label="Nearby / Free" value={summary.nearby} active={filter === "nearby"} onClick={() => onFilterChange("nearby")} />
+          <SummaryCount label="Outside" value={summary.outside} active={filter === "outside"} onClick={() => onFilterChange("outside")} />
+        </div>
+      </div>
+      <label className="flex min-h-12 items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-2 text-white focus-within:border-neonbrand/50 focus-within:ring-4 focus-within:ring-neonbrand/10">
+        <Search size={16} className="shrink-0 text-neonbrand" />
+        <input className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-white/35" value={search} onChange={(event) => onSearchChange(event.target.value)} placeholder="Search customer or municipality" />
+      </label>
+      {loading ? (
+        <div className="grid gap-2">
+          {[1, 2, 3].map((item) => <div key={item} className="skeleton min-h-16 rounded-2xl" />)}
+        </div>
+      ) : error ? (
+        <div className="flex flex-col gap-3 rounded-2xl border border-rose-300/20 bg-rose-400/10 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-sm font-semibold text-rose-100">{error}</p>
+          <button type="button" onClick={onRetry} className="inline-flex items-center justify-center gap-2 rounded-xl border border-rose-200/25 px-3 py-2 text-xs font-bold text-rose-100">
+            <RefreshCw size={14} /> Retry
+          </button>
+        </div>
+      ) : customers.length ? (
+        <div className="max-h-80 overflow-y-auto rounded-2xl border border-white/10 bg-black/15">
+          {customers.map((customer) => {
+            const distance = Number(customer.distanceKm);
+            const hasDistance = customer.distanceKm !== null && customer.distanceKm !== undefined && customer.distanceKm !== "" && Number.isFinite(distance);
+            const outside = String(customer.zone || "").toLowerCase() === "outside";
+            const hasCustomerFee = customer.shippingFee !== null && customer.shippingFee !== undefined && customer.shippingFee !== "" && Number.isFinite(Number(customer.shippingFee));
+            const fee = hasCustomerFee ? Number(customer.shippingFee) : Number(outsideFee || 0);
+            return (
+              <div key={customer.id} className="grid gap-2 border-b border-white/[0.08] p-4 last:border-b-0 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+                <div className="min-w-0">
+                  <strong className="block truncate text-sm text-white">{customer.name || "Customer"}</strong>
+                  <span className="mt-1 block break-words text-xs text-white/52">
+                    {customer.municipality || customer.address || "Location not provided"}{hasDistance ? ` | ${distance.toFixed(1)} km` : ""}
+                  </span>
+                  <span className="mt-1 block text-xs text-white/[0.38]">{shippingReasonLabel(customer.shippingRule || customer.reason, outside)}</span>
+                </div>
+                <strong className={`text-sm ${outside ? "text-white/80" : "text-neonbrand"}`}>{outside ? formatPhp(fee) : "FREE"}</strong>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <p className="rounded-2xl border border-dashed border-white/10 bg-white/[0.035] p-5 text-center text-sm text-white/45">No {filter === "nearby" ? "nearby" : "outside-area"} customers match this search.</p>
+      )}
+    </section>
+  );
+}
+
+function SummaryCount({ label, value, active, onClick }) {
+  return (
+    <button type="button" onClick={onClick} className={`min-h-14 rounded-2xl border px-3 py-2 text-left transition ${active ? "border-neonbrand/40 bg-neonbrand/15 text-neonbrand" : "border-white/10 bg-white/[0.05] text-white/55 hover:border-neonbrand/25"}`} aria-pressed={active}>
+      <span className="block text-[11px] font-bold uppercase tracking-[0.12em]">{label}</span>
+      <strong className="mt-1 block text-lg text-white">{Number(value || 0)}</strong>
+    </button>
+  );
+}
+
+function shippingReasonLabel(reason, outside) {
+  const normalized = String(reason || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+  if (["municipality", "free_municipality", "nearby_municipality"].includes(normalized)) return "Nearby delivery area";
+  if (["radius", "distance", "free_radius"].includes(normalized)) return "Within free delivery radius";
+  if (normalized === "outside_area" || normalized === "outside") return "Outside nearby delivery area";
+  return reason || (outside ? "Outside nearby delivery area" : "Nearby delivery area");
+}
+
+function formatPhp(value) {
+  return `PHP ${Number(value || 0).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 function FieldShell({ label, error, children, className = "" }) {
@@ -904,6 +1369,35 @@ function isValidShopCoordinate(latitude, longitude, countryCode = "ph") {
   return latitude >= -90 && latitude <= 90 && longitude >= -180 && longitude <= 180 && (Math.abs(latitude) > 0.5 || Math.abs(longitude) > 0.5);
 }
 
+function cleanGeocoderPart(value) {
+  return String(value || "").trim().replace(/\s+/g, " ");
+}
+
+function firstGeocoderPart(...values) {
+  return values.map(cleanGeocoderPart).find(Boolean) || "";
+}
+
+function looksLikePhilippineRegion(value) {
+  return /\b(region|metro manila|national capital|soccsksargen|calabarzon|mimaropa|cordillera|bangsamoro|barmm|caraga|cagayan valley|central luzon|western visayas|central visayas|eastern visayas|zamboanga peninsula|northern mindanao)\b/i.test(String(value || ""));
+}
+
+function structuredGeocoderAddress(item) {
+  const address = item?.address || {};
+  const state = cleanGeocoderPart(address.state);
+  let province = firstGeocoderPart(address.province, address.state_district);
+  let region = firstGeocoderPart(address.region);
+
+  if (!province && state && !looksLikePhilippineRegion(state)) province = state;
+  if (!region && state && (looksLikePhilippineRegion(state) || province !== state)) region = state;
+
+  return {
+    municipality: firstGeocoderPart(address.city, address.municipality, address.town, address.city_district, address.county, address.locality),
+    province,
+    region,
+    placeId: item?.place_id === null || item?.place_id === undefined ? "" : String(item.place_id)
+  };
+}
+
 function parseGeocoderResult(item) {
   if (import.meta.env.DEV) {
     console.log("[geocoder] raw result", { lat: item?.lat, lon: item?.lon, display_name: item?.display_name });
@@ -913,10 +1407,15 @@ function parseGeocoderResult(item) {
   const countryCode = item?.address?.country_code || "ph";
   if (!isValidShopCoordinate(latitude, longitude, countryCode)) return null;
   if (import.meta.env.DEV) console.log("[geocoder] parsed", { latitude, longitude });
-  return { latitude, longitude };
+  return {
+    address: cleanGeocoderPart(item?.display_name),
+    latitude,
+    longitude,
+    ...structuredGeocoderAddress(item)
+  };
 }
 
-function ShopLocationSetting({ value, onChange, error }) {
+function ShopLocationSetting({ value, onChange, error, containerRef }) {
   const initialAddress = String(value.shopAddress || "");
   const savedLatitude = finiteCoordinate(value.shopLatitude);
   const savedLongitude = finiteCoordinate(value.shopLongitude);
@@ -935,7 +1434,10 @@ function ShopLocationSetting({ value, onChange, error }) {
     setQuery(String(value.shopAddress || ""));
   }, [value.shopAddress]);
 
-  function applyLocation({ address, latitude: nextLatitude, longitude: nextLongitude }) {
+  function applyLocation(location = {}) {
+    const hasOwn = (key) => Object.prototype.hasOwnProperty.call(location, key);
+    const nextLatitude = hasOwn("latitude") ? location.latitude : latitude;
+    const nextLongitude = hasOwn("longitude") ? location.longitude : longitude;
     const parsedLatitude = finiteCoordinate(nextLatitude);
     const parsedLongitude = finiteCoordinate(nextLongitude);
     if (parsedLatitude !== null || parsedLongitude !== null) {
@@ -949,7 +1451,11 @@ function ShopLocationSetting({ value, onChange, error }) {
       if (import.meta.env.DEV) console.log("[shop-location] saving", { latitude: parsedLatitude, longitude: parsedLongitude });
     }
     onChange({
-      shopAddress: String(address || value.shopAddress || "").trim(),
+      shopAddress: hasOwn("address") ? cleanGeocoderPart(location.address) : cleanGeocoderPart(value.shopAddress),
+      shopMunicipality: hasOwn("municipality") ? cleanGeocoderPart(location.municipality) : cleanGeocoderPart(value.shopMunicipality),
+      shopProvince: hasOwn("province") ? cleanGeocoderPart(location.province) : cleanGeocoderPart(value.shopProvince),
+      shopRegion: hasOwn("region") ? cleanGeocoderPart(location.region) : cleanGeocoderPart(value.shopRegion),
+      shopPlaceId: hasOwn("placeId") ? cleanGeocoderPart(location.placeId) : cleanGeocoderPart(value.shopPlaceId),
       shopLatitude: parsedLatitude,
       shopLongitude: parsedLongitude
     });
@@ -961,12 +1467,12 @@ function ShopLocationSetting({ value, onChange, error }) {
     if (!text) return;
     setSearching(true);
     try {
-      const response = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=5&countrycodes=ph&q=${encodeURIComponent(text)}`);
+      const response = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&namedetails=1&limit=5&countrycodes=ph&q=${encodeURIComponent(text)}`);
       if (!response.ok) throw new Error("Search failed");
       const data = await response.json();
       const parsedResults = (Array.isArray(data) ? data : []).map((item) => {
-        const coordinates = parseGeocoderResult(item);
-        return coordinates ? { id: item.place_id, address: item.display_name, ...coordinates } : null;
+        const parsed = parseGeocoderResult(item);
+        return parsed ? { id: parsed.placeId || `${parsed.latitude}-${parsed.longitude}`, ...parsed } : null;
       }).filter((item) => item?.address);
       setResults(parsedResults);
       setCoordinateError(parsedResults.length ? "" : "Invalid map coordinates returned. Please select the location again.");
@@ -989,12 +1495,22 @@ function ShopLocationSetting({ value, onChange, error }) {
     setResolving(true);
     try {
       const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(nextLatitude)}&lon=${encodeURIComponent(nextLongitude)}&zoom=18&addressdetails=1`);
-      const data = response.ok ? await response.json() : {};
-      const address = String(data?.display_name || value.shopAddress || "").trim();
-      applyLocation({ address, latitude: latitudeValue, longitude: longitudeValue });
+      if (!response.ok) throw new Error("Reverse geocoding failed");
+      const data = await response.json();
+      const parsed = parseGeocoderResult({ ...data, lat: data?.lat ?? latitudeValue, lon: data?.lon ?? longitudeValue });
+      const address = cleanGeocoderPart(parsed?.address || value.shopAddress || query);
+      applyLocation({
+        address,
+        latitude: latitudeValue,
+        longitude: longitudeValue,
+        municipality: parsed?.municipality || "",
+        province: parsed?.province || "",
+        region: parsed?.region || "",
+        placeId: parsed?.placeId || ""
+      });
       if (address) setQuery(address);
     } catch {
-      applyLocation({ address: value.shopAddress || query, latitude: latitudeValue, longitude: longitudeValue });
+      applyLocation({ address: value.shopAddress || query, latitude: latitudeValue, longitude: longitudeValue, placeId: "" });
     } finally {
       setResolving(false);
     }
@@ -1007,7 +1523,7 @@ function ShopLocationSetting({ value, onChange, error }) {
   }
 
   return (
-    <div className="grid gap-3 rounded-[24px] border border-neonbrand/20 bg-neonbrand/10 p-4 md:col-span-2">
+    <div ref={containerRef} className="grid gap-3 rounded-[24px] border border-neonbrand/20 bg-neonbrand/10 p-4 md:col-span-2">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <p className="text-xs font-bold uppercase tracking-[0.16em] text-neonbrand/80">Exact Shop Location</p>
@@ -1117,7 +1633,7 @@ function SettingsMiniMap({ latitude, longitude, hasPin, resolving, onSelect }) {
             }}
           />
         ))}
-        {tileState === "error" ? <div className="retela-map-status-overlay"><span>Map could not be loaded.</span><button type="button" onClick={retryTiles}>Retry</button></div> : null}
+        {tileState === "error" ? <div className="retela-map-status-overlay"><span>Map could not be loaded.</span><button type="button" onClick={(event) => { event.stopPropagation(); retryTiles(); }}>Retry</button></div> : null}
         {tileState === "loading" ? <div className="retela-map-status-overlay is-loading"><Loader2 size={16} className="animate-spin" /> Loading map...</div> : null}
         {tileState === "ready" ? <span className={`retela-delivery-map-pin ${hasPin ? "" : "opacity-60"}`}><MapPin size={30} /></span> : null}
         <div className="retela-delivery-map-tools">
@@ -1203,10 +1719,11 @@ function AIProviderSelector({ value = "auto", onChange, currentProvider, lastPro
   );
 }
 
-function NumberInput({ label, value, onChange, suffix, error }) {
+function NumberInput({ label, value, onChange, prefix, suffix, error }) {
   return (
     <FieldShell label={label} error={error}>
       <div className={`flex min-h-12 items-center gap-2 rounded-2xl border px-4 py-3 ${error ? "border-rose-400/55 bg-rose-500/10" : "border-white/10 bg-white/[0.06]"}`}>
+        {prefix ? <span className="shrink-0 text-xs font-semibold text-white/45">{prefix}</span> : null}
         <input type="number" min="0" className="min-w-0 flex-1 bg-transparent text-sm text-white outline-none" value={value} onChange={(event) => onChange(event.target.value)} />
         {suffix ? <span className="shrink-0 text-xs font-semibold text-white/45">{suffix}</span> : null}
       </div>

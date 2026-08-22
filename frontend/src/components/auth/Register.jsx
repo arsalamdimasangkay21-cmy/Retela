@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import { CalendarDays, KeyRound, Loader2, Mail, MapPin, Phone, User } from "lucide-react";
+import { CalendarDays, KeyRound, Loader2, Mail, Phone, User } from "lucide-react";
 import { checkRegistrationField, validateRegistration } from "../../api/registration";
 import { getApiErrorMessage } from "../../api/client";
 import { getPasswordBlueprint, getPasswordStrength, PasswordBlueprint } from "../PasswordBlueprint";
+import StructuredLocationPicker from "../StructuredLocationPicker";
 import { Button, Field } from "../ui";
+import { locationValidationMessage, registrationFieldsFromLocation } from "../../utils/location";
 import PrivacyPolicyModal from "./PrivacyPolicyModal";
 import TermsModal from "./TermsModal";
 import VerificationWizard from "./VerificationWizard";
@@ -15,6 +17,16 @@ const initialForm = {
   email: "",
   phone: "",
   location: "",
+  formattedAddress: "",
+  barangay: "",
+  municipality: "",
+  province: "",
+  region: "",
+  postalCode: "",
+  latitude: null,
+  longitude: null,
+  placeId: "",
+  locationSource: "",
   birthday: "",
   gender: "",
   password: "",
@@ -59,7 +71,19 @@ export default function Register({ onBackToLogin, onComplete, message, setMessag
     if (!values.displayName.trim()) nextErrors.displayName = "Display Name is required.";
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(values.email.trim())) nextErrors.email = "Invalid email address.";
     if (!/^09\d{9}$/.test(values.phone)) nextErrors.phone = "Invalid phone number.";
-    if (!values.location.trim()) nextErrors.location = "Location is required.";
+    const locationError = locationValidationMessage({
+      formattedAddress: values.formattedAddress || values.location,
+      barangay: values.barangay,
+      municipality: values.municipality,
+      province: values.province,
+      region: values.region,
+      postalCode: values.postalCode,
+      latitude: values.latitude,
+      longitude: values.longitude,
+      placeId: values.placeId,
+      locationSource: values.locationSource
+    });
+    if (locationError) nextErrors.location = locationError;
     if (!values.birthday) nextErrors.birthday = "Birthday is required.";
     if (!values.gender) nextErrors.gender = "Gender is required.";
     if (!values.password) nextErrors.password = "Password is required.";
@@ -119,6 +143,11 @@ export default function Register({ onBackToLogin, onComplete, message, setMessag
     return touched[field] || errors[field] ? errors[field] : "";
   }
 
+  function updateLocation(location) {
+    setForm((current) => ({ ...current, ...registrationFieldsFromLocation(location) }));
+    setErrors((current) => ({ ...current, location: undefined }));
+  }
+
   async function submit(event) {
     event.preventDefault();
     setMessage("");
@@ -168,9 +197,26 @@ export default function Register({ onBackToLogin, onComplete, message, setMessag
         <ValidatedField error={displayedError("phone")} loading={availabilityRunning.phone}>
           <Field id="signup-phone-number" name="phoneNumber" autoComplete="tel-national" icon={Phone} inputMode="numeric" maxLength={11} placeholder="Phone number" value={form.phone} invalid={Boolean(displayedError("phone"))} onBlur={() => markTouched("phone")} onChange={(event) => update("phone", normalizePhone(event.target.value))} />
         </ValidatedField>
-        <ValidatedField error={displayedError("location")}>
-          <Field id="signup-location" name="location" autoComplete="street-address" icon={MapPin} placeholder="Location" value={form.location} invalid={Boolean(displayedError("location"))} onBlur={() => markTouched("location")} onChange={(event) => update("location", event.target.value)} />
-        </ValidatedField>
+        <StructuredLocationPicker
+          value={{
+            formattedAddress: form.formattedAddress || form.location,
+            barangay: form.barangay,
+            municipality: form.municipality,
+            province: form.province,
+            region: form.region,
+            postalCode: form.postalCode,
+            latitude: form.latitude,
+            longitude: form.longitude,
+            placeId: form.placeId,
+            locationSource: form.locationSource
+          }}
+          onChange={updateLocation}
+          onBlur={() => markTouched("location")}
+          error={displayedError("location")}
+          compact
+          label="Search location"
+          placeholder="Agriculture, Midsayap, Cotabato"
+        />
         <ValidatedField error={displayedError("birthday")}>
           <Field id="signup-birthday" name="birthday" autoComplete="bday" icon={CalendarDays} type="date" placeholder="Birthday" value={form.birthday} invalid={Boolean(displayedError("birthday"))} onBlur={() => markTouched("birthday")} onChange={(event) => update("birthday", event.target.value)} />
         </ValidatedField>

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2, X } from "lucide-react";
 import { sendRegistrationOtp } from "../../api/registration";
 import { API_URL, getApiErrorMessage } from "../../api/client";
+import { locationValidationMessage } from "../../utils/location";
 import GovernmentIDStep from "./GovernmentIDStep";
 import OTPVerification from "./OTPVerification";
 import SelfieCaptureStep from "./SelfieCaptureStep";
@@ -41,11 +42,23 @@ function firstValidationMessage(errors = {}) {
 function validateRegistrationContinue(registration, verification) {
   const email = String(registration.email || "").trim();
   const governmentIdVerified = Boolean(verification.idQualityVerified);
+  const locationError = locationValidationMessage({
+    formattedAddress: registration.formattedAddress || registration.location,
+    barangay: registration.barangay,
+    municipality: registration.municipality,
+    province: registration.province,
+    region: registration.region,
+    postalCode: registration.postalCode,
+    latitude: registration.latitude,
+    longitude: registration.longitude,
+    placeId: registration.placeId,
+    locationSource: registration.locationSource
+  });
   const checks = [
     [String(registration.displayName || "").trim(), "Display Name is required."],
     [/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email), "Please enter a valid email address."],
     [/^09\d{9}$/.test(String(registration.phone || "")), "Please enter a valid phone number."],
-    [String(registration.location || "").trim(), "Location is required."],
+    [!locationError, locationError || "Location is required."],
     [registration.birthday, "Birthday is required."],
     [registration.gender, "Gender is required."],
     [registration.password, "Password is required."],

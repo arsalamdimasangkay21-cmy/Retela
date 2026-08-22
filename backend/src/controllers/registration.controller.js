@@ -43,14 +43,35 @@ function normalizeBoolean(value) {
   return value === true || value === "true" || value === "1" || value === "on";
 }
 
+function normalizeCoordinate(value, min, max) {
+  if (value === "" || value === null || value === undefined) return null;
+  const number = Number(value);
+  return Number.isFinite(number) && number >= min && number <= max ? number : null;
+}
+
 function normalizeRegistrationInput(body = {}) {
   const faceMatchScore = Number(body.faceMatchScore);
+  const formattedAddress = String(body.formattedAddress || body.formatted_address || body.location || "").trim().slice(0, 500);
+  const latitude = normalizeCoordinate(body.latitude ?? body.delivery_latitude, -90, 90);
+  const longitude = normalizeCoordinate(body.longitude ?? body.delivery_longitude, -180, 180);
+  const placeId = String(body.placeId || body.place_id || body.delivery_place_id || "").trim();
+  const locationSource = String(body.locationSource || body.location_source || body.delivery_location_source || "").trim().toLowerCase().slice(0, 40);
   return {
     username: String(body.username || "").trim(),
     displayName: String(body.displayName || "").trim(),
     email: String(body.email || "").trim().toLowerCase(),
     phone: normalizePhoneNumber(body.phone),
-    location: String(body.location || "").trim(),
+    location: formattedAddress.slice(0, 255),
+    formattedAddress,
+    barangay: String(body.barangay || body.delivery_barangay || "").trim(),
+    municipality: String(body.municipality || body.city || body.delivery_municipality || "").trim(),
+    province: String(body.province || body.delivery_province || "").trim(),
+    region: String(body.region || body.delivery_region || "").trim(),
+    postalCode: String(body.postalCode || body.postal_code || body.delivery_postal_code || "").trim(),
+    latitude,
+    longitude,
+    placeId,
+    locationSource,
     birthday: String(body.birthday || "").trim(),
     gender: String(body.gender || "").trim(),
     password: String(body.password || ""),
@@ -162,6 +183,14 @@ function addBaseValidationErrors(input, errors, { includeIdentity = false } = {}
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.email)) errors.email = "Invalid email address.";
   if (!/^09\d{9}$/.test(input.phone)) errors.phone = "Invalid phone number.";
   if (!input.location) errors.location = "Location is required.";
+  const hasLatitude = input.latitude !== null;
+  const hasLongitude = input.longitude !== null;
+  const allowedLocationSources = new Set(["google", "nominatim", "geolocation", "map", "manual"]);
+  if (!allowedLocationSources.has(input.locationSource)) errors.location = "Please select a location from the suggestions.";
+  if (hasLatitude !== hasLongitude) errors.location = "Please select a valid delivery location.";
+  if (input.locationSource !== "manual" && (!hasLatitude || !hasLongitude)) {
+    errors.location = "Please select a location from the suggestions.";
+  }
   if (!input.birthday || !normalizeBirthday(input.birthday)) errors.birthday = "Birthday is required.";
   if (!input.gender) errors.gender = "Gender is required.";
 
@@ -296,12 +325,22 @@ export async function ensureVerificationTables() {
        FROM INFORMATION_SCHEMA.COLUMNS
        WHERE TABLE_SCHEMA = DATABASE()
          AND TABLE_NAME = 'users'
-         AND COLUMN_NAME IN ('display_name','phone_number','location','birthday','gender','is_verified')`
+         AND COLUMN_NAME IN ('display_name','phone_number','location','formatted_address','delivery_barangay','delivery_municipality','delivery_province','delivery_region','delivery_postal_code','delivery_place_id','delivery_location_source','delivery_latitude','delivery_longitude','birthday','gender','is_verified')`
     );
     const userColumns = new Set(userRows.map((row) => row.COLUMN_NAME));
     if (!userColumns.has("display_name")) await query("ALTER TABLE users ADD COLUMN display_name VARCHAR(120) NULL AFTER username");
     if (!userColumns.has("phone_number")) await query("ALTER TABLE users ADD COLUMN phone_number VARCHAR(20) NULL UNIQUE AFTER email");
     if (!userColumns.has("location")) await query("ALTER TABLE users ADD COLUMN location VARCHAR(255) NULL AFTER phone_number");
+    if (!userColumns.has("formatted_address")) await query("ALTER TABLE users ADD COLUMN formatted_address VARCHAR(500) NULL AFTER location");
+    if (!userColumns.has("delivery_barangay")) await query("ALTER TABLE users ADD COLUMN delivery_barangay VARCHAR(160) NULL AFTER formatted_address");
+    if (!userColumns.has("delivery_municipality")) await query("ALTER TABLE users ADD COLUMN delivery_municipality VARCHAR(160) NULL AFTER delivery_barangay");
+    if (!userColumns.has("delivery_province")) await query("ALTER TABLE users ADD COLUMN delivery_province VARCHAR(160) NULL AFTER delivery_municipality");
+    if (!userColumns.has("delivery_region")) await query("ALTER TABLE users ADD COLUMN delivery_region VARCHAR(160) NULL AFTER delivery_province");
+    if (!userColumns.has("delivery_postal_code")) await query("ALTER TABLE users ADD COLUMN delivery_postal_code VARCHAR(20) NULL AFTER delivery_region");
+    if (!userColumns.has("delivery_place_id")) await query("ALTER TABLE users ADD COLUMN delivery_place_id VARCHAR(255) NULL AFTER delivery_postal_code");
+    if (!userColumns.has("delivery_location_source")) await query("ALTER TABLE users ADD COLUMN delivery_location_source VARCHAR(40) NULL AFTER delivery_place_id");
+    if (!userColumns.has("delivery_latitude")) await query("ALTER TABLE users ADD COLUMN delivery_latitude DECIMAL(10,7) NULL AFTER delivery_location_source");
+    if (!userColumns.has("delivery_longitude")) await query("ALTER TABLE users ADD COLUMN delivery_longitude DECIMAL(10,7) NULL AFTER delivery_latitude");
     if (!userColumns.has("birthday")) await query("ALTER TABLE users ADD COLUMN birthday DATE NULL AFTER location");
     if (!userColumns.has("gender")) await query("ALTER TABLE users ADD COLUMN gender VARCHAR(40) NULL AFTER birthday");
     if (!userColumns.has("is_verified")) {
@@ -507,6 +546,16 @@ export const sendRegistrationOtp = asyncHandler(async (req, res) => {
       email: input.email,
       phone_number: input.phone,
       location: input.location,
+      formatted_address: input.formattedAddress,
+      barangay: input.barangay,
+      municipality: input.municipality,
+      province: input.province,
+      region: input.region,
+      postal_code: input.postalCode,
+      latitude: input.latitude,
+      longitude: input.longitude,
+      place_id: input.placeId,
+      location_source: input.locationSource,
       birthday: normalizeBirthday(input.birthday),
       gender: input.gender,
       password_hash: await hashPassword(input.password),
@@ -783,15 +832,33 @@ export const completeRegistration = asyncHandler(async (req, res) => {
 
     const result = await run(
       `INSERT INTO users
-        (username, display_name, email, phone_number, location, birthday, gender, password_hash, role, status, is_verified, otp_code, otp_expires_at)
+        (username, display_name, email, phone_number, location, formatted_address,
+         delivery_barangay, delivery_municipality, delivery_province, delivery_region,
+         delivery_postal_code, delivery_place_id, delivery_location_source,
+         delivery_latitude, delivery_longitude, birthday, gender, password_hash,
+         role, status, is_verified, otp_code, otp_expires_at)
        VALUES
-        (:username, :displayName, :email, :phoneNumber, :location, :birthday, :gender, :passwordHash, 'customer', 'approved', true, NULL, NULL)`,
+        (:username, :displayName, :email, :phoneNumber, :location, :formattedAddress,
+         :deliveryBarangay, :deliveryMunicipality, :deliveryProvince, :deliveryRegion,
+         :deliveryPostalCode, :deliveryPlaceId, :deliveryLocationSource,
+         :deliveryLatitude, :deliveryLongitude, :birthday, :gender, :passwordHash,
+         'customer', 'approved', true, NULL, NULL)`,
       {
         username: payload.username,
         displayName: payload.display_name,
         email: payload.email,
         phoneNumber: payload.phone_number,
         location: payload.location,
+        formattedAddress: payload.formatted_address || payload.location,
+        deliveryBarangay: payload.barangay || null,
+        deliveryMunicipality: payload.municipality || null,
+        deliveryProvince: payload.province || null,
+        deliveryRegion: payload.region || null,
+        deliveryPostalCode: payload.postal_code || null,
+        deliveryPlaceId: payload.place_id || null,
+        deliveryLocationSource: payload.location_source || "manual",
+        deliveryLatitude: payload.latitude ?? null,
+        deliveryLongitude: payload.longitude ?? null,
         birthday: payload.birthday,
         gender: payload.gender,
         passwordHash: payload.password_hash

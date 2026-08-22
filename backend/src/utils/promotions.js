@@ -1,6 +1,6 @@
 import { query } from "../config/db.js";
 import { loadSystemSettings } from "./systemSettings.js";
-import { shippingSummary } from "./shippingSettings.js";
+import { calculateShippingQuote, shippingSummary } from "./shippingSettings.js";
 
 function parseJson(value, fallback) {
   if (!value) return fallback;
@@ -66,7 +66,7 @@ export async function getPromotionSummary() {
   };
 }
 
-export async function calculateCheckoutPricing(items, couponCode = "", fulfillmentMethod = "delivery") {
+export async function calculateCheckoutPricing(items, couponCode = "", fulfillmentMethod = "delivery", options = {}) {
   const [settings, sales, shipping] = await Promise.all([loadSystemSettings(), getActiveSalePromotions(), shippingSummary()]);
   const config = settings.config;
   const coupons = activeCouponsFromSettings(config);
@@ -123,9 +123,11 @@ export async function calculateCheckoutPricing(items, couponCode = "", fulfillme
   });
 
   const couponDiscount = coupon ? couponBase * (Number(coupon.discountPercent || 0) / 100) : 0;
-  const shippingFee = fulfillmentMethod === "delivery" && shipping.type !== "free" && !coupon?.freeShipping
-    ? Number(shipping.fee || 0)
-    : 0;
+  const shippingQuote = await calculateShippingQuote(options.location || {}, {
+    fulfillmentMethod,
+    couponFreeShipping: Boolean(coupon?.freeShipping)
+  });
+  const shippingFee = Number(shippingQuote.shippingFee || 0);
   const total = Math.max(0, subtotal - saleDiscount - couponDiscount + shippingFee);
 
   return {
@@ -134,6 +136,10 @@ export async function calculateCheckoutPricing(items, couponCode = "", fulfillme
     saleDiscount,
     couponDiscount,
     shippingFee,
+    shippingZone: shippingQuote.shippingZone,
+    shippingDistanceKm: shippingQuote.distanceKm,
+    shippingRule: shippingQuote.shippingRule,
+    shippingReason: shippingQuote.reason,
     shippingRateName: shipping.name,
     total,
     coupon: coupon ? {

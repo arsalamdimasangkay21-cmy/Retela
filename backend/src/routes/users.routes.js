@@ -11,6 +11,8 @@ let userColumnsReady;
 
 const SAFE_USER_SELECT = `
   SELECT id, username, display_name, email, phone_number, location,
+    formatted_address, delivery_barangay, delivery_municipality, delivery_province,
+    delivery_region, delivery_postal_code, delivery_place_id, delivery_location_source,
     delivery_latitude, delivery_longitude, delivery_landmark, delivery_notes,
     DATE_FORMAT(birthday, '%Y-%m-%d') AS birthday,
     gender, shop_description, profile_photo_url, gcash_number, debit_account_name, debit_account_number,
@@ -47,6 +49,10 @@ function nullableCoordinate(min, max) {
     (value) => (value === "" || value === null ? null : value),
     z.coerce.number().min(min).max(max).nullable()
   ).optional();
+}
+
+function nullableString(max) {
+  return z.string().trim().max(max).nullable().optional();
 }
 
 async function getSafeUser(userId) {
@@ -86,7 +92,7 @@ async function ensureUserColumns() {
        FROM INFORMATION_SCHEMA.COLUMNS
        WHERE TABLE_SCHEMA = DATABASE()
          AND TABLE_NAME = 'users'
-         AND COLUMN_NAME IN ('display_name', 'phone_number', 'location', 'delivery_latitude', 'delivery_longitude', 'delivery_landmark', 'delivery_notes', 'birthday', 'gender', 'shop_description', 'profile_photo_url', 'gcash_number', 'debit_account_name', 'debit_account_number', 'preferences', 'last_active_at', 'is_verified')`
+         AND COLUMN_NAME IN ('display_name', 'phone_number', 'location', 'formatted_address', 'delivery_barangay', 'delivery_municipality', 'delivery_province', 'delivery_region', 'delivery_postal_code', 'delivery_place_id', 'delivery_location_source', 'delivery_latitude', 'delivery_longitude', 'delivery_landmark', 'delivery_notes', 'birthday', 'gender', 'shop_description', 'profile_photo_url', 'gcash_number', 'debit_account_name', 'debit_account_number', 'preferences', 'last_active_at', 'is_verified')`
     );
     const columns = new Set(rows.map((row) => row.COLUMN_NAME));
     if (!columns.has("display_name")) {
@@ -98,6 +104,14 @@ async function ensureUserColumns() {
     if (!columns.has("location")) {
       await query("ALTER TABLE users ADD COLUMN location VARCHAR(255) NULL AFTER phone_number");
     }
+    if (!columns.has("formatted_address")) await query("ALTER TABLE users ADD COLUMN formatted_address VARCHAR(500) NULL AFTER location");
+    if (!columns.has("delivery_barangay")) await query("ALTER TABLE users ADD COLUMN delivery_barangay VARCHAR(160) NULL AFTER formatted_address");
+    if (!columns.has("delivery_municipality")) await query("ALTER TABLE users ADD COLUMN delivery_municipality VARCHAR(160) NULL AFTER delivery_barangay");
+    if (!columns.has("delivery_province")) await query("ALTER TABLE users ADD COLUMN delivery_province VARCHAR(160) NULL AFTER delivery_municipality");
+    if (!columns.has("delivery_region")) await query("ALTER TABLE users ADD COLUMN delivery_region VARCHAR(160) NULL AFTER delivery_province");
+    if (!columns.has("delivery_postal_code")) await query("ALTER TABLE users ADD COLUMN delivery_postal_code VARCHAR(20) NULL AFTER delivery_region");
+    if (!columns.has("delivery_place_id")) await query("ALTER TABLE users ADD COLUMN delivery_place_id VARCHAR(255) NULL AFTER delivery_postal_code");
+    if (!columns.has("delivery_location_source")) await query("ALTER TABLE users ADD COLUMN delivery_location_source VARCHAR(40) NULL AFTER delivery_place_id");
     if (!columns.has("delivery_latitude")) {
       await query("ALTER TABLE users ADD COLUMN delivery_latitude DECIMAL(10,7) NULL AFTER location");
     }
@@ -183,11 +197,22 @@ router.patch("/me", upload.single("profilePhoto"), asyncHandler(async (req, res)
     display_name: z.string().trim().max(120).optional(),
     email: z.string().email().optional().or(z.literal("")),
     phone_number: z.string().trim().optional(),
-    location: z.string().trim().optional(),
+    location: nullableString(255),
+    formatted_address: nullableString(500),
+    delivery_barangay: nullableString(160),
+    delivery_municipality: nullableString(160),
+    delivery_province: nullableString(160),
+    delivery_region: nullableString(160),
+    delivery_postal_code: nullableString(20),
+    delivery_place_id: nullableString(255),
+    delivery_location_source: z.preprocess(
+      (value) => value === "" || value === null ? null : value,
+      z.enum(["google", "nominatim", "geolocation", "map", "manual", "saved"]).nullable()
+    ).optional(),
     delivery_latitude: nullableCoordinate(-90, 90),
     delivery_longitude: nullableCoordinate(-180, 180),
-    delivery_landmark: z.string().trim().max(255).optional(),
-    delivery_notes: z.string().trim().max(1000).optional(),
+    delivery_landmark: nullableString(255),
+    delivery_notes: nullableString(1000),
     birthday: z.string().trim().optional().or(z.literal("")),
     gender: z.string().trim().max(40).optional(),
     shop_description: z.string().trim().optional(),
@@ -197,6 +222,42 @@ router.patch("/me", upload.single("profilePhoto"), asyncHandler(async (req, res)
     debit_account_number: z.string().trim().optional()
   });
   const input = schema.parse(req.body);
+  const structuredLocationFields = [
+    "formatted_address",
+    "delivery_barangay",
+    "delivery_municipality",
+    "delivery_province",
+    "delivery_region",
+    "delivery_postal_code",
+    "delivery_place_id",
+    "delivery_location_source",
+    "delivery_latitude",
+    "delivery_longitude"
+  ];
+  const hasStructuredLocationUpdate = structuredLocationFields.some((field) => hasOwn(input, field));
+  if (req.user.role === "customer" && hasStructuredLocationUpdate) {
+    const requiredFields = ["formatted_address", "delivery_location_source", "delivery_latitude", "delivery_longitude"];
+    if (requiredFields.some((field) => !hasOwn(input, field))) {
+      throw new HttpError(400, "Submit the complete selected delivery location.");
+    }
+    if (!nullableTrim(input.formatted_address)) throw new HttpError(400, "Delivery location is required.");
+    const hasLatitude = input.delivery_latitude !== null;
+    const hasLongitude = input.delivery_longitude !== null;
+    if (hasLatitude !== hasLongitude) throw new HttpError(400, "Submit both delivery coordinates.");
+    if (input.delivery_location_source !== "manual" && (!hasLatitude || !hasLongitude)) {
+      throw new HttpError(400, "Please select a location from the suggestions.");
+    }
+    if (input.delivery_location_source === "manual") {
+      input.delivery_barangay = null;
+      input.delivery_municipality = null;
+      input.delivery_province = null;
+      input.delivery_region = null;
+      input.delivery_postal_code = null;
+      input.delivery_place_id = null;
+      input.delivery_latitude = null;
+      input.delivery_longitude = null;
+    }
+  }
   const updates = [];
   const params = { id: req.user.id };
 
@@ -230,6 +291,47 @@ router.patch("/me", upload.single("profilePhoto"), asyncHandler(async (req, res)
   if (hasOwn(input, "location")) {
     updates.push("location = :location");
     params.location = nullableTrim(input.location);
+    if (req.user.role === "customer" && !hasStructuredLocationUpdate) {
+      updates.push(
+        "formatted_address = :legacyFormattedAddress",
+        "delivery_barangay = NULL",
+        "delivery_municipality = NULL",
+        "delivery_province = NULL",
+        "delivery_region = NULL",
+        "delivery_postal_code = NULL",
+        "delivery_place_id = NULL",
+        "delivery_location_source = :legacyLocationSource",
+        "delivery_latitude = NULL",
+        "delivery_longitude = NULL"
+      );
+      params.legacyFormattedAddress = params.location;
+      params.legacyLocationSource = params.location ? "manual" : null;
+    }
+  }
+
+  if (hasOwn(input, "formatted_address")) {
+    const formattedAddress = nullableTrim(input.formatted_address);
+    updates.push("formatted_address = :formattedAddress");
+    params.formattedAddress = formattedAddress;
+    if (!hasOwn(input, "location")) {
+      updates.push("location = :location");
+      params.location = formattedAddress?.slice(0, 255) || null;
+    }
+  }
+
+  for (const [field, column, parameter] of [
+    ["delivery_barangay", "delivery_barangay", "deliveryBarangay"],
+    ["delivery_municipality", "delivery_municipality", "deliveryMunicipality"],
+    ["delivery_province", "delivery_province", "deliveryProvince"],
+    ["delivery_region", "delivery_region", "deliveryRegion"],
+    ["delivery_postal_code", "delivery_postal_code", "deliveryPostalCode"],
+    ["delivery_place_id", "delivery_place_id", "deliveryPlaceId"],
+    ["delivery_location_source", "delivery_location_source", "deliveryLocationSource"]
+  ]) {
+    if (hasOwn(input, field)) {
+      updates.push(`${column} = :${parameter}`);
+      params[parameter] = nullableTrim(input[field]);
+    }
   }
 
   if (hasOwn(input, "delivery_latitude")) {
@@ -328,7 +430,10 @@ router.get("/", asyncHandler(async (req, res) => {
   if (req.user.role !== "admin") return res.status(403).json({ message: "Forbidden" });
   await ensureUserColumns();
   const users = await query(
-    `SELECT id, username, display_name, email, phone_number, location, status, birthday, gender,
+    `SELECT id, username, display_name, email, phone_number, location, formatted_address,
+      delivery_barangay, delivery_municipality, delivery_province, delivery_region,
+      delivery_postal_code, delivery_place_id, delivery_location_source,
+      delivery_latitude, delivery_longitude, status, birthday, gender,
       CASE
         WHEN last_active_at >= (NOW() - INTERVAL 5 MINUTE) THEN 'active'
         WHEN last_active_at >= (NOW() - INTERVAL 15 MINUTE) THEN 'away'

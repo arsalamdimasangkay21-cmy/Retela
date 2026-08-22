@@ -9,6 +9,7 @@ import { calculateCheckoutPricing } from "../utils/promotions.js";
 import { createAdminNotification } from "../utils/adminNotifications.js";
 import { ensureCartTable } from "./cart.routes.js";
 import { loadSystemSettings } from "../utils/systemSettings.js";
+import { loadCustomerDeliveryLocation } from "../utils/customerLocation.js";
 
 const router = Router();
 const statuses = ["pending", "awaiting_payment", "paid", "approved", "processing", "ready", "completed", "cancelled", "payment_failed"];
@@ -113,7 +114,7 @@ async function ensureOrderColumns() {
        FROM INFORMATION_SCHEMA.COLUMNS
        WHERE TABLE_SCHEMA = DATABASE()
          AND TABLE_NAME = 'orders'
-         AND COLUMN_NAME IN ('tracking_number', 'fulfillment_method', 'delivery_address', 'delivery_latitude', 'delivery_longitude', 'delivery_landmark', 'delivery_notes', 'meeting_place', 'meeting_latitude', 'meeting_longitude', 'meetup_date', 'meetup_time', 'meetup_confirmation_status', 'meetup_confirmed_at', 'meetup_customer_note', 'meetup_24h_reminder_sent_at', 'meetup_1h_reminder_sent_at', 'subtotal_amount', 'coupon_discount', 'sale_discount', 'shipping_fee', 'coupon_code', 'payment_status', 'payment_reference', 'transaction_id', 'paid_at', 'payment_provider', 'checkout_session_id', 'checkout_url', 'order_channel', 'cash_received', 'change_amount', 'pos_cashier_id')`
+         AND COLUMN_NAME IN ('tracking_number', 'fulfillment_method', 'delivery_address', 'delivery_latitude', 'delivery_longitude', 'delivery_municipality', 'delivery_province', 'delivery_region', 'delivery_postal_code', 'delivery_place_id', 'delivery_landmark', 'delivery_notes', 'meeting_place', 'meeting_latitude', 'meeting_longitude', 'meetup_date', 'meetup_time', 'meetup_confirmation_status', 'meetup_confirmed_at', 'meetup_customer_note', 'meetup_24h_reminder_sent_at', 'meetup_1h_reminder_sent_at', 'subtotal_amount', 'coupon_discount', 'sale_discount', 'shipping_fee', 'shipping_zone', 'shipping_distance_km', 'shipping_rule', 'coupon_code', 'payment_status', 'payment_reference', 'transaction_id', 'paid_at', 'payment_provider', 'checkout_session_id', 'checkout_url', 'order_channel', 'cash_received', 'change_amount', 'pos_cashier_id')`
     );
     const columns = new Set(rows.map((row) => row.COLUMN_NAME));
     await safeModifyColumn("orders", "status", "status enum update", "ALTER TABLE orders MODIFY status ENUM('pending','awaiting_payment','paid','approved','processing','ready','completed','cancelled','payment_failed') NOT NULL DEFAULT 'pending'");
@@ -129,6 +130,11 @@ async function ensureOrderColumns() {
     if (!columns.has("delivery_address")) await query("ALTER TABLE orders ADD COLUMN delivery_address VARCHAR(500) NULL AFTER fulfillment_method");
     if (!columns.has("delivery_latitude")) await query("ALTER TABLE orders ADD COLUMN delivery_latitude DECIMAL(10,7) NULL AFTER delivery_address");
     if (!columns.has("delivery_longitude")) await query("ALTER TABLE orders ADD COLUMN delivery_longitude DECIMAL(10,7) NULL AFTER delivery_latitude");
+    if (!columns.has("delivery_municipality")) await query("ALTER TABLE orders ADD COLUMN delivery_municipality VARCHAR(160) NULL AFTER delivery_longitude");
+    if (!columns.has("delivery_province")) await query("ALTER TABLE orders ADD COLUMN delivery_province VARCHAR(160) NULL AFTER delivery_municipality");
+    if (!columns.has("delivery_region")) await query("ALTER TABLE orders ADD COLUMN delivery_region VARCHAR(160) NULL AFTER delivery_province");
+    if (!columns.has("delivery_postal_code")) await query("ALTER TABLE orders ADD COLUMN delivery_postal_code VARCHAR(20) NULL AFTER delivery_region");
+    if (!columns.has("delivery_place_id")) await query("ALTER TABLE orders ADD COLUMN delivery_place_id VARCHAR(255) NULL AFTER delivery_postal_code");
     if (!columns.has("delivery_landmark")) await query("ALTER TABLE orders ADD COLUMN delivery_landmark VARCHAR(255) NULL AFTER delivery_longitude");
     if (!columns.has("delivery_notes")) await query("ALTER TABLE orders ADD COLUMN delivery_notes TEXT NULL AFTER delivery_landmark");
     if (!columns.has("meeting_place")) await query("ALTER TABLE orders ADD COLUMN meeting_place VARCHAR(500) NULL AFTER delivery_notes");
@@ -145,6 +151,9 @@ async function ensureOrderColumns() {
     if (!columns.has("coupon_discount")) await query("ALTER TABLE orders ADD COLUMN coupon_discount DECIMAL(10,2) NOT NULL DEFAULT 0 AFTER subtotal_amount");
     if (!columns.has("sale_discount")) await query("ALTER TABLE orders ADD COLUMN sale_discount DECIMAL(10,2) NOT NULL DEFAULT 0 AFTER coupon_discount");
     if (!columns.has("shipping_fee")) await query("ALTER TABLE orders ADD COLUMN shipping_fee DECIMAL(10,2) NOT NULL DEFAULT 0 AFTER sale_discount");
+    if (!columns.has("shipping_zone")) await query("ALTER TABLE orders ADD COLUMN shipping_zone VARCHAR(20) NULL AFTER shipping_fee");
+    if (!columns.has("shipping_distance_km")) await query("ALTER TABLE orders ADD COLUMN shipping_distance_km DECIMAL(10,2) NULL AFTER shipping_zone");
+    if (!columns.has("shipping_rule")) await query("ALTER TABLE orders ADD COLUMN shipping_rule VARCHAR(40) NULL AFTER shipping_distance_km");
     if (!columns.has("coupon_code")) await query("ALTER TABLE orders ADD COLUMN coupon_code VARCHAR(40) NULL AFTER shipping_fee");
     if (!columns.has("payment_status")) await query("ALTER TABLE orders ADD COLUMN payment_status ENUM('unpaid','awaiting_payment','paid','failed','cancelled','refunded') NOT NULL DEFAULT 'unpaid' AFTER payment_method");
     if (!columns.has("payment_reference")) await query("ALTER TABLE orders ADD COLUMN payment_reference VARCHAR(160) NULL AFTER payment_status");
@@ -184,6 +193,11 @@ router.get("/", requireAuth, requireApproved, asyncHandler(async (req, res) => {
     o.delivery_address,
     o.delivery_latitude,
     o.delivery_longitude,
+    o.delivery_municipality,
+    o.delivery_province,
+    o.delivery_region,
+    o.delivery_postal_code,
+    o.delivery_place_id,
     o.delivery_landmark,
     o.delivery_notes,
     o.meeting_place,
@@ -200,6 +214,9 @@ router.get("/", requireAuth, requireApproved, asyncHandler(async (req, res) => {
     o.coupon_discount,
     o.sale_discount,
     o.shipping_fee,
+    o.shipping_zone,
+    o.shipping_distance_km,
+    o.shipping_rule,
     o.coupon_code,
     o.total_amount,
     o.checkout_url,
@@ -251,6 +268,11 @@ GROUP BY
     o.delivery_address,
     o.delivery_latitude,
     o.delivery_longitude,
+    o.delivery_municipality,
+    o.delivery_province,
+    o.delivery_region,
+    o.delivery_postal_code,
+    o.delivery_place_id,
     o.delivery_landmark,
     o.delivery_notes,
     o.meeting_place,
@@ -267,6 +289,9 @@ GROUP BY
     o.coupon_discount,
     o.sale_discount,
     o.shipping_fee,
+    o.shipping_zone,
+    o.shipping_distance_km,
+    o.shipping_rule,
     o.coupon_code,
     o.total_amount,
     o.checkout_url,
@@ -286,8 +311,13 @@ router.get("/:id/items", requireAuth, requireApproved, asyncHandler(async (req, 
     `SELECT o.id, o.user_id, o.order_channel, o.status, o.payment_method, o.payment_status, o.payment_reference,
        o.transaction_id, o.paid_at, o.cash_received, o.change_amount,
        o.tracking_number, o.fulfillment_method, o.delivery_address, o.delivery_latitude,
-       o.delivery_longitude, o.delivery_landmark, o.delivery_notes, o.meeting_place, o.meeting_latitude, o.meeting_longitude, o.meetup_date, o.meetup_time, o.meetup_confirmation_status, o.meetup_confirmed_at, o.meetup_customer_note, o.meetup_24h_reminder_sent_at, o.meetup_1h_reminder_sent_at, o.subtotal_amount, o.coupon_discount,
-       o.sale_discount, o.shipping_fee, o.coupon_code, o.total_amount, o.checkout_url, o.created_at,
+       o.delivery_longitude, o.delivery_municipality, o.delivery_province, o.delivery_region,
+       o.delivery_postal_code, o.delivery_place_id, o.delivery_landmark, o.delivery_notes,
+       o.meeting_place, o.meeting_latitude, o.meeting_longitude, o.meetup_date, o.meetup_time,
+       o.meetup_confirmation_status, o.meetup_confirmed_at, o.meetup_customer_note,
+       o.meetup_24h_reminder_sent_at, o.meetup_1h_reminder_sent_at, o.subtotal_amount, o.coupon_discount,
+       o.sale_discount, o.shipping_fee, o.shipping_zone, o.shipping_distance_km, o.shipping_rule,
+       o.coupon_code, o.total_amount, o.checkout_url, o.created_at,
        u.username, u.location, u.phone_number
      FROM orders o
      LEFT JOIN users u ON u.id = o.user_id
@@ -387,8 +417,10 @@ router.patch("/:id/cancel", requireAuth, requireApproved, asyncHandler(async (re
     const [updatedRows] = await conn.execute(
       `SELECT id, user_id, order_channel, status, payment_method, payment_status, payment_reference,
          transaction_id, paid_at, cash_received, change_amount, tracking_number, fulfillment_method,
-         delivery_address, delivery_latitude, delivery_longitude, delivery_landmark, delivery_notes, meeting_place,
-         subtotal_amount, coupon_discount, sale_discount, shipping_fee, coupon_code, total_amount,
+         delivery_address, delivery_latitude, delivery_longitude, delivery_municipality, delivery_province,
+         delivery_region, delivery_postal_code, delivery_place_id, delivery_landmark, delivery_notes, meeting_place,
+         subtotal_amount, coupon_discount, sale_discount, shipping_fee, shipping_zone, shipping_distance_km,
+         shipping_rule, coupon_code, total_amount,
          checkout_url, created_at
        FROM orders
        WHERE id = ?`,
@@ -450,8 +482,12 @@ async function createOrderTransactionAttempt(req, input, pricing, attempt) {
 
     const [orderResult] = await conn.execute(
       `INSERT INTO orders
-        (user_id, status, payment_method, payment_status, fulfillment_method, delivery_address, delivery_latitude, delivery_longitude, delivery_landmark, delivery_notes, subtotal_amount, coupon_discount, sale_discount, shipping_fee, coupon_code, total_amount)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        (user_id, status, payment_method, payment_status, fulfillment_method, delivery_address,
+         delivery_latitude, delivery_longitude, delivery_municipality, delivery_province, delivery_region,
+         delivery_postal_code, delivery_place_id, delivery_landmark, delivery_notes, subtotal_amount,
+         coupon_discount, sale_discount, shipping_fee, shipping_zone, shipping_distance_km, shipping_rule,
+         coupon_code, total_amount)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         userId,
         input.payment_method === "cod" ? "pending" : "awaiting_payment",
@@ -461,12 +497,20 @@ async function createOrderTransactionAttempt(req, input, pricing, attempt) {
         input.fulfillment_method === "delivery" ? input.delivery_address : null,
         input.fulfillment_method === "delivery" ? input.delivery_latitude ?? null : null,
         input.fulfillment_method === "delivery" ? input.delivery_longitude ?? null : null,
+        input.fulfillment_method === "delivery" ? input.delivery_municipality || null : null,
+        input.fulfillment_method === "delivery" ? input.delivery_province || null : null,
+        input.fulfillment_method === "delivery" ? input.delivery_region || null : null,
+        input.fulfillment_method === "delivery" ? input.delivery_postal_code || null : null,
+        input.fulfillment_method === "delivery" ? input.delivery_place_id || null : null,
         input.fulfillment_method === "delivery" ? input.delivery_landmark || null : null,
         input.fulfillment_method === "delivery" ? input.delivery_notes || null : null,
         pricing.subtotal,
         pricing.couponDiscount,
         pricing.saleDiscount,
         pricing.shippingFee,
+        pricing.shippingZone,
+        pricing.shippingDistanceKm ?? null,
+        pricing.shippingRule,
         pricing.coupon?.code || null,
         pricing.total
       ]
@@ -633,13 +677,34 @@ router.post("/", requireAuth, requireApproved, asyncHandler(async (req, res) => 
     items: z.array(z.object({ product_id: z.coerce.number().int().positive(), quantity: z.coerce.number().int().positive() })).min(1)
   });
   const input = schema.parse(req.body);
-  if (input.fulfillment_method === "delivery" && !input.delivery_address) {
-    throw new HttpError(400, "Please set your delivery location before checkout.");
+  const savedLocation = input.fulfillment_method === "delivery"
+    ? await loadCustomerDeliveryLocation(req.user.id)
+    : null;
+  if (input.fulfillment_method === "delivery" && !savedLocation?.formattedAddress) {
+    throw new HttpError(400, "Please save your delivery location before checkout.");
   }
+  const trustedInput = input.fulfillment_method === "delivery" ? {
+    ...input,
+    delivery_address: savedLocation.formattedAddress,
+    delivery_latitude: savedLocation.latitude,
+    delivery_longitude: savedLocation.longitude,
+    delivery_municipality: savedLocation.municipality,
+    delivery_province: savedLocation.province,
+    delivery_region: savedLocation.region,
+    delivery_postal_code: savedLocation.postalCode,
+    delivery_place_id: savedLocation.placeId,
+    delivery_landmark: savedLocation.landmark || "",
+    delivery_notes: savedLocation.notes || ""
+  } : input;
   const compactItems = compactOrderItems(input.items);
-  const pricing = await calculateCheckoutPricing(compactItems, input.coupon_code, input.fulfillment_method);
+  const pricing = await calculateCheckoutPricing(
+    compactItems,
+    input.coupon_code,
+    input.fulfillment_method,
+    { location: savedLocation }
+  );
   if (input.coupon_code && !pricing.coupon) throw new HttpError(400, "Coupon is invalid or expired.");
-  const result = await createOrderWithRetry(req, input, pricing);
+  const result = await createOrderWithRetry(req, trustedInput, pricing);
   void runOrderCreatedSideEffects(req, result).catch((error) => {
     console.error("[order-side-effects] failed", { orderId: result.orderId, message: error?.message, code: error?.code });
   });

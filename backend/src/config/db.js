@@ -539,6 +539,14 @@ async function ensureCoreTables() {
       email VARCHAR(160) NULL UNIQUE,
       phone_number VARCHAR(20) NULL UNIQUE,
       location VARCHAR(255) NULL,
+      formatted_address VARCHAR(500) NULL,
+      delivery_barangay VARCHAR(160) NULL,
+      delivery_municipality VARCHAR(160) NULL,
+      delivery_province VARCHAR(160) NULL,
+      delivery_region VARCHAR(160) NULL,
+      delivery_postal_code VARCHAR(20) NULL,
+      delivery_place_id VARCHAR(255) NULL,
+      delivery_location_source VARCHAR(40) NULL,
       delivery_latitude DECIMAL(10,7) NULL,
       delivery_longitude DECIMAL(10,7) NULL,
       delivery_landmark VARCHAR(255) NULL,
@@ -571,6 +579,14 @@ async function ensureCoreTables() {
   await ensureColumn("users", "display_name", "display_name VARCHAR(120) NULL AFTER username");
   await ensureColumn("users", "phone_number", "phone_number VARCHAR(20) NULL UNIQUE AFTER email");
   await ensureColumn("users", "location", "location VARCHAR(255) NULL AFTER phone_number");
+  await ensureColumn("users", "formatted_address", "formatted_address VARCHAR(500) NULL AFTER location");
+  await ensureColumn("users", "delivery_barangay", "delivery_barangay VARCHAR(160) NULL AFTER formatted_address");
+  await ensureColumn("users", "delivery_municipality", "delivery_municipality VARCHAR(160) NULL AFTER delivery_barangay");
+  await ensureColumn("users", "delivery_province", "delivery_province VARCHAR(160) NULL AFTER delivery_municipality");
+  await ensureColumn("users", "delivery_region", "delivery_region VARCHAR(160) NULL AFTER delivery_province");
+  await ensureColumn("users", "delivery_postal_code", "delivery_postal_code VARCHAR(20) NULL AFTER delivery_region");
+  await ensureColumn("users", "delivery_place_id", "delivery_place_id VARCHAR(255) NULL AFTER delivery_postal_code");
+  await ensureColumn("users", "delivery_location_source", "delivery_location_source VARCHAR(40) NULL AFTER delivery_place_id");
   await ensureColumn("users", "delivery_latitude", "delivery_latitude DECIMAL(10,7) NULL AFTER location");
   await ensureColumn("users", "delivery_longitude", "delivery_longitude DECIMAL(10,7) NULL AFTER delivery_latitude");
   await ensureColumn("users", "delivery_landmark", "delivery_landmark VARCHAR(255) NULL AFTER delivery_longitude");
@@ -640,17 +656,26 @@ async function ensureCoreTables() {
       id TINYINT PRIMARY KEY,
       config_json LONGTEXT NOT NULL,
       openai_api_key_encrypted TEXT NULL,
+      gcash_qr_data LONGBLOB NULL,
+      gcash_qr_mime VARCHAR(100) NULL,
+      gcash_qr_updated_at DATETIME NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
     )
   `);
   await ensureColumn("system_settings", "openai_api_key_encrypted", "openai_api_key_encrypted TEXT NULL AFTER config_json");
+  await ensureColumn("system_settings", "gcash_qr_data", "gcash_qr_data LONGBLOB NULL AFTER openai_api_key_encrypted");
+  await ensureColumn("system_settings", "gcash_qr_mime", "gcash_qr_mime VARCHAR(100) NULL AFTER gcash_qr_data");
+  await ensureColumn("system_settings", "gcash_qr_updated_at", "gcash_qr_updated_at DATETIME NULL AFTER gcash_qr_mime");
 
   await ensureTable("shipping_settings", `
     CREATE TABLE IF NOT EXISTS shipping_settings (
       id INT AUTO_INCREMENT PRIMARY KEY,
       rate_name VARCHAR(120) NULL,
       fixed_fee DECIMAL(10,2) NOT NULL DEFAULT 0,
+      free_municipalities_json LONGTEXT NULL,
+      free_radius_km DECIMAL(8,2) NOT NULL DEFAULT 15,
+      outside_area_fee DECIMAL(10,2) NOT NULL DEFAULT 0,
       is_enabled BOOLEAN NOT NULL DEFAULT TRUE,
       is_active BOOLEAN NOT NULL DEFAULT TRUE,
       created_by INT NULL,
@@ -660,6 +685,17 @@ async function ensureCoreTables() {
     )
   `);
   await ensureAutoIncrementId("shipping_settings");
+  await ensureColumn("shipping_settings", "free_municipalities_json", "free_municipalities_json LONGTEXT NULL AFTER fixed_fee");
+  await ensureColumn("shipping_settings", "free_radius_km", "free_radius_km DECIMAL(8,2) NOT NULL DEFAULT 15 AFTER free_municipalities_json");
+  await ensureColumn("shipping_settings", "outside_area_fee", "outside_area_fee DECIMAL(10,2) NOT NULL DEFAULT 0 AFTER free_radius_km");
+  await safeDataMigration(
+    "shipping_settings",
+    "default free delivery municipalities",
+    `UPDATE shipping_settings
+     SET free_municipalities_json = '["Midsayap","Libungan","Pigcawayan"]'
+     WHERE free_municipalities_json IS NULL OR TRIM(free_municipalities_json) = ''`
+  );
+  await safeDataMigration("shipping_settings", "legacy outside shipping fee", "UPDATE shipping_settings SET outside_area_fee = fixed_fee WHERE outside_area_fee = 0 AND fixed_fee > 0");
 
   for (const tableName of ["categories", "types", "sizes", "conditions", "brands", "colors"]) {
     await ensureTable(tableName, `
@@ -699,12 +735,20 @@ async function ensureCoreTables() {
       delivery_address VARCHAR(500) NULL,
       delivery_latitude DECIMAL(10,7) NULL,
       delivery_longitude DECIMAL(10,7) NULL,
+      delivery_municipality VARCHAR(160) NULL,
+      delivery_province VARCHAR(160) NULL,
+      delivery_region VARCHAR(160) NULL,
+      delivery_postal_code VARCHAR(20) NULL,
+      delivery_place_id VARCHAR(255) NULL,
       delivery_landmark VARCHAR(255) NULL,
       delivery_notes TEXT NULL,
       subtotal_amount DECIMAL(10,2) NOT NULL DEFAULT 0,
       coupon_discount DECIMAL(10,2) NOT NULL DEFAULT 0,
       sale_discount DECIMAL(10,2) NOT NULL DEFAULT 0,
       shipping_fee DECIMAL(10,2) NOT NULL DEFAULT 0,
+      shipping_zone VARCHAR(20) NULL,
+      shipping_distance_km DECIMAL(10,2) NULL,
+      shipping_rule VARCHAR(40) NULL,
       coupon_code VARCHAR(40) NULL,
       total_amount DECIMAL(10,2) NOT NULL DEFAULT 0,
       cash_received DECIMAL(10,2) NULL,
@@ -737,12 +781,20 @@ async function ensureCoreTables() {
   await ensureColumn("orders", "delivery_address", "delivery_address VARCHAR(500) NULL AFTER fulfillment_method");
   await ensureColumn("orders", "delivery_latitude", "delivery_latitude DECIMAL(10,7) NULL AFTER delivery_address");
   await ensureColumn("orders", "delivery_longitude", "delivery_longitude DECIMAL(10,7) NULL AFTER delivery_latitude");
+  await ensureColumn("orders", "delivery_municipality", "delivery_municipality VARCHAR(160) NULL AFTER delivery_longitude");
+  await ensureColumn("orders", "delivery_province", "delivery_province VARCHAR(160) NULL AFTER delivery_municipality");
+  await ensureColumn("orders", "delivery_region", "delivery_region VARCHAR(160) NULL AFTER delivery_province");
+  await ensureColumn("orders", "delivery_postal_code", "delivery_postal_code VARCHAR(20) NULL AFTER delivery_region");
+  await ensureColumn("orders", "delivery_place_id", "delivery_place_id VARCHAR(255) NULL AFTER delivery_postal_code");
   await ensureColumn("orders", "delivery_landmark", "delivery_landmark VARCHAR(255) NULL AFTER delivery_longitude");
   await ensureColumn("orders", "delivery_notes", "delivery_notes TEXT NULL AFTER delivery_landmark");
   await ensureColumn("orders", "subtotal_amount", "subtotal_amount DECIMAL(10,2) NOT NULL DEFAULT 0 AFTER fulfillment_method");
   await ensureColumn("orders", "coupon_discount", "coupon_discount DECIMAL(10,2) NOT NULL DEFAULT 0 AFTER subtotal_amount");
   await ensureColumn("orders", "sale_discount", "sale_discount DECIMAL(10,2) NOT NULL DEFAULT 0 AFTER coupon_discount");
   await ensureColumn("orders", "shipping_fee", "shipping_fee DECIMAL(10,2) NOT NULL DEFAULT 0 AFTER sale_discount");
+  await ensureColumn("orders", "shipping_zone", "shipping_zone VARCHAR(20) NULL AFTER shipping_fee");
+  await ensureColumn("orders", "shipping_distance_km", "shipping_distance_km DECIMAL(10,2) NULL AFTER shipping_zone");
+  await ensureColumn("orders", "shipping_rule", "shipping_rule VARCHAR(40) NULL AFTER shipping_distance_km");
   await ensureColumn("orders", "coupon_code", "coupon_code VARCHAR(40) NULL AFTER shipping_fee");
   await ensureColumn("orders", "total_amount", "total_amount DECIMAL(10,2) NOT NULL DEFAULT 0 AFTER coupon_code");
   await ensureColumn("orders", "cash_received", "cash_received DECIMAL(10,2) NULL AFTER total_amount");

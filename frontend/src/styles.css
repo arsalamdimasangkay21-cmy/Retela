@@ -6099,6 +6099,244 @@ button {
   color: #ffffff;
 }
 
+.retela-structured-location {
+  display: grid;
+  min-width: 0;
+  gap: 9px;
+}
+
+.retela-structured-location-label {
+  display: grid;
+  gap: 7px;
+}
+
+.retela-structured-location-label > span:first-child {
+  color: #16864e;
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.retela-structured-location-input {
+  display: grid;
+  min-height: 46px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  border: 1px solid #cfe8d8;
+  border-radius: 14px;
+  background: #ffffff;
+  padding: 0 12px;
+  color: #16a36a;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.retela-structured-location-input:focus-within {
+  border-color: #22a968;
+  box-shadow: 0 0 0 4px rgba(34, 169, 104, 0.1);
+}
+
+.retela-structured-location-input.is-invalid {
+  border-color: #fb7185;
+  box-shadow: 0 0 0 3px rgba(251, 113, 133, 0.1);
+}
+
+.retela-structured-location-input input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: #173329;
+  font-size: 0.9rem;
+  font-weight: 750;
+  outline: 0;
+}
+
+.retela-structured-location-input input::placeholder {
+  color: #8aa095;
+}
+
+.retela-structured-location-results {
+  max-height: 190px;
+  display: grid;
+  gap: 6px;
+  overflow-y: auto;
+  border: 1px solid #d9eee2;
+  border-radius: 14px;
+  background: #ffffff;
+  padding: 6px;
+  box-shadow: 0 12px 30px rgba(24, 73, 49, 0.1);
+}
+
+.retela-structured-location-results button {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  gap: 8px;
+  border: 0;
+  border-radius: 10px;
+  background: #f8fbf9;
+  padding: 9px;
+  color: #173329;
+  text-align: left;
+  transition: background 0.16s ease, color 0.16s ease;
+}
+
+.retela-structured-location-results button:hover,
+.retela-structured-location-results button:focus-visible {
+  background: #eafff1;
+  color: #08764d;
+  outline: 0;
+}
+
+.retela-structured-location-results button svg {
+  margin-top: 2px;
+  flex: 0 0 auto;
+  color: #16a36a;
+}
+
+.retela-structured-location-results button span {
+  min-width: 0;
+  font-size: 0.8rem;
+  font-weight: 800;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.retela-structured-location-current,
+.retela-structured-location-manual {
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid #b7e4cf;
+  border-radius: 12px;
+  background: #f3faf6;
+  padding: 8px 12px;
+  color: #08764d;
+  font-size: 0.8rem;
+  font-weight: 900;
+}
+
+.retela-structured-location-manual {
+  border-style: dashed;
+  background: #ffffff;
+}
+
+.retela-structured-location-current:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.retela-structured-location-notice,
+.retela-structured-location-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
+  color: #506c5f;
+  font-size: 0.75rem;
+  font-weight: 750;
+  line-height: 1.45;
+}
+
+.retela-structured-location-notice svg {
+  margin-top: 2px;
+  flex: 0 0 auto;
+}
+
+.retela-structured-location-notice.is-warning,
+.retela-structured-location-error {
+  color: #be123c;
+}
+
+.retela-structured-location-selection {
+  display: grid;
+  gap: 3px;
+  border: 1px solid #c9ead6;
+  border-radius: 14px;
+  background: #effcf4;
+  padding: 10px 12px;
+}
+
+.retela-structured-location-selection strong {
+  color: #123526;
+  font-size: 0.84rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.retela-structured-location-selection span {
+  color: #557166;
+  font-size: 0.73rem;
+  font-weight: 750;
+  line-height: 1.4;
+}
+
+.retela-structured-location-selection span.is-warning {
+  color: #a16207;
+}
+
+.retela-structured-map-wrap {
+  display: grid;
+  gap: 6px;
+}
+
+.retela-structured-map {
+  position: relative;
+  min-height: 280px;
+  overflow: hidden;
+  border: 1px solid #d9eee2;
+  border-radius: 16px;
+  background: #d8e8dc;
+  cursor: crosshair;
+}
+
+.retela-structured-map img {
+  position: absolute;
+  width: 256px;
+  height: 256px;
+  max-width: none;
+  user-select: none;
+}
+
+.retela-structured-map-wrap > p {
+  margin: 0;
+  color: #557166;
+  font-size: 0.75rem;
+  font-weight: 750;
+}
+
+.retela-structured-location.is-compact .retela-structured-map {
+  min-height: 190px;
+}
+
+.retela-structured-location.is-compact .retela-structured-location-current {
+  justify-self: start;
+}
+
+.retela-location-persistence-note {
+  margin: 0;
+  border: 1px solid #d9eee2;
+  border-radius: 14px;
+  background: #f7fff9;
+  padding: 11px 12px;
+  color: #557166;
+  font-size: 0.78rem;
+  font-weight: 750;
+  line-height: 1.5;
+}
+
+.customer-profile-field small {
+  display: block;
+  margin-top: 4px;
+  color: #64748b;
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
 .order-delivery-info-card {
   display: grid;
   gap: 12px;
@@ -7793,6 +8031,16 @@ button {
 
   .retela-location-search-row {
     grid-template-columns: 1fr;
+  }
+
+  .retela-structured-map,
+  .retela-structured-location.is-compact .retela-structured-map {
+    min-height: 210px;
+  }
+
+  .retela-structured-location-current,
+  .retela-structured-location-manual {
+    width: 100%;
   }
 
   .retela-location-selector-footer {

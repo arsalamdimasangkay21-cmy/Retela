@@ -1,30 +1,48 @@
 import fs from "fs/promises";
+import crypto from "crypto";
 import path from "path";
 import { fileURLToPath } from "url";
 import { Router } from "express";
 import { z } from "zod";
 import { query } from "../config/db.js";
+import { UPLOAD_ROOT } from "../config/uploads.js";
 import { requireAuth, requireRole } from "../middleware/auth.js";
-import { upload } from "../middleware/upload.js";
+import { settingsUpload } from "../middleware/upload.js";
 import { asyncHandler, HttpError } from "../utils/errors.js";
 import { ensureProductInventoryColumns } from "../utils/productInventory.js";
 import {
   DEFAULT_SYSTEM_SETTINGS,
+  GCASH_QR_URL,
+  getGcashQrImage,
   loadSystemSettings,
   normalizeSystemSettings,
   resetSystemSettings,
+  removeGcashQrImage,
+  saveGcashQrImage,
   sanitizeSystemSettings,
   saveSystemSettings
 } from "../utils/systemSettings.js";
 import { getAIProviderStatus } from "../utils/aiProvider.js";
-import { calculateCheckoutPricing, getPromotionSummary } from "../utils/promotions.js";
-import { getActiveShippingSettings, saveActiveShippingSettings, shippingSummary } from "../utils/shippingSettings.js";
+import { activeCouponsFromSettings, calculateCheckoutPricing, getPromotionSummary } from "../utils/promotions.js";
+import {
+  calculateShippingQuote,
+  getActiveShippingSettings,
+  getShippingPolicy,
+  quoteShippingLocation,
+  saveActiveShippingSettings,
+  shippingSummary
+} from "../utils/shippingSettings.js";
+import {
+  customerLocationFromRow,
+  ensureCustomerLocationColumns,
+  loadCustomerDeliveryLocation
+} from "../utils/customerLocation.js";
 
 const router = Router();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const backendRoot = path.join(__dirname, "../..");
-const uploadsDir = path.join(backendRoot, "uploads");
+const uploadsDir = UPLOAD_ROOT;
 const defaultShippingFallback = {
   type: "fixed",
   name: "Standard Shipping",
@@ -32,15 +50,41 @@ const defaultShippingFallback = {
   fee: 0
 };
 
+function emitShippingUpdate(req, shipping) {
+  if (!shipping) return;
+  req.app.get("io")?.emit("shipping:update", {
+    type: shipping.enabled ? "fixed" : "free",
+    fee: shipping.enabled ? shipping.fixedFee : 0,
+    outsideAreaShippingFee: shipping.enabled ? shipping.outsideAreaShippingFee : 0,
+    freeDeliveryMunicipalities: shipping.freeDeliveryMunicipalities,
+    freeDeliveryRadiusKm: shipping.freeDeliveryRadiusKm,
+    name: shipping.rateName || "Shipping",
+    enabled: shipping.enabled
+  });
+}
+
 function normalizeShippingFallbackFromConfig(config) {
   const enabled = config.payment.shippingFeeType !== "free";
   return {
     type: enabled ? "fixed" : "free",
     name: config.payment.shippingRateName || "Standard Shipping",
     enabled,
-    fee: enabled ? Number(config.payment.shippingFee || 0) : 0
+    fee: enabled ? Number(config.payment.outsideAreaShippingFee ?? config.payment.shippingFee ?? 0) : 0,
+    outsideAreaShippingFee: enabled ? Number(config.payment.outsideAreaShippingFee ?? config.payment.shippingFee ?? 0) : 0,
+    freeDeliveryMunicipalities: config.payment.freeDeliveryMunicipalities,
+    freeDeliveryRadiusKm: Number(config.payment.freeDeliveryRadiusKm ?? 15)
   };
 }
+
+router.get("/gcash-qr", asyncHandler(async (req, res) => {
+  const image = await getGcashQrImage();
+  if (!image) throw new HttpError(404, "GCash QR image not found.");
+  res.setHeader("Content-Type", image.mime);
+  res.setHeader("Cache-Control", "public, max-age=60, must-revalidate");
+  const updatedAt = image.updatedAt ? new Date(image.updatedAt) : null;
+  if (updatedAt && !Number.isNaN(updatedAt.getTime())) res.setHeader("Last-Modified", updatedAt.toUTCString());
+  res.send(image.data);
+}));
 
 async function safeShippingSummary(config = null) {
   try {
@@ -67,6 +111,9 @@ async function safeActiveShippingSettings(config = null) {
       id: null,
       rateName: fallback.name,
       fixedFee: fallback.fee,
+      outsideAreaShippingFee: fallback.outsideAreaShippingFee ?? fallback.fee,
+      freeDeliveryMunicipalities: fallback.freeDeliveryMunicipalities || DEFAULT_SYSTEM_SETTINGS.payment.freeDeliveryMunicipalities,
+      freeDeliveryRadiusKm: fallback.freeDeliveryRadiusKm ?? DEFAULT_SYSTEM_SETTINGS.payment.freeDeliveryRadiusKm,
       enabled: fallback.enabled,
       active: true,
       updatedAt: null
@@ -107,7 +154,10 @@ router.get("/public", asyncHandler(async (req, res) => {
       shippingFeeType: shipping.type,
       shippingRateName: shipping.name,
       shippingFeeEnabled: shipping.enabled,
-      shippingFee: Number(shipping.fee || 0)
+      shippingFee: Number(shipping.fee || 0),
+      outsideAreaShippingFee: Number(shipping.outsideAreaShippingFee ?? shipping.fee ?? 0),
+      freeDeliveryMunicipalities: shipping.freeDeliveryMunicipalities || config.payment.freeDeliveryMunicipalities,
+      freeDeliveryRadiusKm: Number(shipping.freeDeliveryRadiusKm ?? config.payment.freeDeliveryRadiusKm ?? 15)
     },
     stats: {
       totalCustomers,
@@ -128,9 +178,45 @@ router.post("/coupons/validate", requireAuth, asyncHandler(async (req, res) => {
     items: z.array(z.object({ product_id: z.coerce.number().int().positive(), quantity: z.coerce.number().int().positive() })).min(1)
   });
   const input = schema.parse(req.body);
-  const pricing = await calculateCheckoutPricing(input.items, input.couponCode, input.fulfillmentMethod);
+  const location = input.fulfillmentMethod === "delivery"
+    ? await loadCustomerDeliveryLocation(req.user.id)
+    : null;
+  if (input.fulfillmentMethod === "delivery" && !location?.formattedAddress) {
+    throw new HttpError(400, "Please save your delivery location before checkout.");
+  }
+  const pricing = await calculateCheckoutPricing(
+    input.items,
+    input.couponCode,
+    input.fulfillmentMethod,
+    { location }
+  );
   if (input.couponCode && !pricing.coupon) throw new HttpError(400, "Coupon is invalid or expired.");
   res.json(pricing);
+}));
+
+router.post("/shipping/quote", requireAuth, asyncHandler(async (req, res) => {
+  const input = z.object({
+    fulfillmentMethod: z.enum(["delivery", "pickup"]).optional().default("delivery"),
+    couponCode: z.string().trim().max(40).optional().default("")
+  }).parse({
+    fulfillmentMethod: req.body?.fulfillmentMethod ?? req.body?.fulfillment_method,
+    couponCode: req.body?.couponCode ?? req.body?.coupon_code
+  });
+  const location = input.fulfillmentMethod === "delivery"
+    ? await loadCustomerDeliveryLocation(req.user.id)
+    : null;
+  if (input.fulfillmentMethod === "delivery" && !location?.formattedAddress) {
+    throw new HttpError(400, "Please save your delivery location before checkout.");
+  }
+  const { config } = await loadSystemSettings();
+  const coupon = activeCouponsFromSettings(config).find(
+    (item) => item.code.toLowerCase() === input.couponCode.toLowerCase()
+  );
+  const quote = await calculateShippingQuote(location || {}, {
+    fulfillmentMethod: input.fulfillmentMethod,
+    couponFreeShipping: Boolean(coupon?.freeShipping)
+  });
+  res.json(quote);
 }));
 
 router.use(requireAuth, requireRole("admin"));
@@ -171,7 +257,10 @@ async function buildSettingsResponse(config, encryptedOpenAiApiKey, databaseStat
       shippingFeeType: shipping.enabled ? "fixed" : "free",
       shippingRateName: shipping.rateName,
       shippingFeeEnabled: shipping.enabled,
-      shippingFee: shipping.fixedFee
+      shippingFee: shipping.outsideAreaShippingFee,
+      outsideAreaShippingFee: shipping.outsideAreaShippingFee,
+      freeDeliveryMunicipalities: shipping.freeDeliveryMunicipalities,
+      freeDeliveryRadiusKm: shipping.freeDeliveryRadiusKm
     },
     ai: {
       ...sanitized.ai,
@@ -194,7 +283,7 @@ function parseSettingsPayload(req) {
   return source;
 }
 
-function applyUploadUrls(settings, files = {}) {
+async function applyUploadUrls(settings, files = {}) {
   const nextSettings = {
     ...settings,
     general: { ...settings.general },
@@ -202,8 +291,14 @@ function applyUploadUrls(settings, files = {}) {
   };
   const shopLogo = files.shopLogo?.[0];
   const gcashQr = files.gcashQr?.[0];
-  if (shopLogo) nextSettings.general.shopLogoUrl = `/uploads/${shopLogo.filename}`;
-  if (gcashQr) nextSettings.payment.gcashQrUrl = `/uploads/${gcashQr.filename}`;
+  if (shopLogo?.buffer?.length) {
+    const extensions = { "image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp" };
+    const filename = `${crypto.randomUUID()}${extensions[shopLogo.mimetype] || ".jpg"}`;
+    await fs.mkdir(uploadsDir, { recursive: true });
+    await fs.writeFile(path.join(uploadsDir, filename), shopLogo.buffer);
+    nextSettings.general.shopLogoUrl = `/uploads/${filename}`;
+  }
+  if (gcashQr?.buffer?.length) nextSettings.payment.gcashQrUrl = GCASH_QR_URL;
   return nextSettings;
 }
 
@@ -215,26 +310,45 @@ router.get("/", asyncHandler(async (req, res) => {
   res.json(await buildSettingsResponse(config, encryptedOpenAiApiKey, databaseStatus));
 }));
 
-router.put("/", upload.fields([
+router.put("/", settingsUpload.fields([
   { name: "shopLogo", maxCount: 1 },
   { name: "gcashQr", maxCount: 1 }
 ]), asyncHandler(async (req, res) => {
-  const payload = applyUploadUrls(parseSettingsPayload(req), req.files);
+  const current = await loadSystemSettings();
+  const payload = await applyUploadUrls(parseSettingsPayload(req), req.files);
+  if (!req.files?.gcashQr?.[0] && current.config.payment.gcashQrUrl) {
+    payload.payment = { ...payload.payment, gcashQrUrl: current.config.payment.gcashQrUrl };
+  }
   const openaiApiKey = String(payload.ai?.openaiApiKey || "").trim();
   let saved;
+  let savedShipping;
   if (payload.payment) {
     try {
-      await saveActiveShippingSettings({
+      const shipping = await saveActiveShippingSettings({
         rateName: payload.payment.shippingRateName || "Standard Shipping",
-        fixedFee: payload.payment.shippingFee,
-        enabled: payload.payment.shippingFeeEnabled ?? payload.payment.shippingFeeType !== "free"
+        outsideAreaShippingFee: payload.payment.outsideAreaShippingFee ?? payload.payment.shippingFee,
+        freeDeliveryMunicipalities: payload.payment.freeDeliveryMunicipalities,
+        freeDeliveryRadiusKm: payload.payment.freeDeliveryRadiusKm,
+        enabled: true
       }, req.user.id);
+      savedShipping = shipping;
+      payload.payment = {
+        ...payload.payment,
+        shippingFeeType: "fixed",
+        shippingFeeEnabled: true,
+        shippingFee: shipping.outsideAreaShippingFee,
+        outsideAreaShippingFee: shipping.outsideAreaShippingFee,
+        freeDeliveryMunicipalities: shipping.freeDeliveryMunicipalities,
+        freeDeliveryRadiusKm: shipping.freeDeliveryRadiusKm
+      };
     } catch (error) {
       console.error("[settings] Shipping settings save failed", { code: error?.code, message: error?.message });
       throw new HttpError(503, "Unable to save shipping settings. Please try again.");
     }
   }
+  if (req.files?.gcashQr?.[0]) await saveGcashQrImage(req.files.gcashQr[0]);
   saved = await saveSystemSettings(payload, { openaiApiKey: openaiApiKey || undefined });
+  emitShippingUpdate(req, savedShipping);
   const databaseStatus = await getDatabaseStatus();
   res.json({
     message: "Settings saved successfully",
@@ -250,8 +364,11 @@ router.get("/shipping", asyncHandler(async (req, res) => {
 router.put("/shipping", asyncHandler(async (req, res) => {
   const schema = z.object({
     rateName: z.string().trim().max(120).optional().default(""),
-    fixedFee: z.coerce.number().min(0, "Shipping fee cannot be negative.").max(99999),
-    enabled: z.boolean()
+    fixedFee: z.coerce.number().min(0, "Shipping fee cannot be negative.").max(99999).optional(),
+    outsideAreaShippingFee: z.coerce.number().min(0, "Shipping fee cannot be negative.").max(99999).optional(),
+    freeDeliveryMunicipalities: z.array(z.string().trim().min(1).max(120)).max(100).optional(),
+    freeDeliveryRadiusKm: z.coerce.number().min(0).max(1000).optional(),
+    enabled: z.boolean().optional()
   });
   const input = schema.parse(req.body);
   const shipping = await saveActiveShippingSettings(input, req.user.id);
@@ -263,20 +380,79 @@ router.put("/shipping", asyncHandler(async (req, res) => {
       shippingFeeType: shipping.enabled ? "fixed" : "free",
       shippingRateName: shipping.rateName,
       shippingFeeEnabled: shipping.enabled,
-      shippingFee: shipping.fixedFee
+      shippingFee: shipping.outsideAreaShippingFee,
+      outsideAreaShippingFee: shipping.outsideAreaShippingFee,
+      freeDeliveryMunicipalities: shipping.freeDeliveryMunicipalities,
+      freeDeliveryRadiusKm: shipping.freeDeliveryRadiusKm
     }
   });
-  req.app.get("io")?.emit("shipping:update", {
-    type: shipping.enabled ? "fixed" : "free",
-    fee: shipping.enabled ? shipping.fixedFee : 0,
-    name: shipping.rateName || "Shipping",
-    enabled: shipping.enabled
-  });
+  emitShippingUpdate(req, shipping);
   res.json(shipping);
+}));
+
+router.delete("/gcash-qr", asyncHandler(async (req, res) => {
+  const saved = await removeGcashQrImage();
+  const databaseStatus = await getDatabaseStatus();
+  res.json({
+    message: "GCash QR removed.",
+    settings: await buildSettingsResponse(saved.config, saved.encryptedOpenAiApiKey, databaseStatus)
+  });
+}));
+
+router.get("/delivery-customers", asyncHandler(async (req, res) => {
+  await ensureCustomerLocationColumns();
+  const filter = z.enum(["all", "nearby", "outside"]).catch("all").parse(String(req.query.zone || "all"));
+  const search = String(req.query.search || "").trim().toLowerCase();
+  const [rows, policy] = await Promise.all([
+    query(
+      `SELECT id, username, display_name, location, formatted_address,
+         delivery_barangay, delivery_municipality, delivery_province, delivery_region,
+         delivery_postal_code, delivery_place_id, delivery_latitude, delivery_longitude,
+         delivery_landmark, delivery_notes, delivery_location_source
+       FROM users
+       WHERE role = 'customer' AND status = 'approved'
+       ORDER BY COALESCE(display_name, username) ASC`
+    ),
+    getShippingPolicy()
+  ]);
+  const classified = rows.map((row) => {
+    const location = customerLocationFromRow(row);
+    const quote = quoteShippingLocation(location, policy, { fulfillmentMethod: "delivery" });
+    return {
+      id: Number(row.id),
+      name: row.display_name || row.username || "Customer",
+      municipality: location.municipality || "",
+      address: location.formattedAddress || "",
+      distanceKm: quote.distanceKm,
+      zone: quote.shippingZone,
+      shippingFee: quote.shippingFee,
+      shippingRule: quote.shippingRule,
+      reason: quote.reason
+    };
+  });
+  const summary = classified.reduce((counts, customer) => {
+    if (customer.zone === "nearby") counts.nearby += 1;
+    else counts.outside += 1;
+    return counts;
+  }, { nearby: 0, outside: 0 });
+  const customers = classified.filter((customer) => {
+    if (filter !== "all" && customer.zone !== filter) return false;
+    if (!search) return true;
+    return `${customer.name} ${customer.municipality} ${customer.address}`.toLowerCase().includes(search);
+  });
+  res.json({ summary, customers });
 }));
 
 router.post("/reset", asyncHandler(async (req, res) => {
   const reset = await resetSystemSettings();
+  const shipping = await saveActiveShippingSettings({
+    rateName: reset.config.payment.shippingRateName,
+    outsideAreaShippingFee: reset.config.payment.outsideAreaShippingFee,
+    freeDeliveryMunicipalities: reset.config.payment.freeDeliveryMunicipalities,
+    freeDeliveryRadiusKm: reset.config.payment.freeDeliveryRadiusKm,
+    enabled: reset.config.payment.shippingFeeEnabled
+  }, req.user.id);
+  emitShippingUpdate(req, shipping);
   const databaseStatus = await getDatabaseStatus();
   res.json({
     message: "Settings reset to default values",

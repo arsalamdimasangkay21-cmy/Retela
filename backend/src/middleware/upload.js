@@ -52,6 +52,12 @@ export const productUpload = multer({
   fileFilter: imageOnly
 });
 
+export const settingsUpload = multer({
+  storage: memoryStorage,
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: imageOnly
+});
+
 export const registrationUpload = multer({
   storage: memoryStorage,
   limits: { fileSize: 5 * 1024 * 1024 },

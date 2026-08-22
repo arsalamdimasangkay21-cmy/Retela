@@ -1,6 +1,12 @@
 import crypto from "crypto";
+import fs from "fs/promises";
+import path from "path";
 import { z } from "zod";
 import { query } from "../config/db.js";
+import { UPLOAD_ROOT } from "../config/uploads.js";
+import { DEFAULT_FREE_DELIVERY_MUNICIPALITIES, normalizeMunicipalityList } from "./shippingCalculator.js";
+
+export const GCASH_QR_URL = "/api/settings/gcash-qr";
 
 export const DEFAULT_SYSTEM_SETTINGS = {
   general: {
@@ -11,6 +17,9 @@ export const DEFAULT_SYSTEM_SETTINGS = {
     emailAddress: "",
     shopAddress: "",
     shopMunicipality: "",
+    shopProvince: "",
+    shopRegion: "",
+    shopPlaceId: "",
     shopLatitude: null,
     shopLongitude: null,
     currency: "PHP",
@@ -46,6 +55,9 @@ export const DEFAULT_SYSTEM_SETTINGS = {
     shippingRateName: "Standard Shipping",
     shippingFeeEnabled: true,
     shippingFee: 0,
+    freeDeliveryMunicipalities: DEFAULT_FREE_DELIVERY_MUNICIPALITIES,
+    freeDeliveryRadiusKm: 15,
+    outsideAreaShippingFee: 0,
     coupons: []
   },
   security: {
@@ -113,6 +125,9 @@ const settingsSchema = z.object({
     emailAddress: z.string().trim().email("Use a valid email address").or(z.literal("")).default(""),
     shopAddress: z.string().trim().max(255).optional().default(""),
     shopMunicipality: z.string().trim().max(120).optional().default(""),
+    shopProvince: z.string().trim().max(120).optional().default(""),
+    shopRegion: z.string().trim().max(120).optional().default(""),
+    shopPlaceId: z.string().trim().max(255).optional().default(""),
     shopLatitude: z.preprocess((value) => value === "" || value == null ? null : Number(value), z.number().min(-90).max(90).nullable()).optional().default(null),
     shopLongitude: z.preprocess((value) => value === "" || value == null ? null : Number(value), z.number().min(-180).max(180).nullable()).optional().default(null),
     currency: z.enum(["PHP"]).default("PHP"),
@@ -148,6 +163,9 @@ const settingsSchema = z.object({
     shippingRateName: z.string().trim().max(120).optional().default("Standard Shipping"),
     shippingFeeEnabled: z.boolean().optional().default(true),
     shippingFee: z.coerce.number().min(0).max(99999).optional().default(0),
+    freeDeliveryMunicipalities: z.array(z.string().trim().min(1).max(120)).max(100).optional().default(DEFAULT_FREE_DELIVERY_MUNICIPALITIES),
+    freeDeliveryRadiusKm: z.coerce.number().min(0).max(1000).optional().default(15),
+    outsideAreaShippingFee: z.coerce.number().min(0).max(99999).optional().default(0),
     coupons: z.array(z.object({
       code: z.string().trim().min(2).max(40),
       discountPercent: z.coerce.number().min(0).max(100).optional().default(0),
@@ -266,16 +284,72 @@ function parseStoredConfig(value) {
   }
 }
 
+function legacyQrUpload(config) {
+  const rawUrl = String(config?.payment?.gcashQrUrl || "").trim();
+  if (!rawUrl || rawUrl === GCASH_QR_URL) return null;
+  let pathname = rawUrl;
+  try {
+    pathname = new URL(rawUrl, "http://retela.local").pathname;
+  } catch {
+    return null;
+  }
+  if (!pathname.startsWith("/uploads/")) return null;
+  const filename = path.basename(pathname);
+  if (!filename) return null;
+  const extension = path.extname(filename).toLowerCase();
+  const mime = extension === ".png" ? "image/png" : extension === ".webp" ? "image/webp" : "image/jpeg";
+  return { filename, mime };
+}
+
+async function migrateLegacyGcashQr(config) {
+  const legacy = legacyQrUpload(config);
+  if (!legacy) return false;
+  try {
+    const data = await fs.readFile(path.join(UPLOAD_ROOT, legacy.filename));
+    if (!data.length) return false;
+    await query(
+      `UPDATE system_settings
+       SET gcash_qr_data = :data,
+           gcash_qr_mime = :mime,
+           gcash_qr_updated_at = NOW()
+       WHERE id = 1`,
+      { data, mime: legacy.mime }
+    );
+    return true;
+  } catch (error) {
+    if (error?.code !== "ENOENT") {
+      console.warn("[settings] Legacy GCash QR migration failed", { code: error?.code, message: error?.message });
+    }
+    return false;
+  }
+}
+
 export async function ensureSettingsTable() {
-  settingsTableReady ||= query(`
-    CREATE TABLE IF NOT EXISTS system_settings (
-      id TINYINT PRIMARY KEY,
-      config_json LONGTEXT NOT NULL,
-      openai_api_key_encrypted TEXT NULL,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-    )
-  `).catch((error) => {
+  settingsTableReady ||= (async () => {
+    await query(`
+      CREATE TABLE IF NOT EXISTS system_settings (
+        id TINYINT PRIMARY KEY,
+        config_json LONGTEXT NOT NULL,
+        openai_api_key_encrypted TEXT NULL,
+        gcash_qr_data LONGBLOB NULL,
+        gcash_qr_mime VARCHAR(100) NULL,
+        gcash_qr_updated_at DATETIME NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      )
+    `);
+    const rows = await query(
+      `SELECT COLUMN_NAME
+       FROM INFORMATION_SCHEMA.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE()
+         AND TABLE_NAME = 'system_settings'
+         AND COLUMN_NAME IN ('gcash_qr_data', 'gcash_qr_mime', 'gcash_qr_updated_at')`
+    );
+    const columns = new Set(rows.map((row) => row.COLUMN_NAME));
+    if (!columns.has("gcash_qr_data")) await query("ALTER TABLE system_settings ADD COLUMN gcash_qr_data LONGBLOB NULL AFTER openai_api_key_encrypted");
+    if (!columns.has("gcash_qr_mime")) await query("ALTER TABLE system_settings ADD COLUMN gcash_qr_mime VARCHAR(100) NULL AFTER gcash_qr_data");
+    if (!columns.has("gcash_qr_updated_at")) await query("ALTER TABLE system_settings ADD COLUMN gcash_qr_updated_at DATETIME NULL AFTER gcash_qr_mime");
+  })().catch((error) => {
     settingsTableReady = undefined;
     throw error;
   });
@@ -283,7 +357,21 @@ export async function ensureSettingsTable() {
 }
 
 export function normalizeSystemSettings(settings) {
-  const merged = deepMerge(DEFAULT_SYSTEM_SETTINGS, settings);
+  const source = isPlainObject(settings) ? settings : {};
+  const sourcePayment = isPlainObject(source.payment) ? source.payment : {};
+  const migratedSettings = {
+    ...source,
+    payment: {
+      ...sourcePayment,
+      outsideAreaShippingFee: sourcePayment.outsideAreaShippingFee
+        ?? sourcePayment.shippingFee
+        ?? DEFAULT_SYSTEM_SETTINGS.payment.outsideAreaShippingFee,
+      freeDeliveryMunicipalities: normalizeMunicipalityList(
+        sourcePayment.freeDeliveryMunicipalities ?? DEFAULT_FREE_DELIVERY_MUNICIPALITIES
+      )
+    }
+  };
+  const merged = deepMerge(DEFAULT_SYSTEM_SETTINGS, migratedSettings);
   return settingsSchema.parse(merged);
 }
 
@@ -301,7 +389,7 @@ export function sanitizeSystemSettings(settings, encryptedOpenAiApiKey, database
 
 export async function loadSystemSettings() {
   await ensureSettingsTable();
-  const rows = await query("SELECT config_json, openai_api_key_encrypted FROM system_settings WHERE id = 1");
+  const rows = await query("SELECT config_json, openai_api_key_encrypted, gcash_qr_data IS NOT NULL AS has_gcash_qr FROM system_settings WHERE id = 1");
   if (!rows.length) {
     const config = normalizeSystemSettings(DEFAULT_SYSTEM_SETTINGS);
     await query(
@@ -313,6 +401,12 @@ export async function loadSystemSettings() {
     return { config, encryptedOpenAiApiKey: null };
   }
   const config = normalizeSystemSettings(parseStoredConfig(rows[0].config_json));
+  const hasPersistedQr = Boolean(rows[0].has_gcash_qr) || await migrateLegacyGcashQr(config);
+  if (hasPersistedQr) {
+    config.payment.gcashQrUrl = GCASH_QR_URL;
+  } else if (config.payment.gcashQrUrl === GCASH_QR_URL) {
+    config.payment.gcashQrUrl = "";
+  }
   return { config, encryptedOpenAiApiKey: rows[0].openai_api_key_encrypted || null };
 }
 
@@ -350,9 +444,70 @@ export async function saveSystemSettings(nextSettings, options = {}) {
 
 export async function resetSystemSettings() {
   await ensureSettingsTable();
-  await query("DELETE FROM system_settings WHERE id = 1");
-  const config = normalizeSystemSettings(DEFAULT_SYSTEM_SETTINGS);
+  const current = await loadSystemSettings();
+  const qrRows = await query("SELECT gcash_qr_data IS NOT NULL AS has_gcash_qr FROM system_settings WHERE id = 1");
+  const preservedQrUrl = Boolean(qrRows[0]?.has_gcash_qr)
+    ? GCASH_QR_URL
+    : current.config.payment.gcashQrUrl;
+  const config = normalizeSystemSettings({
+    ...DEFAULT_SYSTEM_SETTINGS,
+    payment: {
+      ...DEFAULT_SYSTEM_SETTINGS.payment,
+      gcashQrUrl: preservedQrUrl || ""
+    }
+  });
+  await query(
+    `INSERT INTO system_settings (id, config_json, openai_api_key_encrypted)
+     VALUES (1, :configJson, NULL)
+     ON DUPLICATE KEY UPDATE config_json = VALUES(config_json), openai_api_key_encrypted = NULL`,
+    { configJson: JSON.stringify(config) }
+  );
   return { config, encryptedOpenAiApiKey: null };
+}
+
+export async function getGcashQrImage() {
+  await ensureSettingsTable();
+  const rows = await query(
+    "SELECT gcash_qr_data, gcash_qr_mime, gcash_qr_updated_at FROM system_settings WHERE id = 1 LIMIT 1"
+  );
+  const row = rows[0];
+  if (!Buffer.isBuffer(row?.gcash_qr_data) || row.gcash_qr_data.length === 0) return null;
+  return {
+    data: row.gcash_qr_data,
+    mime: row.gcash_qr_mime || "image/png",
+    updatedAt: row.gcash_qr_updated_at || null
+  };
+}
+
+export async function saveGcashQrImage(file) {
+  if (!Buffer.isBuffer(file?.buffer) || file.buffer.length === 0) {
+    throw new Error("GCash QR image data is required");
+  }
+  await ensureSettingsTable();
+  await query(
+    `UPDATE system_settings
+     SET gcash_qr_data = :imageData,
+         gcash_qr_mime = :imageMime,
+         gcash_qr_updated_at = NOW()
+     WHERE id = 1`,
+    { imageData: file.buffer, imageMime: file.mimetype || "image/png" }
+  );
+}
+
+export async function removeGcashQrImage() {
+  const { config } = await loadSystemSettings();
+  const saved = await saveSystemSettings({
+    ...config,
+    payment: { ...config.payment, gcashQrUrl: "" }
+  });
+  await query(
+    `UPDATE system_settings
+     SET gcash_qr_data = NULL,
+         gcash_qr_mime = NULL,
+         gcash_qr_updated_at = NULL
+     WHERE id = 1`
+  );
+  return saved;
 }
 
 export async function getOpenAiRuntimeSettings() {
