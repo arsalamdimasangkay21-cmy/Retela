@@ -1507,7 +1507,7 @@ function PremiumInventoryPage({
                       <span className="mt-1 block break-words text-xs text-white/45">{product.brand || "Other"} | {product.category || "Apparel"} | {product.size || "Free Size"}</span>
                       <div className="mt-2 flex flex-wrap items-center gap-2">
                         <InventoryStatusBadge stock={product.stock} status={product.status} />
-                        <span className="rounded-full border border-white/10 bg-white/[0.06] px-3 py-1 text-xs font-bold text-white/65">{product.stock} stock</span>
+                        <AdminStockBadge stock={product.stock} />
                       </div>
                     </div>
                   </div>
@@ -1622,6 +1622,17 @@ function InventoryStatusBadge({ stock, status }) {
     "Out of Stock": "border-rose-400/20 bg-rose-400/10 text-rose-300"
   };
   return <span className={`inline-flex rounded-full border px-3 py-1 text-xs font-bold ${styles[badgeStatus]}`}>{badgeStatus}</span>;
+}
+
+function AdminStockBadge({ stock, compact = false }) {
+  const quantity = Number(stock || 0);
+  const sold = quantity <= 0;
+  const tone = sold
+    ? "border-rose-300/50 bg-rose-500/15 text-rose-200"
+    : quantity <= 5
+      ? "border-orange-400/20 bg-orange-400/10 text-orange-300"
+      : "border-emerald-400/20 bg-emerald-400/10 text-emerald-300";
+  return <span className={`inline-flex rounded-full border px-2.5 py-1 font-bold ${compact ? "text-[11px]" : "text-xs"} ${tone}`}>{sold ? "SOLD" : `${quantity} stock`}</span>;
 }
 
 function InventoryActions({ product, onEdit, onUpdateStock, onDelete, deletingProductIds = [], mobile = false }) {
@@ -3461,7 +3472,7 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
       });
       onMeetingPlaceSaved?.({
         meeting_place: data.meeting_place || null,
-                meetup_date: data.meetup_date || null,
+        meetup_date: data.meetup_date || null,
         meetup_time: data.meetup_time || null,
         meetup_confirmation_status: data.meetup_confirmation_status || "pending",
         meetup_confirmed_at: data.meetup_confirmed_at || null,
@@ -3512,14 +3523,17 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
                   <p className="text-xs font-bold uppercase tracking-[0.16em] text-emerald-700">Meeting Place</p>
                   <h4 className="mt-1 font-display text-lg font-bold text-[#111827]">Admin-selected meetup location</h4>
                 </div>
-                <textarea
-                  value={meetingPlaceDraft}
-                  onChange={(event) => setMeetingPlaceDraft(event.target.value)}
-                  maxLength={500}
-                  rows={3}
-                  placeholder="Enter meeting place"
-                  className="min-h-24 w-full resize-y rounded-2xl border border-[#dfe9e3] bg-white px-3 py-3 text-sm font-semibold text-[#111827] outline-none placeholder:text-slate-400 focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100"
-                />
+                <label className="grid gap-1 text-sm font-bold text-slate-700">
+                  <span>Meeting Place</span>
+                  <textarea
+                    value={meetingPlaceDraft}
+                    onChange={(event) => setMeetingPlaceDraft(event.target.value)}
+                    maxLength={500}
+                    rows={2}
+                    placeholder="Enter meeting place"
+                    className="min-h-16 w-full resize-y rounded-xl border border-[#dfe9e3] bg-white px-3 py-2 text-sm font-semibold text-[#111827] outline-none placeholder:text-slate-400 focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100"
+                  />
+                </label>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <label className="grid gap-1 text-sm font-bold text-slate-700">
                     <span>Meetup Date</span>
@@ -3968,7 +3982,7 @@ function ProductGallery({ products, filters, setFilters, optionValues, onAdd, on
               </div>
               <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
                 <strong className="text-sm text-white">PHP {Number(p.price || 0).toLocaleString()}</strong>
-                <span className={`rounded-full border px-2.5 py-1 text-[11px] font-bold ${p.stock <= 5 ? "border-orange-400/20 bg-orange-400/10 text-orange-300" : "border-emerald-400/20 bg-emerald-400/10 text-emerald-300"}`}>{p.stock} stock</span>
+                <AdminStockBadge stock={p.stock} compact />
               </div>
               <div className="mt-3 grid grid-cols-2 gap-2">
                 <button type="button" onClick={() => onEdit?.(p)} className="inline-flex items-center justify-center gap-1 rounded-xl border border-white/10 bg-white/[0.06] px-3 py-2 text-xs font-bold text-white/72 transition hover:border-neonbrand/40 hover:text-neonbrand">
