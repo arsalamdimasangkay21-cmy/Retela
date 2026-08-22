@@ -1322,7 +1322,7 @@ function PremiumInventoryPage({
   productToast,
   onDismissToast
 }) {
-  const sourceProducts = products.map(normalizeInventoryProduct);
+  const sourceProducts = useMemo(() => products.map(normalizeInventoryProduct), [products]);
   const [page, setPage] = useState(1);
   const [barcodeQuery, setBarcodeQuery] = useState("");
   const [focusedSku, setFocusedSku] = useState("");
@@ -1830,9 +1830,11 @@ function BarcodeCameraModal({ onDetected, onClose }) {
     let cancelled = false;
     async function startScanner() {
       try {
-        const { Html5Qrcode } = await import("html5-qrcode");
+        const { Html5Qrcode, Html5QrcodeSupportedFormats } = await import("html5-qrcode");
         if (cancelled) return;
-        const scanner = new Html5Qrcode(regionId.current);
+        const scanner = new Html5Qrcode(regionId.current, {
+          formatsToSupport: [Html5QrcodeSupportedFormats.CODE_128]
+        });
         scannerRef.current = scanner;
         await scanner.start(
           { facingMode: "environment" },
@@ -3106,7 +3108,7 @@ function barcodeSvgMarkup(value) {
     svg.setAttribute("role", "img");
     svg.setAttribute("aria-label", `CODE128 barcode ${safeValue}`);
     svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
-    return new XMLSerializer().serializeToString(svg);
+    return new window.XMLSerializer().serializeToString(svg);
   } catch {
     return `<div class="barcode-error">${safeValue}</div>`;
   }
