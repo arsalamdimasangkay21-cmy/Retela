@@ -653,6 +653,19 @@ async function ensureCoreTables() {
   await requireUsableAutoIncrementId(storageTable);
   await ensureProductAlias(storageTable);
 
+  await ensureTable("product_additional_images", `
+    CREATE TABLE IF NOT EXISTS product_additional_images (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      product_id INT NOT NULL,
+      image_data LONGBLOB NOT NULL,
+      image_mime VARCHAR(100) NOT NULL,
+      sort_order INT NOT NULL DEFAULT 0,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_product_additional_images_product (product_id),
+      INDEX idx_product_additional_images_order (product_id, sort_order, id)
+    )
+  `);
+
   await ensureTable("system_settings", `
     CREATE TABLE IF NOT EXISTS system_settings (
       id TINYINT PRIMARY KEY,

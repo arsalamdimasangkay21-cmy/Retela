@@ -220,6 +220,8 @@ export default function AdminDashboard({ active, onChange }) {
   const [reviews, setReviews] = useState([]);
   const [form, setForm] = useState(blankProduct);
   const [productImage, setProductImage] = useState(null);
+  const [additionalImages, setAdditionalImages] = useState([]);
+  const [removedAdditionalImageIds, setRemovedAdditionalImageIds] = useState([]);
   const [editingProductId, setEditingProductId] = useState(null);
   const [inventoryModalOpen, setInventoryModalOpen] = useState(false);
   const [inventoryFocusSku, setInventoryFocusSku] = useState("");
@@ -277,6 +279,14 @@ export default function AdminDashboard({ active, onChange }) {
     setProductToast({ message, tone, placement });
     window.clearTimeout(showProductToast.timer);
     showProductToast.timer = window.setTimeout(() => setProductToast(null), 2800);
+  }
+
+  function clearAdditionalImageState() {
+    additionalImages.forEach((image) => {
+      if (image?.previewUrl?.startsWith("blob:")) URL.revokeObjectURL(image.previewUrl);
+    });
+    setAdditionalImages([]);
+    setRemovedAdditionalImageIds([]);
   }
 
   const canUpdate = useCallback((cancelled) => mountedRef.current && !cancelled?.(), []);
@@ -481,6 +491,11 @@ export default function AdminDashboard({ active, onChange }) {
       if (editingProductId && resolvedForm.image_url) payload.append("image_url", resolvedForm.image_url);
       const selectedImageFile = typeof File !== "undefined" && selectedImage instanceof File ? selectedImage : null;
       if (selectedImageFile) payload.append("image", selectedImageFile);
+      const selectedAdditionalFiles = additionalImages
+        .map((image) => image?.file)
+        .filter((file) => typeof File !== "undefined" && file instanceof File);
+      selectedAdditionalFiles.forEach((file) => payload.append("additional_images", file));
+      payload.append("additional_image_ids_to_remove", JSON.stringify(removedAdditionalImageIds));
       if (import.meta.env.DEV) {
         console.log("[apparel image submit]", {
           hasFile: Boolean(selectedImageFile),
@@ -498,6 +513,7 @@ export default function AdminDashboard({ active, onChange }) {
       const savedItem = response?.data?.item || response?.data?.product || response?.data;
       setForm(blankProduct);
       setProductImage(null);
+      clearAdditionalImageState();
       setEditingProductId(null);
       setInventoryModalOpen(false);
       if (savedItem?.id) {
@@ -529,6 +545,13 @@ export default function AdminDashboard({ active, onChange }) {
     if (String(product.id).startsWith("sample-")) return;
     setEditingProductId(product.id);
     setProductImage(null);
+    clearAdditionalImageState();
+    setAdditionalImages((product.additional_images || []).map((image) => ({
+      id: image?.id,
+      url: image?.url || image?.image_url || image,
+      file: null,
+      previewUrl: image?.url || image?.image_url || image
+    })).filter((image) => image.url));
     setForm({
       name: product.name || "",
       brand: product.brand || "",
@@ -732,6 +755,7 @@ export default function AdminDashboard({ active, onChange }) {
           onAddItem={() => {
             setEditingProductId(null);
             setProductImage(null);
+            clearAdditionalImageState();
             setForm(blankProduct);
             setInventoryModalOpen(true);
           }}
@@ -743,6 +767,7 @@ export default function AdminDashboard({ active, onChange }) {
             setInventoryModalOpen(false);
             setEditingProductId(null);
             setProductImage(null);
+            clearAdditionalImageState();
             setForm(blankProduct);
           }}
           editingProductId={editingProductId}
@@ -750,6 +775,10 @@ export default function AdminDashboard({ active, onChange }) {
           setForm={setForm}
           productImage={productImage}
           setProductImage={setProductImage}
+          additionalImages={additionalImages}
+          setAdditionalImages={setAdditionalImages}
+          removedAdditionalImageIds={removedAdditionalImageIds}
+          setRemovedAdditionalImageIds={setRemovedAdditionalImageIds}
           saveProduct={saveProduct}
           productSaving={productSaving}
           optionValues={optionValues}
@@ -1279,6 +1308,10 @@ function PremiumInventoryPage({
   setForm,
   productImage,
   setProductImage,
+  additionalImages = [],
+  setAdditionalImages,
+  removedAdditionalImageIds = [],
+  setRemovedAdditionalImageIds,
   saveProduct,
   productSaving = false,
   optionValues = {},
@@ -1600,6 +1633,10 @@ function PremiumInventoryPage({
           setForm={setForm}
           productImage={productImage}
           setProductImage={setProductImage}
+          additionalImages={additionalImages}
+          setAdditionalImages={setAdditionalImages}
+          removedAdditionalImageIds={removedAdditionalImageIds}
+          setRemovedAdditionalImageIds={setRemovedAdditionalImageIds}
           saveProduct={saveProduct}
           productSaving={productSaving}
           optionValues={optionValues}
@@ -1873,7 +1910,7 @@ function AdminToast({ toast, onClose }) {
   );
 }
 
-function ProductEditorModal({ editingProductId, form, setForm, productImage, setProductImage, saveProduct, productSaving = false, optionValues = {}, optionMeta = {}, refreshApparelOptions, showProductToast, onClose }) {
+function ProductEditorModal({ editingProductId, form, setForm, productImage, setProductImage, additionalImages = [], setAdditionalImages = () => {}, removedAdditionalImageIds = [], setRemovedAdditionalImageIds = () => {}, saveProduct, productSaving = false, optionValues = {}, optionMeta = {}, refreshApparelOptions, showProductToast, onClose }) {
   const inputClass = "h-12 min-h-12 w-full rounded-xl border border-[#cfded4] bg-white px-3 py-2 text-sm font-semibold text-[#17211b] outline-none transition placeholder:text-[#8b9a91] focus:border-[#20b66a] focus:ring-4 focus:ring-[rgba(32,182,106,0.18)]";
   const secondaryButtonClass = "inline-flex min-h-12 items-center justify-center rounded-xl border border-[#cfded4] bg-white px-5 py-2.5 text-sm font-bold text-[#17211b] shadow-sm transition hover:border-[#20b66a] hover:text-[#15884f] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#20b66a] active:scale-95";
   const primaryButtonClass = "inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-[#20b66a] px-5 py-2.5 text-sm font-bold text-white shadow-lg shadow-emerald-700/18 transition hover:bg-[#15884f] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#20b66a] active:scale-95";
@@ -1885,6 +1922,8 @@ function ProductEditorModal({ editingProductId, form, setForm, productImage, set
   const [selectedImageFile, setSelectedImageFile] = useState(null);
   const [previewImageUrl, setPreviewImageUrl] = useState(null);
   const [imageLoadFailed, setImageLoadFailed] = useState(false);
+  const [additionalImageEntries, setAdditionalImageEntries] = useState(additionalImages);
+  const additionalImageEntriesRef = useRef(additionalImages);
   const previewObjectUrlRef = useRef("");
   const displayedImageUrl = previewImageUrl || existingImageUrl;
   const optionConfigs = [
@@ -1906,16 +1945,38 @@ function ProductEditorModal({ editingProductId, form, setForm, productImage, set
   useEffect(() => {
     revokePreviewObjectUrl();
     setExistingImageUrl(resolveProductImageUrl(form));
+    setAdditionalImageEntries(additionalImages);
+    additionalImageEntriesRef.current = additionalImages;
     setSelectedImageFile(null);
     setPreviewImageUrl(null);
     setImageLoadFailed(false);
     setProductImage(null);
   }, [editingProductId, form.image_url]);
 
-  useEffect(() => () => revokePreviewObjectUrl(), []);
+  useEffect(() => () => {
+    revokePreviewObjectUrl();
+    additionalImageEntriesRef.current.forEach((image) => {
+      if (image?.previewUrl?.startsWith("blob:")) URL.revokeObjectURL(image.previewUrl);
+    });
+  }, []);
+
+  function updateAdditionalImageEntries(nextEntries) {
+    additionalImageEntriesRef.current = nextEntries;
+    setAdditionalImageEntries(nextEntries);
+    setAdditionalImages(nextEntries);
+  }
+
+  function isSupportedImage(file) {
+    return ["image/jpeg", "image/png", "image/webp"].includes(String(file?.type || "").toLowerCase());
+  }
 
   function handleImageChange(event) {
     const file = event.target.files?.[0] || null;
+    if (file && (!isSupportedImage(file) || file.size > 5 * 1024 * 1024)) {
+      showProductToast("Main image must be JPG, PNG, or WEBP up to 5MB.", "error", "top-right");
+      event.target.value = "";
+      return;
+    }
     revokePreviewObjectUrl();
     setSelectedImageFile(file);
     setProductImage(file);
@@ -1927,6 +1988,41 @@ function ProductEditorModal({ editingProductId, form, setForm, productImage, set
     const objectUrl = URL.createObjectURL(file);
     previewObjectUrlRef.current = objectUrl;
     setPreviewImageUrl(objectUrl);
+  }
+
+  function handleAdditionalImageChange(event) {
+    const files = Array.from(event.target.files || []);
+    event.target.value = "";
+    if (!files.length) return;
+    const availableSlots = 10 - additionalImageEntries.length;
+    if (files.length > availableSlots) {
+      showProductToast(`You can add ${availableSlots} more image${availableSlots === 1 ? "" : "s"}.`, "error", "top-right");
+      return;
+    }
+    const invalidFile = files.find((file) => !isSupportedImage(file) || file.size > 5 * 1024 * 1024);
+    if (invalidFile) {
+      showProductToast("Additional images must be JPG, PNG, or WEBP up to 5MB each.", "error", "top-right");
+      return;
+    }
+    const nextEntries = [
+      ...additionalImageEntries,
+      ...files.map((file) => ({
+        id: null,
+        url: "",
+        file,
+        previewUrl: URL.createObjectURL(file),
+        name: file.name
+      }))
+    ];
+    updateAdditionalImageEntries(nextEntries);
+  }
+
+  function removeAdditionalImage(entry) {
+    if (entry?.id) {
+      setRemovedAdditionalImageIds((current) => [...new Set([...current, Number(entry.id)])]);
+    }
+    if (entry?.previewUrl?.startsWith("blob:")) URL.revokeObjectURL(entry.previewUrl);
+    updateAdditionalImageEntries(additionalImageEntries.filter((image) => image !== entry));
   }
 
   async function createAndSelectOption(kind, formKey, name, successMessage) {
@@ -1986,6 +2082,10 @@ function ProductEditorModal({ editingProductId, form, setForm, productImage, set
 
   async function handleSubmit(event) {
     event.preventDefault();
+    if (!selectedImageFile && !displayedImageUrl) {
+      showProductToast("A main apparel image is required.", "error", "top-right");
+      return;
+    }
     const resolvedForm = await resolveOtherOptions(form);
     if (!resolvedForm) return;
     setForm(resolvedForm);
@@ -2072,8 +2172,8 @@ function ProductEditorModal({ editingProductId, form, setForm, productImage, set
               onDeleteOption={(option) => removeOptionImmediately({ ...option, kind: config.kind, formKey: config.formKey })}
             />
           ))}
-          <div className="grid gap-2">
-            <span className="text-xs font-bold text-slate-700">{editingProductId ? "Current image" : "Apparel image"}</span>
+          <div className="inventory-main-image-field grid gap-2">
+            <span className="text-xs font-bold text-slate-700">Main apparel image <span className="text-rose-600">(required)</span></span>
             <div className="grid gap-3 sm:grid-cols-[190px_minmax(0,1fr)] sm:items-stretch md:grid-cols-1">
               <div className="h-[160px] w-full overflow-hidden rounded-[14px] border border-[#d7e3db] bg-white">
                 {displayedImageUrl && !imageLoadFailed ? (
@@ -2089,10 +2189,40 @@ function ProductEditorModal({ editingProductId, form, setForm, productImage, set
               </div>
               <label className="flex min-h-12 cursor-pointer items-center justify-center gap-2 rounded-[14px] border border-dashed border-[#58c998] bg-[#effcf5] p-3 text-sm font-bold text-[#087a55] transition hover:bg-emerald-100 focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-[#20b66a]">
                 <Upload size={17} />
-                {selectedImageFile ? selectedImageFile.name : "Browse apparel image"}
-                <input className="hidden" type="file" accept="image/*" onChange={handleImageChange} aria-label="Browse apparel image" />
+                {selectedImageFile ? selectedImageFile.name : editingProductId ? "Replace main image" : "Add main image"}
+                <input className="hidden" type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" onChange={handleImageChange} aria-label="Add main apparel image" />
               </label>
             </div>
+          </div>
+          <div className="inventory-additional-images grid gap-3 md:col-span-2">
+            <div className="flex flex-wrap items-end justify-between gap-2">
+              <div>
+                <p className="text-sm font-bold text-[#17211b]">Additional apparel images</p>
+                <p className="mt-1 text-xs font-semibold text-[#60746a]">Supporting details such as tags, flaws, back views, and fabric close-ups.</p>
+              </div>
+              <span className="rounded-full border border-[#b9dfc5] bg-[#effaf2] px-3 py-1 text-xs font-bold text-[#176b37]">{additionalImageEntries.length} / 10 images</span>
+            </div>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 md:grid-cols-5">
+              {additionalImageEntries.map((image, index) => {
+                const source = image?.file ? image.previewUrl : resolveProductImageUrl(image?.previewUrl || image?.url);
+                return (
+                  <div key={image?.id || image?.previewUrl || `${image?.name || "image"}-${index}`} className="relative aspect-square overflow-hidden rounded-[14px] border border-[#d7e3db] bg-white shadow-sm">
+                    {source ? <img src={source} className="h-full w-full object-cover" alt={`${form.name || "Apparel"} detail ${index + 1}`} /> : <div className="grid h-full place-items-center text-xs font-bold text-slate-400">No preview</div>}
+                    <button type="button" onClick={() => removeAdditionalImage(image)} className="absolute right-1.5 top-1.5 grid h-8 w-8 place-items-center rounded-full border border-white/80 bg-white/95 text-rose-600 shadow-md transition hover:bg-rose-50" aria-label={`Remove additional image ${index + 1}`}>
+                      <X size={15} />
+                    </button>
+                  </div>
+                );
+              })}
+              {additionalImageEntries.length < 10 ? (
+                <label className="flex aspect-square cursor-pointer flex-col items-center justify-center gap-2 rounded-[14px] border border-dashed border-[#58c998] bg-[#effcf5] p-3 text-center text-xs font-bold text-[#087a55] transition hover:bg-emerald-100 focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-[#20b66a]">
+                  <Plus size={20} />
+                  Add Images
+                  <input className="hidden" type="file" multiple accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" onChange={handleAdditionalImageChange} aria-label="Add additional apparel images" />
+                </label>
+              ) : null}
+            </div>
+            <p className="text-xs font-semibold text-[#60746a]">JPG, PNG, or WEBP · Maximum 5MB per image · Up to 10 supporting images</p>
           </div>
           <textarea className={`${inputClass} h-auto min-h-[120px] max-h-[220px] resize-y md:col-span-2`} placeholder="Apparel description, fit notes, flaws, fabric, or styling details" value={form.description || ""} onChange={(e) => setForm({ ...form, description: e.target.value })} />
           <div className="sticky bottom-0 -mx-[22px] mt-1 grid gap-3 border-t border-[#dce8e0] bg-[#f8fbf9] px-[22px] pb-1 pt-3 md:col-span-2 sm:flex sm:justify-end">

@@ -14,7 +14,8 @@ import {
   nonDeletedProductWhere,
   productSkuForId,
   productStatusForStock,
-  productWriteTable
+  productWriteTable,
+  ensureProductAdditionalImagesTable
 } from "../utils/productInventory.js";
 
 const router = Router();
@@ -149,6 +150,128 @@ function productListResponse(row) {
   return createdProductResponse(row);
 }
 
+function additionalImageUrl(productId, imageId) {
+  return `/api/products/${Number(productId)}/additional-images/${Number(imageId)}`;
+}
+
+function parseAdditionalImageIds(value) {
+  if (Array.isArray(value)) return value;
+  if (typeof value !== "string" || !value.trim()) return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function normalizedAdditionalImageIds(value) {
+  return [...new Set(parseAdditionalImageIds(value)
+    .map((id) => Number(id))
+    .filter((id) => Number.isInteger(id) && id > 0))];
+}
+
+async function hydrateAdditionalImages(rows = []) {
+  const products = Array.isArray(rows) ? rows : [];
+  if (!products.length) return products;
+  await ensureProductAdditionalImagesTable();
+  const productIds = products.map((row) => Number(row.id)).filter((id) => Number.isInteger(id) && id > 0);
+  if (!productIds.length) return products;
+  const params = Object.fromEntries(productIds.map((id, index) => [`productId${index}`, id]));
+  const placeholders = productIds.map((_, index) => `:productId${index}`).join(", ");
+  const imageRows = await query(
+    `SELECT id, product_id, sort_order
+     FROM product_additional_images
+     WHERE product_id IN (${placeholders})
+     ORDER BY product_id ASC, sort_order ASC, id ASC`,
+    params
+  );
+  const grouped = new Map();
+  imageRows.forEach((image) => {
+    const productId = Number(image.product_id);
+    const current = grouped.get(productId) || [];
+    current.push({
+      id: Number(image.id),
+      url: additionalImageUrl(productId, image.id)
+    });
+    grouped.set(productId, current);
+  });
+  return products.map((row) => {
+    const mainImage = productImageUrlForRow(row);
+    const additionalImages = grouped.get(Number(row.id)) || [];
+    return {
+      ...row,
+      additional_images: additionalImages,
+      images: [mainImage, ...additionalImages.map((image) => image.url)].filter(Boolean)
+    };
+  });
+}
+
+async function hydrateProductResponse(row) {
+  const [product] = await hydrateAdditionalImages(row ? [row] : []);
+  return product || row;
+}
+
+async function countAdditionalImages(productId) {
+  await ensureProductAdditionalImagesTable();
+  const [row] = await query(
+    "SELECT COUNT(*) AS count FROM product_additional_images WHERE product_id = :productId",
+    { productId }
+  );
+  return Number(row?.count || 0);
+}
+
+async function removeAdditionalImages(productId, imageIds = []) {
+  const ids = normalizedAdditionalImageIds(imageIds);
+  if (!ids.length) return;
+  await ensureProductAdditionalImagesTable();
+  const params = { productId };
+  const placeholders = ids.map((id, index) => {
+    params[`imageId${index}`] = id;
+    return `:imageId${index}`;
+  }).join(", ");
+  await query(
+    `DELETE FROM product_additional_images
+     WHERE product_id = :productId AND id IN (${placeholders})`,
+    params
+  );
+}
+
+async function countRemovableAdditionalImages(productId, imageIds = []) {
+  const ids = normalizedAdditionalImageIds(imageIds);
+  if (!ids.length) return 0;
+  await ensureProductAdditionalImagesTable();
+  const params = { productId };
+  const placeholders = ids.map((id, index) => {
+    params[`imageId${index}`] = id;
+    return `:imageId${index}`;
+  }).join(", ");
+  const [row] = await query(
+    `SELECT COUNT(*) AS count
+     FROM product_additional_images
+     WHERE product_id = :productId AND id IN (${placeholders})`,
+    params
+  );
+  return Number(row?.count || 0);
+}
+
+async function insertAdditionalImages(productId, files = [], startingOrder = 0, executor = query) {
+  const imageFiles = Array.isArray(files) ? files.filter((file) => file?.buffer?.length) : [];
+  if (!imageFiles.length) return;
+  for (const [index, file] of imageFiles.entries()) {
+    await executor(
+      `INSERT INTO product_additional_images (product_id, image_data, image_mime, sort_order)
+       VALUES (:productId, :imageData, :imageMime, :sortOrder)`,
+      {
+        productId,
+        imageData: file.buffer,
+        imageMime: file.mimetype || "image/jpeg",
+        sortOrder: startingOrder + index
+      }
+    );
+  }
+}
+
 function productSelect(tableExpression = "products") {
   const table = tableExpression.includes(".") || tableExpression.startsWith("`") ? tableExpression : `\`${tableExpression}\``;
   return `${table}.id AS id,
@@ -235,24 +358,33 @@ function parseProductId(value) {
 }
 
 function uploadedProductImage(req) {
-  return req.file ? { data: req.file.buffer, mime: req.file.mimetype } : { data: null, mime: null };
+  const file = req.file || req.files?.image?.[0];
+  return file ? { data: file.buffer, mime: file.mimetype } : { data: null, mime: null };
+}
+
+function uploadedAdditionalImages(req) {
+  return Array.isArray(req.files?.additional_images) ? req.files.additional_images : [];
 }
 
 function logProductUpload(req, imageUrl = null) {
+  const mainFile = req.file || req.files?.image?.[0];
   console.log("[PRODUCT UPLOAD]", {
     id: req.params.id || null,
-    hasFile: Boolean(req.file),
-    filename: req.file?.originalname || null,
-    mimetype: req.file?.mimetype || null,
+    hasFile: Boolean(mainFile),
+    filename: mainFile?.originalname || null,
+    mimetype: mainFile?.mimetype || null,
+    additionalImageCount: uploadedAdditionalImages(req).length,
     resultingImageUrl: imageUrl || null
   });
 }
 
 function logProductEditImage(req) {
+  const mainFile = req.file || req.files?.image?.[0];
   console.log("[PRODUCT EDIT IMAGE]", {
-    hasFile: Boolean(req.file),
-    filename: req.file?.filename || null,
-    mimetype: req.file?.mimetype || null,
+    hasFile: Boolean(mainFile),
+    filename: mainFile?.filename || mainFile?.originalname || null,
+    mimetype: mainFile?.mimetype || null,
+    additionalImageCount: uploadedAdditionalImages(req).length,
     contentType: req.headers["content-type"]
   });
 }
@@ -326,7 +458,7 @@ router.get("/", requireAuth, requireApproved, asyncHandler(async (req, res) => {
       : "ORDER BY created_at DESC";
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
   const products = await query(`SELECT ${productSelect(table)}, ${inventoryStatusSql("stock")} AS computed_status FROM \`${table}\` ${where} ${orderBy}`, params);
-  const mapped = products.map(productListResponse);
+  const mapped = await hydrateAdditionalImages(products.map(productListResponse));
   res.json(mapped);
 }));
 
@@ -338,7 +470,7 @@ router.get("/inventory", requireAuth, requireRole("admin"), asyncHandler(async (
      WHERE ${nonDeletedProductWhere()}
      ORDER BY created_at DESC`
   );
-  res.json(products.map(productListResponse));
+  res.json(await hydrateAdditionalImages(products.map(productListResponse)));
 }));
 
 router.get("/available", requireAuth, requireApproved, asyncHandler(async (req, res) => {
@@ -349,7 +481,27 @@ router.get("/available", requireAuth, requireApproved, asyncHandler(async (req, 
      WHERE ${availableProductWhere()}
      ORDER BY created_at DESC`
   );
-  res.json(products.map(productListResponse));
+  res.json(await hydrateAdditionalImages(products.map(productListResponse)));
+}));
+
+router.get("/:id/additional-images/:imageId", asyncHandler(async (req, res) => {
+  const table = await productWriteTable();
+  const productId = parseProductId(req.params.id);
+  const imageId = parseProductId(req.params.imageId);
+  const [image] = await query(
+    `SELECT additional.image_data, additional.image_mime
+     FROM product_additional_images additional
+     INNER JOIN \`${table}\` product ON product.id = additional.product_id
+     WHERE additional.id = :imageId
+       AND additional.product_id = :productId
+       AND product.is_deleted = FALSE
+     LIMIT 1`,
+    { imageId, productId }
+  );
+  if (!image?.image_data) throw new HttpError(404, "Product image not found.");
+  res.setHeader("Content-Type", image.image_mime || "image/jpeg");
+  res.setHeader("Cache-Control", "public, max-age=3600");
+  res.send(image.image_data);
 }));
 
 router.get("/:id/image", asyncHandler(async (req, res) => {
@@ -378,7 +530,7 @@ router.get("/archived", requireAuth, requireRole("admin"), asyncHandler(async (r
      WHERE is_deleted = TRUE
      ORDER BY deleted_at DESC, updated_at DESC`
   );
-  res.json(products.map(productListResponse));
+  res.json(await hydrateAdditionalImages(products.map(productListResponse)));
 }));
 
 router.get("/barcode/:sku", requireAuth, requireRole("admin"), asyncHandler(async (req, res) => {
@@ -392,7 +544,7 @@ router.get("/barcode/:sku", requireAuth, requireRole("admin"), asyncHandler(asyn
     { sku: String(req.params.sku || "").trim() }
   );
   if (!product) throw new HttpError(404, "No product found for this barcode");
-  res.json(productListResponse(product));
+  res.json(await hydrateProductResponse(productListResponse(product)));
 }));
 
 router.get("/filters", requireAuth, requireApproved, asyncHandler(async (req, res) => {
@@ -413,22 +565,38 @@ router.get("/filters", requireAuth, requireApproved, asyncHandler(async (req, re
   });
 }));
 
-router.post("/", requireAuth, requireRole("admin"), productUpload.single("image"), asyncHandler(async (req, res) => {
+router.post(
+  "/",
+  requireAuth,
+  requireRole("admin"),
+  productUpload.fields([{ name: "image", maxCount: 1 }, { name: "additional_images", maxCount: 10 }]),
+  asyncHandler(async (req, res) => {
   console.log("[POST /api/products] request", {
     bodyFields: Object.keys(req.body || {}),
-    hasFile: Boolean(req.file),
+    hasFile: Boolean(req.file || req.files?.image?.[0]),
+    additionalImageCount: uploadedAdditionalImages(req).length,
     contentType: req.headers["content-type"]
   });
   try {
     const table = await productWriteTable();
     const uploadedImage = uploadedProductImage(req);
-    logProductUpload(req, req.file ? "database:image_data" : null);
+    const uploadedAdditional = uploadedAdditionalImages(req);
+    await ensureProductAdditionalImagesTable();
+    if (uploadedAdditional.length > 10) throw new HttpError(400, "You can add up to 10 additional images.");
+    if (!uploadedImage.data && !String(req.body.image_url || "").trim()) {
+      throw new HttpError(400, "A main apparel image is required.");
+    }
+    logProductUpload(req, uploadedImage.data ? "database:image_data" : null);
     const rawInput = normalizeProductInput({ ...req.body, image_url: req.body.image_url || null });
     const input = productSchema.parse(rawInput);
     await ensureProductOptionValues(input);
     const duplicate = await findDuplicateActiveProduct(input);
 
     if (duplicate) {
+      const existingAdditionalCount = await countAdditionalImages(duplicate.id);
+      if (existingAdditionalCount + uploadedAdditional.length > 10) {
+        throw new HttpError(400, "This apparel item can have up to 10 additional images.");
+      }
       const nextStock = Number(duplicate.stock || 0) + Number(input.stock || 0);
       const nextStatus = productStatusForStock(nextStock);
       await query(
@@ -450,8 +618,9 @@ router.post("/", requireAuth, requireRole("admin"), productUpload.single("image"
           description: input.description || ""
         }
       );
+      await insertAdditionalImages(duplicate.id, uploadedAdditional, existingAdditionalCount);
       const [merged] = await query(`SELECT ${productSelect("products")}, ${inventoryStatusSql("stock")} AS computed_status FROM products WHERE id = :id LIMIT 1`, { id: duplicate.id });
-      const item = createdProductResponse(merged);
+      const item = await hydrateProductResponse(createdProductResponse(merged));
       req.app.get("io")?.emit("inventory:update", { type: "inventory", action: "stock", id: duplicate.id, stock: nextStock, status: nextStatus });
       return res.status(200).json({
         success: true,
@@ -475,11 +644,13 @@ router.post("/", requireAuth, requireRole("admin"), productUpload.single("image"
       }
       const sku = productSkuForId(productId);
       await run(`UPDATE \`${table}\` SET sku = :sku WHERE id = :id`, { id: productId, sku });
+      await insertAdditionalImages(productId, uploadedAdditional, 0, run);
       const [created] = await run(`SELECT ${productSelect(table)}, ${inventoryStatusSql("stock")} AS computed_status FROM \`${table}\` WHERE id = :id LIMIT 1`, { id: productId });
       return createdProductResponse(created);
     });
+    const hydratedProduct = await hydrateProductResponse(product);
 
-    notifyApprovedCustomersAboutNewProduct(req.app, product)
+    notifyApprovedCustomersAboutNewProduct(req.app, hydratedProduct)
       .catch((notificationError) => {
         console.warn("Create apparel notification failed:", {
           message: notificationError.message,
@@ -487,12 +658,12 @@ router.post("/", requireAuth, requireRole("admin"), productUpload.single("image"
           sqlMessage: notificationError.sqlMessage
         });
       });
-    req.app.get("io")?.emit("product:new", product);
+    req.app.get("io")?.emit("product:new", hydratedProduct);
     return res.status(201).json({
       success: true,
       message: "Apparel item created successfully",
-      item: product,
-      product
+      item: hydratedProduct,
+      product: hydratedProduct
     });
   } catch (error) {
     logProductImageSaveFailure(error);
@@ -507,22 +678,38 @@ router.post("/", requireAuth, requireRole("admin"), productUpload.single("image"
     });
     throw productCreateError(error);
   }
-}));
+  })
+);
 
-router.put("/:id", requireAuth, requireRole("admin"), productUpload.single("image"), asyncHandler(async (req, res) => {
+router.put(
+  "/:id",
+  requireAuth,
+  requireRole("admin"),
+  productUpload.fields([{ name: "image", maxCount: 1 }, { name: "additional_images", maxCount: 10 }]),
+  asyncHandler(async (req, res) => {
   try {
     logProductEditImage(req);
     const table = await productWriteTable();
     const productId = parseProductId(req.params.id);
     const [existingProduct] = await query(
-      `SELECT id, image_url FROM \`${table}\` WHERE id = :id AND is_deleted = FALSE LIMIT 1`,
+      `SELECT id, image_url, image_data IS NOT NULL AS has_image FROM \`${table}\` WHERE id = :id AND is_deleted = FALSE LIMIT 1`,
       { id: productId }
     );
     if (!existingProduct) throw new HttpError(404, "Apparel item not found");
 
     const uploadedImage = uploadedProductImage(req);
+    const uploadedAdditional = uploadedAdditionalImages(req);
+    if (!uploadedImage.data && !String(existingProduct.image_url || "").trim() && !existingProduct.has_image) {
+      throw new HttpError(400, "A main apparel image is required.");
+    }
+    const removedAdditionalIds = normalizedAdditionalImageIds(req.body.additional_image_ids_to_remove);
+    const currentAdditionalCount = await countAdditionalImages(productId);
+    const removableAdditionalCount = await countRemovableAdditionalImages(productId, removedAdditionalIds);
+    if (currentAdditionalCount - removableAdditionalCount + uploadedAdditional.length > 10) {
+      throw new HttpError(400, "This apparel item can have up to 10 additional images.");
+    }
     const imageUrl = existingProduct.image_url;
-    logProductUpload(req, req.file ? "database:image_data" : imageUrl);
+    logProductUpload(req, uploadedImage.data ? "database:image_data" : imageUrl);
     const input = productSchema.parse(normalizeProductInput({ ...req.body, image_url: imageUrl }));
     await ensureProductOptionValues(input);
     const status = productStatusForStock(input.stock);
@@ -535,8 +722,11 @@ router.put("/:id", requireAuth, requireRole("admin"), productUpload.single("imag
       { ...input, status, id: productId, hasImage: Boolean(uploadedImage.data), imageData: uploadedImage.data, imageMime: uploadedImage.mime }
     );
     if (!result.affectedRows) throw new HttpError(404, "Apparel item not found");
+    await removeAdditionalImages(productId, removedAdditionalIds);
+    const remainingAdditionalCount = currentAdditionalCount - removableAdditionalCount;
+    await insertAdditionalImages(productId, uploadedAdditional, remainingAdditionalCount);
     const [updated] = await query(`SELECT ${productSelect(table)}, ${inventoryStatusSql("stock")} AS computed_status FROM \`${table}\` WHERE id = :id LIMIT 1`, { id: productId });
-    const apparel = productListResponse(updated);
+    const apparel = await hydrateProductResponse(productListResponse(updated));
     req.app.get("io")?.emit("inventory:update", { type: "inventory", action: "updated", apparel });
     req.app.get("io")?.emit("product:update", apparel);
     res.json({
@@ -549,7 +739,8 @@ router.put("/:id", requireAuth, requireRole("admin"), productUpload.single("imag
     logProductImageSaveFailure(error);
     throw error;
   }
-}));
+  })
+);
 
 router.patch("/:id/stock", requireAuth, requireRole("admin"), asyncHandler(async (req, res) => {
   const table = await productWriteTable();
@@ -585,7 +776,7 @@ router.patch("/:id/stock", requireAuth, requireRole("admin"), asyncHandler(async
     req.app.get("io")?.to("admin").emit("notification:new", { type: "inventory", title: "Out of stock", body: `Apparel item #${productId} is out of stock.` });
   }
   const [updated] = await query(`SELECT ${productSelect(table)}, ${inventoryStatusSql("stock")} AS computed_status FROM \`${table}\` WHERE id = :id LIMIT 1`, { id: productId });
-  const product = productListResponse(updated);
+  const product = await hydrateProductResponse(productListResponse(updated));
   req.app.get("io")?.emit("inventory:update", { type: "inventory", action: "stock", id: productId, stock: nextStock, status: nextStatus, product });
   res.json(product);
 }));

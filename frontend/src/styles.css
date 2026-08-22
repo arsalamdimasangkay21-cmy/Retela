@@ -11471,10 +11471,17 @@ button {
 }
 
 .inventory-action-button {
-  min-width: 0;
+  min-width: 92px;
   min-height: 42px;
+  padding-inline: 12px !important;
   white-space: nowrap;
   flex-shrink: 0;
+}
+
+.inventory-action-button > span {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: nowrap;
 }
 
 .inventory-action-button--edit {
@@ -11504,18 +11511,28 @@ button {
 }
 
 .inventory-status-badge--sold {
+  align-items: center;
+  justify-content: center;
+  line-height: 1.2;
   border-color: #8bd0a2 !important;
   background: #e9f8ed !important;
   color: #176b37 !important;
 }
 
 .inventory-status-badge--low {
+  min-width: 88px;
+  justify-content: center;
+  text-align: center;
+  line-height: 1.2;
   border-color: #e4b86a !important;
   background: #fff7e6 !important;
   color: #8a4b08 !important;
 }
 
 .inventory-status-badge--available {
+  align-items: center;
+  justify-content: center;
+  line-height: 1.2;
   border-color: #9bd3ad !important;
   background: #effaf2 !important;
   color: #176b37 !important;
@@ -11828,17 +11845,6 @@ button {
   }
 }
 
-@media (min-width: 1280px) and (max-width: 1399px) {
-  .inventory-stock-list-card .inventory-action-button {
-    width: 42px;
-    padding-inline: 8px;
-  }
-
-  .inventory-stock-list-card .inventory-action-button > span {
-    display: none;
-  }
-}
-
 @media (max-width: 639px) {
   .inventory-stock-list__header {
     align-items: stretch;
@@ -11860,6 +11866,25 @@ button {
   .inventory-stock-mobile-card .inventory-action-button {
     min-height: 44px;
   }
+}
+
+.retela-dark .inventory-main-image-field,
+.premium-shell.retela-dark-shell .inventory-main-image-field,
+.retela-dark .inventory-additional-images,
+.premium-shell.retela-dark-shell .inventory-additional-images {
+  color: #e6f4e9;
+}
+
+.retela-dark .inventory-main-image-field [class*="text-slate-"],
+.premium-shell.retela-dark-shell .inventory-main-image-field [class*="text-slate-"],
+.retela-dark .inventory-additional-images [class*="text-[#17211b]"],
+.premium-shell.retela-dark-shell .inventory-additional-images [class*="text-[#17211b]"] {
+  color: #e6f4e9 !important;
+}
+
+.retela-dark .inventory-additional-images [class*="text-[#60746a]"],
+.premium-shell.retela-dark-shell .inventory-additional-images [class*="text-[#60746a]"] {
+  color: #b7cabe !important;
 }
 
 .settings-location-edit-row {

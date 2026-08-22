@@ -48,7 +48,7 @@ export const upload = multer({
 
 export const productUpload = multer({
   storage: memoryStorage,
-  limits: { fileSize: 3 * 1024 * 1024 },
+  limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: imageOnly
 });
 
