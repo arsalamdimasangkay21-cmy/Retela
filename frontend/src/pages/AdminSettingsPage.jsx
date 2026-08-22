@@ -948,7 +948,7 @@ export default function AdminSettingsPage({ onChange }) {
           </div>
         </SettingsCard>
 
-        <SettingsCard section="security" {...cardControls("security")} onSave={saveSettings} className="settings-card--wide" view={<SecuritySettingsView value={settings.security} onEdit={() => beginEditing("security")} />}>
+        <SettingsCard section="security" {...cardControls("security")} onSave={saveSettings} view={<SecuritySettingsView value={settings.security} onEdit={() => beginEditing("security")} />}>
           <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.9fr)]">
             <div className="grid gap-3 md:grid-cols-2">
               <ToggleSwitch label="Two Factor Authentication Toggle" checked={settings.security.twoFactorAuthentication} onChange={(value) => updateSetting("security", "twoFactorAuthentication", value)} />
@@ -1029,7 +1029,7 @@ export default function AdminSettingsPage({ onChange }) {
           </div>
         </SettingsCard>
 
-        <SettingsCard section="dataManagement" saving={saving} onSave={null} className="xl:col-span-2">
+        <SettingsCard section="dataManagement" saving={saving} onSave={null} className="settings-card--wide">
           <div className="grid gap-3 lg:grid-cols-3">
             <DataManagementButton
               icon={Archive}
@@ -1052,7 +1052,7 @@ export default function AdminSettingsPage({ onChange }) {
           </div>
         </SettingsCard>
 
-        <SettingsCard section="backup" saving={saving} onSave={null} className="xl:col-span-2">
+        <SettingsCard section="backup" saving={saving} onSave={null} className="settings-card--wide">
           <div className="grid gap-4 lg:grid-cols-[minmax(260px,0.8fr)_minmax(0,1fr)]">
             <DatabaseStatus status={settings.databaseStatus} />
             <div className="grid gap-3 sm:grid-cols-3">
@@ -1111,7 +1111,7 @@ function SettingsCard({ section, saving, editing = false, disabled = false, dirt
       transition={{ duration: 0.38, ease: "easeOut" }}
     >
       <div className="settings-card__header mb-5 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div className="flex min-w-0 gap-3">
+        <div className="settings-card__heading flex min-w-0 flex-1 gap-3">
           <span className="settings-card__icon grid h-11 w-11 shrink-0 place-items-center rounded-2xl">
             <Icon size={22} />
           </span>

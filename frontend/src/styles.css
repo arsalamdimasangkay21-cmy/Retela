@@ -12029,3 +12029,119 @@ button {
     justify-content: space-between;
   }
 }
+
+/* Final settings layout pass: independent card flow and non-wrapping actions. */
+.settings-page-grid {
+  display: block;
+  align-items: initial;
+}
+
+.settings-page-grid::after {
+  display: block;
+  clear: both;
+  content: "";
+}
+
+.settings-page-grid > .settings-card {
+  width: calc(50% - 10px);
+  margin-bottom: 20px;
+}
+
+.settings-page-grid > .settings-card:not(.settings-card--wide):nth-child(odd) {
+  float: left;
+  clear: left;
+}
+
+.settings-page-grid > .settings-card:not(.settings-card--wide):nth-child(even) {
+  float: right;
+  clear: right;
+}
+
+.settings-page-grid > .settings-card.settings-card--wide {
+  width: 100%;
+  float: none;
+  clear: both;
+}
+
+.settings-card__heading {
+  min-width: 0;
+}
+
+.settings-card__actions {
+  flex: 0 0 auto;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.settings-card__actions button,
+.settings-edit-button {
+  flex: 0 0 auto;
+  min-height: 44px;
+  white-space: nowrap !important;
+  word-break: normal !important;
+  overflow-wrap: normal !important;
+}
+
+.settings-edit-button {
+  min-width: 100px;
+  padding: 0 16px;
+}
+
+.settings-card__actions button.gradient-btn {
+  min-width: 130px;
+}
+
+.settings-card__actions button[class*="border-white"] {
+  min-width: 90px;
+}
+
+.settings-value-grid {
+  gap: 12px 14px;
+}
+
+.settings-value {
+  min-height: 0;
+  padding: 12px 14px;
+}
+
+.settings-value__label {
+  color: #42544a;
+  font-weight: 750;
+  letter-spacing: 0.07em;
+}
+
+.settings-value__text {
+  margin-top: 4px;
+  font-weight: 700;
+}
+
+@media (max-width: 1100px) {
+  .settings-page-grid > .settings-card,
+  .settings-page-grid > .settings-card.settings-card--wide {
+    width: 100%;
+    float: none;
+    clear: both;
+  }
+}
+
+@media (max-width: 639px) {
+  .settings-card__actions {
+    width: 100%;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+  }
+
+  .settings-card__actions > button,
+  .settings-card__actions > span {
+    flex: 0 0 auto;
+  }
+
+  .settings-edit-button {
+    min-width: 100px;
+  }
+}
+
+.retela-dark .settings-value__label,
+.premium-shell.retela-dark-shell .settings-value__label {
+  color: #b7cabe;
+}
