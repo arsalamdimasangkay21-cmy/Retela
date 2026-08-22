@@ -10661,6 +10661,955 @@ button {
   }
 }
 
+/* Admin Settings: readable, natural-height information dashboard */
+.settings-page {
+  color: #15221b;
+}
+
+.settings-page-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: 20px;
+}
+
+.settings-card,
+.premium-shell .settings-card {
+  align-self: start;
+  min-height: 0 !important;
+  height: auto !important;
+  overflow: visible;
+  border: 1px solid #d8e8de !important;
+  border-radius: 22px !important;
+  background: #ffffff !important;
+  color: #15221b !important;
+  box-shadow: 0 12px 30px rgba(28, 67, 42, 0.08) !important;
+}
+
+.settings-card--wide {
+  grid-column: 1 / -1;
+}
+
+.settings-card:hover {
+  transform: none;
+  border-color: #b8d9c2 !important;
+  box-shadow: 0 16px 34px rgba(28, 67, 42, 0.1) !important;
+}
+
+.settings-hero,
+.premium-shell .settings-hero {
+  border: 1px solid #cfe5d6 !important;
+  background: linear-gradient(135deg, #ffffff 0%, #f0fbf3 100%) !important;
+  color: #15221b !important;
+  box-shadow: 0 12px 30px rgba(28, 67, 42, 0.07) !important;
+}
+
+.settings-hero__eyebrow,
+.settings-card__icon {
+  color: #166534 !important;
+}
+
+.settings-hero__eyebrow {
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.settings-hero__title,
+.settings-card__title {
+  color: #15221b !important;
+}
+
+.settings-hero__subtitle,
+.settings-card__description {
+  color: #58675f !important;
+}
+
+.settings-card__header {
+  border-bottom: 1px solid #e3eee6;
+  padding-bottom: 16px;
+}
+
+.settings-card__icon {
+  border: 1px solid #b9ddc5;
+  background: #e9f8ed;
+}
+
+.settings-card__actions {
+  min-height: 44px;
+}
+
+.settings-edit-button,
+.settings-inline-button {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid #acd4b8;
+  border-radius: 12px;
+  background: #f1fbf4;
+  color: #14532d;
+  padding: 9px 14px;
+  font-size: 0.78rem;
+  font-weight: 800;
+  transition: background-color 180ms ease, border-color 180ms ease, box-shadow 180ms ease, color 180ms ease;
+}
+
+.settings-edit-button:hover,
+.settings-edit-button:focus-visible,
+.settings-inline-button:hover,
+.settings-inline-button:focus-visible {
+  border-color: #63ad79;
+  background: #ddf4e4;
+  color: #14532d;
+  box-shadow: 0 4px 12px rgba(21, 128, 61, 0.1);
+}
+
+.settings-edit-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.settings-unsaved {
+  border: 1px solid #e3bd62;
+  border-radius: 999px;
+  background: #fff8df;
+  color: #795b10;
+  padding: 6px 10px;
+  font-size: 0.7rem;
+  font-weight: 800;
+}
+
+.settings-editing-badge {
+  border: 1px solid #a9d5b5;
+  border-radius: 999px;
+  background: #e8f8ec;
+  color: #14532d;
+  padding: 6px 10px;
+  font-size: 0.7rem;
+  font-weight: 800;
+}
+
+.settings-card__actions .gradient-btn,
+.settings-hero__actions .gradient-btn {
+  min-height: 44px;
+  background: #16803e !important;
+  color: #ffffff !important;
+  box-shadow: 0 7px 16px rgba(22, 128, 62, 0.2) !important;
+}
+
+.settings-card__actions .gradient-btn:hover,
+.settings-hero__actions .gradient-btn:hover {
+  background: #116b33 !important;
+}
+
+.settings-card__actions button[class*="border-white"],
+.settings-hero__actions button[class*="border-white"] {
+  min-height: 44px;
+  border: 1px solid #bfd5c5 !important;
+  background: #ffffff !important;
+  color: #244232 !important;
+  box-shadow: none !important;
+}
+
+.settings-card__actions button[class*="border-white"]:hover,
+.settings-hero__actions button[class*="border-white"]:hover {
+  border-color: #7db991 !important;
+  background: #f0faf3 !important;
+  color: #14532d !important;
+}
+
+.settings-view-content,
+.settings-view-groups {
+  display: grid;
+  gap: 18px;
+}
+
+.settings-value-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: 10px 14px;
+}
+
+.settings-value {
+  min-width: 0;
+  min-height: 64px;
+  align-self: start;
+  border: 1px solid #e0ece3;
+  border-radius: 14px;
+  background: #fbfefc;
+  padding: 11px 13px;
+}
+
+.settings-value--wide {
+  grid-column: 1 / -1;
+}
+
+.settings-value__label {
+  display: block;
+  color: #58675f;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  line-height: 1.35;
+  text-transform: uppercase;
+}
+
+.settings-value__text {
+  display: block;
+  margin-top: 5px;
+  overflow-wrap: anywhere;
+  color: #15221b;
+  font-size: 0.9rem;
+  font-weight: 750;
+  line-height: 1.45;
+}
+
+.settings-status {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  border: 1px solid;
+  border-radius: 999px;
+  margin-top: 6px;
+  padding: 4px 9px;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.settings-status--on {
+  border-color: #9bcfa9;
+  background: #e6f7eb;
+  color: #146332;
+}
+
+.settings-status--off {
+  border-color: #c8d4cc;
+  background: #f1f4f2;
+  color: #45544b;
+}
+
+.settings-view-subgrid,
+.settings-view-payment-top {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 0.8fr);
+  align-items: start;
+  gap: 14px;
+}
+
+.settings-logo-preview,
+.settings-location-preview,
+.settings-password-preview,
+.settings-qr-preview {
+  min-width: 0;
+  border: 1px solid #d8e8de;
+  border-radius: 16px;
+  background: #f4fbf6;
+  padding: 13px;
+}
+
+.settings-logo-preview {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.settings-logo-preview img,
+.settings-logo-preview__empty {
+  display: grid;
+  width: 58px;
+  height: 58px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid #c5dfcd;
+  border-radius: 14px;
+  background: #ffffff;
+  color: #277443;
+  object-fit: contain;
+  padding: 7px;
+}
+
+.settings-location-preview {
+  display: grid;
+  gap: 10px;
+}
+
+.settings-location-preview__copy,
+.settings-password-preview {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.settings-location-preview__copy > svg {
+  flex: 0 0 auto;
+  color: #16803e;
+}
+
+.settings-location-preview .retela-delivery-map-card {
+  margin-top: 2px;
+}
+
+.settings-location-preview .retela-delivery-map {
+  border-radius: 12px;
+  height: 145px !important;
+  min-height: 145px !important;
+}
+
+.settings-qr-preview {
+  display: grid;
+  min-height: 142px;
+  place-items: center;
+  color: #58675f;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-align: center;
+}
+
+.settings-qr-preview img {
+  width: 132px;
+  height: 132px;
+  border-radius: 12px;
+  background: #ffffff;
+  object-fit: contain;
+  padding: 7px;
+}
+
+.settings-qr-preview span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.settings-view-group {
+  display: grid;
+  gap: 9px;
+  border-top: 1px solid #e0ece3;
+  padding-top: 15px;
+}
+
+.settings-view-group__title {
+  color: #277443;
+  font-size: 0.7rem;
+  font-weight: 850;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.settings-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 7px;
+}
+
+.settings-chip {
+  border: 1px solid #a9d5b5;
+  border-radius: 999px;
+  background: #e8f8ec;
+  color: #14532d;
+  padding: 5px 9px;
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+
+.settings-color-value {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  color: #15221b;
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+
+.settings-color-value i {
+  width: 20px;
+  height: 20px;
+  border: 1px solid #9ab7a2;
+  border-radius: 6px;
+  box-shadow: 0 0 0 2px #ffffff;
+}
+
+.settings-about-groups {
+  display: grid;
+  gap: 9px;
+}
+
+.settings-about-group {
+  overflow: hidden;
+  border: 1px solid #d8e8de;
+  border-radius: 16px;
+  background: #fbfefc;
+}
+
+.settings-about-group__trigger {
+  display: flex;
+  width: 100%;
+  min-height: 48px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 0;
+  background: transparent;
+  color: #15221b;
+  padding: 11px 14px;
+  font-size: 0.9rem;
+  font-weight: 800;
+  text-align: left;
+}
+
+.settings-about-group__trigger:hover,
+.settings-about-group__trigger:focus-visible {
+  background: #eff9f2;
+  color: #14532d;
+}
+
+.settings-about-group__trigger svg {
+  color: #277443;
+  transition: transform 180ms ease;
+}
+
+.settings-about-group__trigger svg.is-open {
+  transform: rotate(180deg);
+}
+
+.settings-about-group__body {
+  border-top: 1px solid #e0ece3;
+  padding: 12px;
+}
+
+.settings-card input,
+.settings-card select,
+.settings-card textarea {
+  border-color: #cbded1 !important;
+  background: #ffffff !important;
+  color: #15221b !important;
+}
+
+.settings-card input::placeholder,
+.settings-card textarea::placeholder {
+  color: #687870 !important;
+  opacity: 1;
+}
+
+.settings-card input:focus,
+.settings-card select:focus,
+.settings-card textarea:focus {
+  border-color: #4d9f67 !important;
+  box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.13) !important;
+}
+
+.settings-card textarea {
+  min-height: 122px;
+  line-height: 1.55;
+}
+
+.settings-card .settings-toggle-row {
+  min-height: 58px;
+  border-color: #d1e2d6;
+  background: #fbfefc;
+}
+
+.settings-card .settings-toggle-row:hover {
+  border-color: #8fc8a0;
+  background: #eff9f2;
+}
+
+.settings-card .settings-toggle-row > span:first-child span:first-child {
+  color: #15221b !important;
+  font-weight: 750;
+}
+
+.settings-card .settings-toggle-row > span:first-child span:nth-child(2) {
+  color: #58675f !important;
+}
+
+.settings-card .settings-toggle-row > span:last-child {
+  border: 1px solid #aebfb3;
+  background: #dbe5de !important;
+}
+
+.settings-card .settings-toggle-row > span:last-child > span {
+  background: #54635a !important;
+}
+
+.settings-card .settings-toggle-row > span:last-child[class*="bg-neonbrand"] {
+  border-color: #16803e;
+  background: #22c55e !important;
+}
+
+.settings-card .settings-toggle-row > span:last-child[class*="bg-neonbrand"] > span {
+  background: #0b3d20 !important;
+}
+
+.settings-card .settings-toggle-group > p,
+.settings-card .text-neonbrand {
+  color: #176b36 !important;
+}
+
+.settings-card .text-white\/45,
+.settings-card .text-white\/48,
+.settings-card .text-white\/52,
+.settings-card .text-white\/55,
+.settings-card .text-white\/58,
+.settings-card .text-white\/60,
+.settings-card .text-white\/62,
+.settings-card .text-white\/70,
+.settings-card .text-white\/75,
+.settings-card .text-white\/80,
+.settings-card .text-white\/85,
+.settings-card .text-white {
+  color: #15221b !important;
+}
+
+.settings-card .text-white\/45,
+.settings-card .text-white\/48,
+.settings-card .text-white\/52,
+.settings-card .text-white\/55,
+.settings-card .text-white\/58,
+.settings-card .text-white\/60,
+.settings-card .text-white\/62 {
+  color: #58675f !important;
+}
+
+.settings-card .text-rose-100,
+.settings-card .text-rose-200 {
+  color: #a32121 !important;
+}
+
+.settings-card button[class*="border-rose"] {
+  border-color: #e1aaaa !important;
+  background: #fff3f3 !important;
+  color: #8b2525 !important;
+}
+
+.settings-card-skeleton {
+  min-height: 220px;
+}
+
+.settings-toast--success {
+  border-color: #8fc9a0;
+  background: #effaf2;
+  color: #14532d;
+}
+
+.settings-toast--success > span {
+  color: #16803e !important;
+}
+
+.settings-toast--error {
+  border-color: #e2a0a0;
+  background: #fff3f3;
+  color: #7f1d1d;
+}
+
+.settings-toast--error > span {
+  color: #b42323 !important;
+}
+
+.settings-toast__message {
+  color: inherit !important;
+  font-weight: 650;
+}
+
+.settings-toast__close {
+  color: inherit;
+}
+
+.settings-toast__close:hover,
+.settings-toast__close:focus-visible {
+  background: rgba(21, 83, 45, 0.1);
+}
+
+.settings-card .group.min-h-32 {
+  min-height: 0;
+}
+
+/* Dark mode keeps the same hierarchy with intentional charcoal/green surfaces. */
+.retela-dark .settings-page,
+.premium-shell.retela-dark-shell .settings-page {
+  color: #f1f8f3;
+}
+
+.retela-dark .settings-card,
+.premium-shell.retela-dark-shell .settings-card {
+  border-color: #365244 !important;
+  background: #1a2b21 !important;
+  color: #f1f8f3 !important;
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.25) !important;
+}
+
+.retela-dark .settings-hero,
+.premium-shell.retela-dark-shell .settings-hero {
+  border-color: #365244 !important;
+  background: linear-gradient(135deg, #1d3427 0%, #132119 100%) !important;
+  color: #f1f8f3 !important;
+}
+
+.retela-dark .settings-hero__title,
+.retela-dark .settings-card__title,
+.premium-shell.retela-dark-shell .settings-hero__title,
+.premium-shell.retela-dark-shell .settings-card__title {
+  color: #f1f8f3 !important;
+}
+
+.retela-dark .settings-hero__subtitle,
+.retela-dark .settings-card__description,
+.premium-shell.retela-dark-shell .settings-hero__subtitle,
+.premium-shell.retela-dark-shell .settings-card__description {
+  color: #b9cdbf !important;
+}
+
+.retela-dark .settings-card__header,
+.premium-shell.retela-dark-shell .settings-card__header {
+  border-color: #365244;
+}
+
+.retela-dark .settings-card__icon,
+.premium-shell.retela-dark-shell .settings-card__icon {
+  border-color: #4c8060;
+  background: #204430;
+  color: #86efac !important;
+}
+
+.retela-dark .settings-hero__eyebrow,
+.retela-dark .settings-card__icon,
+.premium-shell.retela-dark-shell .settings-hero__eyebrow {
+  color: #86efac !important;
+}
+
+.retela-dark .settings-edit-button,
+.retela-dark .settings-inline-button,
+.premium-shell.retela-dark-shell .settings-edit-button,
+.premium-shell.retela-dark-shell .settings-inline-button {
+  border-color: #5a8a68;
+  background: #203b2a;
+  color: #baf7c9;
+}
+
+.retela-dark .settings-edit-button:hover,
+.retela-dark .settings-edit-button:focus-visible,
+.retela-dark .settings-inline-button:hover,
+.retela-dark .settings-inline-button:focus-visible,
+.premium-shell.retela-dark-shell .settings-edit-button:hover,
+.premium-shell.retela-dark-shell .settings-edit-button:focus-visible,
+.premium-shell.retela-dark-shell .settings-inline-button:hover,
+.premium-shell.retela-dark-shell .settings-inline-button:focus-visible {
+  border-color: #86efac;
+  background: #2b5538;
+  color: #ffffff;
+}
+
+.retela-dark .settings-unsaved,
+.premium-shell.retela-dark-shell .settings-unsaved {
+  border-color: #bd973c;
+  background: #493b16;
+  color: #f8df8a;
+}
+
+.retela-dark .settings-editing-badge,
+.premium-shell.retela-dark-shell .settings-editing-badge {
+  border-color: #4e9d67;
+  background: #1f4b2e;
+  color: #b2f5bf;
+}
+
+.retela-dark .settings-toast--success,
+.premium-shell.retela-dark-shell .settings-toast--success {
+  border-color: #4e9d67;
+  background: #173c25;
+  color: #c0f8cc;
+}
+
+.retela-dark .settings-toast--error,
+.premium-shell.retela-dark-shell .settings-toast--error {
+  border-color: #a55757;
+  background: #4a2020;
+  color: #ffd0d0;
+}
+
+.retela-dark .settings-card__actions button[class*="border-white"],
+.premium-shell.retela-dark-shell .settings-card__actions button[class*="border-white"] {
+  border-color: #5e7767 !important;
+  background: #1f3528 !important;
+  color: #e0f0e4 !important;
+}
+
+.retela-dark .settings-card__actions button[class*="border-white"]:hover,
+.premium-shell.retela-dark-shell .settings-card__actions button[class*="border-white"]:hover {
+  border-color: #86efac !important;
+  background: #2b5538 !important;
+  color: #ffffff !important;
+}
+
+.retela-dark .settings-value,
+.premium-shell.retela-dark-shell .settings-value {
+  border-color: #365244;
+  background: #203329;
+}
+
+.retela-dark .settings-value__label,
+.premium-shell.retela-dark-shell .settings-value__label {
+  color: #b7cabe;
+}
+
+.retela-dark .settings-value__text,
+.premium-shell.retela-dark-shell .settings-value__text,
+.retela-dark .settings-color-value,
+.premium-shell.retela-dark-shell .settings-color-value {
+  color: #f1f8f3;
+}
+
+.retela-dark .settings-status--on,
+.premium-shell.retela-dark-shell .settings-status--on {
+  border-color: #4e9d67;
+  background: #1f4b2e;
+  color: #a9f5ba;
+}
+
+.retela-dark .settings-status--off,
+.premium-shell.retela-dark-shell .settings-status--off {
+  border-color: #5c7063;
+  background: #293a30;
+  color: #d0ded4;
+}
+
+.retela-dark .settings-logo-preview,
+.retela-dark .settings-location-preview,
+.retela-dark .settings-password-preview,
+.retela-dark .settings-qr-preview,
+.premium-shell.retela-dark-shell .settings-logo-preview,
+.premium-shell.retela-dark-shell .settings-location-preview,
+.premium-shell.retela-dark-shell .settings-password-preview,
+.premium-shell.retela-dark-shell .settings-qr-preview {
+  border-color: #365244;
+  background: #203329;
+  color: #b9cdbf;
+}
+
+.retela-dark .settings-logo-preview img,
+.retela-dark .settings-logo-preview__empty,
+.premium-shell.retela-dark-shell .settings-logo-preview img,
+.premium-shell.retela-dark-shell .settings-logo-preview__empty {
+  border-color: #4d755a;
+  background: #17251d;
+  color: #86efac;
+}
+
+.retela-dark .settings-view-group,
+.premium-shell.retela-dark-shell .settings-view-group,
+.retela-dark .settings-about-group__body,
+.premium-shell.retela-dark-shell .settings-about-group__body {
+  border-color: #365244;
+}
+
+.retela-dark .settings-view-group__title,
+.premium-shell.retela-dark-shell .settings-view-group__title {
+  color: #86efac;
+}
+
+.retela-dark .settings-chip,
+.premium-shell.retela-dark-shell .settings-chip {
+  border-color: #4e9d67;
+  background: #1f4b2e;
+  color: #b2f5bf;
+}
+
+.retela-dark .settings-about-group,
+.premium-shell.retela-dark-shell .settings-about-group {
+  border-color: #365244;
+  background: #203329;
+}
+
+.retela-dark .settings-about-group__trigger,
+.premium-shell.retela-dark-shell .settings-about-group__trigger {
+  color: #f1f8f3;
+}
+
+.retela-dark .settings-about-group__trigger:hover,
+.retela-dark .settings-about-group__trigger:focus-visible,
+.premium-shell.retela-dark-shell .settings-about-group__trigger:hover,
+.premium-shell.retela-dark-shell .settings-about-group__trigger:focus-visible {
+  background: #284b35;
+  color: #ffffff;
+}
+
+.retela-dark .settings-card input,
+.retela-dark .settings-card select,
+.retela-dark .settings-card textarea,
+.premium-shell.retela-dark-shell .settings-card input,
+.premium-shell.retela-dark-shell .settings-card select,
+.premium-shell.retela-dark-shell .settings-card textarea {
+  border-color: #4a6855 !important;
+  background: #14231a !important;
+  color: #f1f8f3 !important;
+}
+
+.retela-dark .settings-card input::placeholder,
+.retela-dark .settings-card textarea::placeholder,
+.premium-shell.retela-dark-shell .settings-card input::placeholder,
+.premium-shell.retela-dark-shell .settings-card textarea::placeholder {
+  color: #a9c0b0 !important;
+}
+
+.retela-dark .settings-card .settings-toggle-row,
+.premium-shell.retela-dark-shell .settings-card .settings-toggle-row {
+  border-color: #365244;
+  background: #203329;
+}
+
+.retela-dark .settings-card .settings-toggle-row:hover,
+.premium-shell.retela-dark-shell .settings-card .settings-toggle-row:hover {
+  border-color: #6fbd84;
+  background: #284b35;
+}
+
+.retela-dark .settings-card .settings-toggle-row > span:first-child span:first-child,
+.premium-shell.retela-dark-shell .settings-card .settings-toggle-row > span:first-child span:first-child {
+  color: #f1f8f3 !important;
+}
+
+.retela-dark .settings-card .settings-toggle-row > span:first-child span:nth-child(2),
+.premium-shell.retela-dark-shell .settings-card .settings-toggle-row > span:first-child span:nth-child(2) {
+  color: #b9cdbf !important;
+}
+
+.retela-dark .settings-card .settings-toggle-row > span:last-child,
+.premium-shell.retela-dark-shell .settings-card .settings-toggle-row > span:last-child {
+  border-color: #6a7e70;
+  background: #3a4b40 !important;
+}
+
+.retela-dark .settings-card .settings-toggle-row > span:last-child > span,
+.premium-shell.retela-dark-shell .settings-card .settings-toggle-row > span:last-child > span {
+  background: #c7d6cb !important;
+}
+
+.retela-dark .settings-card .settings-toggle-row > span:last-child[class*="bg-neonbrand"],
+.premium-shell.retela-dark-shell .settings-card .settings-toggle-row > span:last-child[class*="bg-neonbrand"] {
+  border-color: #86efac;
+  background: #22c55e !important;
+}
+
+.retela-dark .settings-card .settings-toggle-row > span:last-child[class*="bg-neonbrand"] > span,
+.premium-shell.retela-dark-shell .settings-card .settings-toggle-row > span:last-child[class*="bg-neonbrand"] > span {
+  background: #073b1b !important;
+}
+
+.retela-dark .settings-card .text-white,
+.retela-dark .settings-card .text-white\/70,
+.retela-dark .settings-card .text-white\/75,
+.retela-dark .settings-card .text-white\/80,
+.retela-dark .settings-card .text-white\/85,
+.premium-shell.retela-dark-shell .settings-card .text-white {
+  color: #f1f8f3 !important;
+}
+
+.premium-shell.retela-dark-shell .settings-card .text-white\/70,
+.premium-shell.retela-dark-shell .settings-card .text-white\/75,
+.premium-shell.retela-dark-shell .settings-card .text-white\/80,
+.premium-shell.retela-dark-shell .settings-card .text-white\/85 {
+  color: #f1f8f3 !important;
+}
+
+.retela-dark .settings-card .text-white\/45,
+.retela-dark .settings-card .text-white\/48,
+.retela-dark .settings-card .text-white\/52,
+.retela-dark .settings-card .text-white\/55,
+.retela-dark .settings-card .text-white\/58,
+.retela-dark .settings-card .text-white\/60,
+.retela-dark .settings-card .text-white\/62,
+.premium-shell.retela-dark-shell .settings-card .text-white\/45,
+.premium-shell.retela-dark-shell .settings-card .text-white\/48,
+.premium-shell.retela-dark-shell .settings-card .text-white\/52,
+.premium-shell.retela-dark-shell .settings-card .text-white\/55,
+.premium-shell.retela-dark-shell .settings-card .text-white\/58,
+.premium-shell.retela-dark-shell .settings-card .text-white\/60,
+.premium-shell.retela-dark-shell .settings-card .text-white\/62 {
+  color: #b9cdbf !important;
+}
+
+.retela-dark .settings-card .text-neonbrand,
+.premium-shell.retela-dark-shell .settings-card .text-neonbrand {
+  color: #86efac !important;
+}
+
+.retela-dark .settings-card .text-rose-100,
+.retela-dark .settings-card .text-rose-200,
+.premium-shell.retela-dark-shell .settings-card .text-rose-100,
+.premium-shell.retela-dark-shell .settings-card .text-rose-200 {
+  color: #ffcaca !important;
+}
+
+.retela-dark .settings-card button[class*="border-rose"],
+.premium-shell.retela-dark-shell .settings-card button[class*="border-rose"] {
+  border-color: #a55757 !important;
+  background: #4a2020 !important;
+  color: #ffd0d0 !important;
+}
+
+@media (max-width: 900px) {
+  .settings-page-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-card--wide {
+    grid-column: auto;
+  }
+}
+
+@media (max-width: 639px) {
+  .settings-page-grid {
+    gap: 14px;
+  }
+
+  .settings-card {
+    border-radius: 18px !important;
+    padding: 14px !important;
+  }
+
+  .settings-card__header {
+    padding-bottom: 13px;
+  }
+
+  .settings-card__actions {
+    width: 100%;
+  }
+
+  .settings-card__actions > * {
+    flex: 1 1 auto;
+  }
+
+  .settings-value-grid,
+  .settings-view-subgrid,
+  .settings-view-payment-top {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-value--wide {
+    grid-column: auto;
+  }
+
+  .settings-value {
+    min-height: 58px;
+  }
+
+  .settings-location-preview__copy,
+  .settings-password-preview {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .settings-inline-button {
+    width: 100%;
+  }
+}
+
 /* Customer delivery areas dialog */
 .delivery-areas-modal-backdrop,
 .premium-shell .delivery-areas-modal-backdrop {

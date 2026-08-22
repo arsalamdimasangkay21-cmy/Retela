@@ -7,6 +7,7 @@ import {
   Bell,
   Bot,
   CheckCircle2,
+  ChevronDown,
   Clock3,
   Database,
   Download,
@@ -17,6 +18,7 @@ import {
   Moon,
   Package,
   Palette,
+  Pencil,
   Plus,
   RefreshCw,
   RotateCcw,
@@ -314,6 +316,8 @@ export default function AdminSettingsPage({ onChange }) {
   const [deliveryCustomersError, setDeliveryCustomersError] = useState("");
   const [deliveryAreasOpen, setDeliveryAreasOpen] = useState(false);
   const [deliveryCustomerSaving, setDeliveryCustomerSaving] = useState(null);
+  const [editingSection, setEditingSection] = useState(null);
+  const [editSnapshot, setEditSnapshot] = useState(null);
   const [removeQrConfirmOpen, setRemoveQrConfirmOpen] = useState(false);
   const [gcashQrVersion, setGcashQrVersion] = useState(0);
   const [userTheme, setUserTheme] = useState(() => readUserTheme(user));
@@ -394,6 +398,55 @@ export default function AdminSettingsPage({ onChange }) {
     setToast({ type, message });
     window.clearTimeout(toastTimerRef.current);
     toastTimerRef.current = window.setTimeout(() => setToast(null), 3600);
+  }
+
+  function cloneSettings(value) {
+    return JSON.parse(JSON.stringify(value));
+  }
+
+  function beginEditing(section) {
+    if (editingSection && editingSection !== section) return;
+    setEditingSection(section);
+    setEditSnapshot({
+      settings: cloneSettings(settings),
+      files: { ...files },
+      userTheme
+    });
+    setErrors({});
+  }
+
+  function cancelEditing() {
+    if (!editSnapshot) {
+      setEditingSection(null);
+      return;
+    }
+    setSettings(editSnapshot.settings);
+    setFiles(editSnapshot.files);
+    if (editSnapshot.userTheme && editSnapshot.userTheme !== userTheme) {
+      setUserTheme(editSnapshot.userTheme);
+      saveUserTheme(user, editSnapshot.userTheme);
+      emitUserThemeChange(user, editSnapshot.userTheme);
+    }
+    setErrors({});
+    setEditingSection(null);
+    setEditSnapshot(null);
+  }
+
+  function isEditingDirty() {
+    if (!editingSection || !editSnapshot) return false;
+    const filesChanged = files.shopLogo !== editSnapshot.files.shopLogo || files.gcashQr !== editSnapshot.files.gcashQr;
+    return filesChanged || JSON.stringify(settings) !== JSON.stringify(editSnapshot.settings);
+  }
+
+  function cardControls(section, editable = true) {
+    return {
+      saving,
+      editing: editingSection === section,
+      disabled: Boolean(editingSection && editingSection !== section),
+      dirty: editingSection === section && isEditingDirty(),
+      onEdit: editable ? () => beginEditing(section) : undefined,
+      onCancel: editingSection === section ? cancelEditing : undefined
+    };
   }
 
   async function refreshDeliveryCustomers({ showLoading = false, includeCustomers = deliveryAreasOpen } = {}) {
@@ -613,6 +666,8 @@ export default function AdminSettingsPage({ onChange }) {
       window.dispatchEvent(new CustomEvent("retela:appearance-settings", { detail: { sidebarCollapse: hydrated.appearance.sidebarCollapse } }));
       window.dispatchEvent(new CustomEvent("retela:branding-settings", { detail: hydrated }));
       if (scope === "all" || scope === "general" || scope === "payment") void refreshDeliveryCustomers();
+      setEditingSection(null);
+      setEditSnapshot(null);
       pushToast("success", scope === "all" ? "All settings saved." : `${sectionTitles[scope] || titleCase(scope)} saved.`);
     } catch (error) {
       pushToast("error", getApiErrorMessage(error, "Could not save settings."));
@@ -630,6 +685,8 @@ export default function AdminSettingsPage({ onChange }) {
       setSettings(hydrated);
       setFiles({ shopLogo: null, gcashQr: null });
       setErrors({});
+      setEditingSection(null);
+      setEditSnapshot(null);
       localStorage.setItem("retela_sidebar_collapsed", String(hydrated.appearance.sidebarCollapse));
       window.dispatchEvent(new CustomEvent("retela:appearance-settings", { detail: { sidebarCollapse: hydrated.appearance.sidebarCollapse } }));
       window.dispatchEvent(new CustomEvent("retela:branding-settings", { detail: hydrated }));
@@ -707,8 +764,8 @@ export default function AdminSettingsPage({ onChange }) {
 
   if (showBlockingLoader) {
     return (
-      <div className="grid gap-5 xl:grid-cols-2">
-        {Array.from({ length: 6 }).map((_, index) => <div key={index} className="premium-card skeleton min-h-72 rounded-[28px]" />)}
+      <div className="settings-page-grid">
+        {Array.from({ length: 6 }).map((_, index) => <div key={index} className="premium-card settings-card-skeleton skeleton rounded-[24px]" />)}
       </div>
     );
   }
@@ -716,13 +773,13 @@ export default function AdminSettingsPage({ onChange }) {
   if (loading) {
     return (
       <div className="settings-page grid gap-5">
-        <section className="relative overflow-hidden rounded-[32px] border border-neonbrand/20 bg-black/35 p-5 shadow-2xl shadow-black/30 backdrop-blur-2xl sm:p-7">
-          <p className="text-xs font-bold uppercase tracking-[0.24em] text-neonbrand/75">Admin Control Center</p>
-          <h1 className="mt-3 font-display text-3xl font-bold tracking-tight text-white sm:text-4xl">Settings</h1>
-          <p className="mt-2 text-sm font-semibold text-white/58">Still loading settings...</p>
+        <section className="settings-hero relative overflow-hidden rounded-[24px] p-5 sm:p-6">
+          <p className="settings-hero__eyebrow">Admin Control Center</p>
+          <h1 className="settings-hero__title mt-2 font-display text-3xl font-bold tracking-tight sm:text-4xl">Settings</h1>
+          <p className="settings-hero__subtitle mt-2 text-sm font-semibold">Still loading settings...</p>
         </section>
-        <div className="grid gap-5 xl:grid-cols-2">
-          {Array.from({ length: 4 }).map((_, index) => <div key={index} className="premium-card skeleton min-h-56 rounded-[28px]" />)}
+        <div className="settings-page-grid">
+          {Array.from({ length: 4 }).map((_, index) => <div key={index} className="premium-card settings-card-skeleton skeleton rounded-[24px]" />)}
         </div>
       </div>
     );
@@ -730,23 +787,21 @@ export default function AdminSettingsPage({ onChange }) {
 
   return (
     <div className="settings-page grid gap-5">
-      <section className="relative overflow-hidden rounded-[32px] border border-neonbrand/20 bg-black/35 p-5 shadow-2xl shadow-black/30 backdrop-blur-2xl sm:p-7">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_15%_10%,rgba(56,255,136,0.18),transparent_34%),radial-gradient(circle_at_85%_10%,rgba(34,197,94,0.16),transparent_30%)]" />
-        <div className="relative flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+      <section className="settings-hero relative overflow-hidden rounded-[24px] p-5 sm:p-6">
+        <div className="relative flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div className="min-w-0">
-            <p className="text-xs font-bold uppercase tracking-[0.24em] text-neonbrand/75">Admin Control Center</p>
-            <h1 className="mt-3 font-display text-3xl font-bold tracking-tight text-white sm:text-4xl">Settings</h1>
-            <p className="mt-2 max-w-3xl text-sm leading-6 text-white/58">Configure RETELA system behavior, AI automation, payments, inventory alerts, reports, security, and database operations.</p>
+            <p className="settings-hero__eyebrow">Admin Control Center</p>
+            <h1 className="settings-hero__title mt-2 font-display text-3xl font-bold tracking-tight sm:text-4xl">Settings</h1>
+            <p className="settings-hero__subtitle mt-2 max-w-3xl text-sm leading-6">Configure RETELA system behavior, AI automation, payments, inventory alerts, reports, security, and database operations.</p>
           </div>
-          <div className="flex flex-col gap-2 sm:flex-row">
+          <div className="settings-hero__actions flex flex-col gap-2 sm:flex-row">
             <ActionButton type="secondary" icon={RotateCcw} loading={saving === "reset"} onClick={resetDefaults}>Reset Defaults</ActionButton>
-            <ActionButton icon={Save} loading={saving === "all"} onClick={() => saveSettings("all")}>Save All Changes</ActionButton>
           </div>
         </div>
       </section>
 
-      <div className="grid gap-5 xl:grid-cols-2">
-        <SettingsCard section="general" saving={saving} onSave={saveSettings}>
+      <div className="settings-page-grid">
+        <SettingsCard section="general" {...cardControls("general")} onSave={saveSettings} view={<GeneralSettingsView value={settings.general} logo={shopLogoPreview} onLocationEdit={() => { beginEditing("general"); window.setTimeout(editShopLocation, 100); }} />}>
           <div className="grid gap-4 md:grid-cols-2">
             <TextInput label="Shop Name" value={settings.general.shopName} error={errors["general.shopName"]} onChange={(value) => updateSetting("general", "shopName", value)} />
             <FileInput label="Shop Logo Upload" file={files.shopLogo} preview={shopLogoPreview} onChange={(file) => updateFile("shopLogo", file)} />
@@ -781,7 +836,7 @@ export default function AdminSettingsPage({ onChange }) {
           </div>
         </SettingsCard>
 
-        <SettingsCard section="ai" saving={saving} onSave={saveSettings}>
+        <SettingsCard section="ai" {...cardControls("ai")} onSave={saveSettings} view={<AISettingsView value={settings.ai} />}>
           <div className="grid gap-4">
             <AIProviderSelector
               value={settings.ai.aiProvider}
@@ -801,7 +856,7 @@ export default function AdminSettingsPage({ onChange }) {
           </div>
         </SettingsCard>
 
-        <SettingsCard section="notifications" saving={saving} onSave={saveSettings}>
+        <SettingsCard section="notifications" {...cardControls("notifications")} onSave={saveSettings} view={<NotificationsSettingsView value={settings.notifications} />}>
           <ToggleGrid>
             <ToggleSwitch label="New Order Notifications" checked={settings.notifications.newOrderNotifications} onChange={(value) => updateSetting("notifications", "newOrderNotifications", value)} />
             <ToggleSwitch label="Low Stock Alerts" checked={settings.notifications.lowStockAlerts} onChange={(value) => updateSetting("notifications", "lowStockAlerts", value)} />
@@ -820,7 +875,7 @@ export default function AdminSettingsPage({ onChange }) {
           </ToggleGrid>
         </SettingsCard>
 
-        <SettingsCard section="payment" saving={saving} onSave={saveSettings} className="xl:col-span-2">
+        <SettingsCard section="payment" {...cardControls("payment")} onSave={saveSettings} className="settings-card--wide" view={<PaymentSettingsView value={settings} qrPreview={gcashQrPreview} summary={deliverySummary} loading={deliveryCustomersLoading} error={deliveryCustomersError} onManage={openDeliveryAreas} onRetry={() => refreshDeliveryCustomers({ showLoading: true, includeCustomers: false })} />}>
           <div className="grid gap-6">
             <section className="grid gap-4">
               <SettingsSectionHeading eyebrow="GCash" title="GCash Payment Details" />
@@ -893,7 +948,7 @@ export default function AdminSettingsPage({ onChange }) {
           </div>
         </SettingsCard>
 
-        <SettingsCard section="security" saving={saving} onSave={saveSettings} className="xl:col-span-2">
+        <SettingsCard section="security" {...cardControls("security")} onSave={saveSettings} className="settings-card--wide" view={<SecuritySettingsView value={settings.security} onEdit={() => beginEditing("security")} />}>
           <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.9fr)]">
             <div className="grid gap-3 md:grid-cols-2">
               <ToggleSwitch label="Two Factor Authentication Toggle" checked={settings.security.twoFactorAuthentication} onChange={(value) => updateSetting("security", "twoFactorAuthentication", value)} />
@@ -908,7 +963,7 @@ export default function AdminSettingsPage({ onChange }) {
           </div>
         </SettingsCard>
 
-        <SettingsCard section="inventory" saving={saving} onSave={saveSettings}>
+        <SettingsCard section="inventory" {...cardControls("inventory")} onSave={saveSettings} view={<InventorySettingsView value={settings.inventory} />}>
           <div className="grid gap-4">
             <NumberInput label="Low Stock Threshold" value={settings.inventory.lowStockThreshold} error={errors["inventory.lowStockThreshold"]} onChange={(value) => updateSetting("inventory", "lowStockThreshold", Number(value))} />
             <ToggleGrid>
@@ -919,7 +974,7 @@ export default function AdminSettingsPage({ onChange }) {
           </div>
         </SettingsCard>
 
-        <SettingsCard section="reports" saving={saving} onSave={saveSettings}>
+        <SettingsCard section="reports" {...cardControls("reports")} onSave={saveSettings} view={<ReportsSettingsView value={settings.reports} />}>
           <ToggleGrid>
             <ToggleSwitch label="Auto Generate Reports" checked={settings.reports.autoGenerateReports} onChange={(value) => updateSetting("reports", "autoGenerateReports", value)} />
             <ToggleSwitch label="Daily Reports" checked={settings.reports.dailyReports} onChange={(value) => updateSetting("reports", "dailyReports", value)} />
@@ -930,7 +985,7 @@ export default function AdminSettingsPage({ onChange }) {
           </ToggleGrid>
         </SettingsCard>
 
-        <SettingsCard section="appearance" saving={saving} onSave={saveSettings}>
+        <SettingsCard section="appearance" {...cardControls("appearance")} onSave={saveSettings} view={<AppearanceSettingsView value={settings.appearance} theme={userTheme} />}>
           <div className="grid gap-4 md:grid-cols-2">
             <ThemeModeSwitch theme={userTheme} onChange={updateUserTheme} />
             <ToggleSwitch label="Sidebar Collapse Toggle" checked={settings.appearance.sidebarCollapse} onChange={(value) => updateSetting("appearance", "sidebarCollapse", value)} />
@@ -939,7 +994,7 @@ export default function AdminSettingsPage({ onChange }) {
           </div>
         </SettingsCard>
 
-        <SettingsCard section="customers" saving={saving} onSave={saveSettings}>
+        <SettingsCard section="customers" {...cardControls("customers")} onSave={saveSettings} view={<CustomerSettingsView value={settings.customers} />}>
           <ToggleGrid>
             <ToggleSwitch label="Auto Welcome Message" checked={settings.customers.autoWelcomeMessage} onChange={(value) => updateSetting("customers", "autoWelcomeMessage", value)} />
             <ToggleSwitch label="Loyalty Rewards Toggle" checked={settings.customers.loyaltyRewards} onChange={(value) => updateSetting("customers", "loyaltyRewards", value)} />
@@ -947,7 +1002,7 @@ export default function AdminSettingsPage({ onChange }) {
           </ToggleGrid>
         </SettingsCard>
 
-        <SettingsCard section="about" saving={saving} onSave={saveSettings} className="xl:col-span-2">
+        <SettingsCard section="about" {...cardControls("about")} onSave={saveSettings} className="settings-card--wide" view={<AboutSettingsView value={settings.about} />}>
           <div className="grid gap-4 md:grid-cols-2">
             <TextArea label="Mission" value={settings.about.mission} onChange={(value) => updateSetting("about", "mission", value)} />
             <TextArea label="Vision" value={settings.about.vision} onChange={(value) => updateSetting("about", "vision", value)} />
@@ -1046,34 +1101,202 @@ export default function AdminSettingsPage({ onChange }) {
   );
 }
 
-function SettingsCard({ section, saving, onSave, children, className = "" }) {
+function SettingsCard({ section, saving, editing = false, disabled = false, dirty = false, onEdit, onCancel, onSave, view, children, className = "" }) {
   const Icon = sectionIcons[section];
   return (
     <motion.section
-      className={`premium-card min-w-0 p-4 shadow-[0_24px_70px_rgba(0,0,0,0.34)] sm:p-5 ${className}`}
+      className={`settings-card premium-card min-w-0 p-4 sm:p-5 ${className}`}
       initial={{ opacity: 0, y: 22 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.38, ease: "easeOut" }}
     >
-      <div className="mb-5 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+      <div className="settings-card__header mb-5 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex min-w-0 gap-3">
-          <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl border border-neonbrand/25 bg-neonbrand/10 text-neonbrand shadow-[0_0_32px_rgba(56,255,136,0.14)]">
+          <span className="settings-card__icon grid h-11 w-11 shrink-0 place-items-center rounded-2xl">
             <Icon size={22} />
           </span>
           <div className="min-w-0">
-            <h2 className="font-display text-xl font-bold text-white">{sectionTitles[section] || titleCase(section)}</h2>
-            <p className="mt-1 text-sm leading-6 text-white/52">{sectionDescriptions[section]}</p>
+            <h2 className="settings-card__title font-display text-xl font-bold">{sectionTitles[section] || titleCase(section)}</h2>
+            <p className="settings-card__description mt-1 text-sm leading-5">{sectionDescriptions[section]}</p>
           </div>
         </div>
         {onSave ? (
-          <ActionButton size="sm" icon={Save} loading={saving === section} onClick={() => onSave(section)}>
-            Save Changes
-          </ActionButton>
+          <div className="settings-card__actions flex flex-wrap items-center gap-2 sm:justify-end">
+            {editing ? (
+              <>
+                <span className="settings-editing-badge">Editing</span>
+                {dirty ? <span className="settings-unsaved">Unsaved Changes</span> : null}
+                <ActionButton type="secondary" size="sm" onClick={onCancel}>Cancel</ActionButton>
+                <ActionButton size="sm" icon={Save} loading={saving === section} onClick={() => onSave(section)}>Save Changes</ActionButton>
+              </>
+            ) : (
+              <button type="button" className="settings-edit-button" onClick={onEdit} disabled={disabled}>
+                <Pencil size={15} /> Edit
+              </button>
+            )}
+          </div>
         ) : null}
       </div>
-      {children}
+      {editing || !view ? children : view}
     </motion.section>
   );
+}
+
+function SettingsValueGrid({ children, className = "" }) {
+  return <div className={`settings-value-grid ${className}`}>{children}</div>;
+}
+
+function SettingsValue({ label, value, children, wide = false }) {
+  const display = value === null || value === undefined || value === "" ? "Not set" : value;
+  return (
+    <div className={`settings-value ${wide ? "settings-value--wide" : ""}`}>
+      <span className="settings-value__label">{label}</span>
+      {children || <strong className="settings-value__text">{display}</strong>}
+    </div>
+  );
+}
+
+function SettingStatus({ enabled, label }) {
+  const active = Boolean(enabled);
+  return <span className={`settings-status ${active ? "settings-status--on" : "settings-status--off"}`}>{label || (active ? "Enabled" : "Disabled")}</span>;
+}
+
+function SettingsValueStatus({ label, enabled }) {
+  return <SettingsValue label={label}><SettingStatus enabled={enabled} /></SettingsValue>;
+}
+
+function SettingsLogoPreview({ src }) {
+  return (
+    <div className="settings-logo-preview">
+      {src ? <img src={src} alt="Saved RETELA shop logo" /> : <span className="settings-logo-preview__empty"><Store size={22} /></span>}
+      <div>
+        <span className="settings-value__label">Shop Logo</span>
+        <strong className="settings-value__text">{src ? "Logo configured" : "No logo configured"}</strong>
+      </div>
+    </div>
+  );
+}
+
+function GeneralSettingsView({ value, logo, onLocationEdit }) {
+  const address = [value.shopAddress, value.shopMunicipality, value.shopProvince].filter(Boolean).join(", ") || "Not set";
+  const hasPin = finiteCoordinate(value.shopLatitude) !== null && finiteCoordinate(value.shopLongitude) !== null;
+  return (
+    <div className="settings-view-content">
+      <SettingsValueGrid>
+        <SettingsValue label="Shop Name" value={value.shopName} />
+        <SettingsValue label="Contact Number" value={value.contactNumber} />
+        <SettingsValue label="Email Address" value={value.emailAddress} />
+        <SettingsValue label="Shop Municipality" value={value.shopMunicipality} />
+        <SettingsValue label="Currency" value={value.currency} />
+        <SettingsValue label="Language" value={value.language} />
+        <SettingsValue label="Shop Address" value={address} wide />
+        <SettingsValue label="Shop Description" value={value.shopDescription} wide />
+      </SettingsValueGrid>
+      <div className="settings-view-subgrid">
+        <SettingsLogoPreview src={logo} />
+        <div className="settings-location-preview">
+          <div className="settings-location-preview__copy">
+            <MapPin size={18} />
+            <div><span className="settings-value__label">Exact Shop Location</span><strong className="settings-value__text">{hasPin ? "Exact pin saved" : "No exact pin saved"}</strong></div>
+          </div>
+          <button type="button" className="settings-inline-button" onClick={onLocationEdit}><MapPin size={14} /> Edit Location</button>
+          <SettingsMiniMap compact readOnly latitude={finiteCoordinate(value.shopLatitude) ?? defaultShopMapCenter.latitude} longitude={finiteCoordinate(value.shopLongitude) ?? defaultShopMapCenter.longitude} hasPin={hasPin} resolving={false} onSelect={() => {}} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AISettingsView({ value }) {
+  return (
+    <SettingsValueGrid>
+      <SettingsValue label="Provider" value={titleCase(value.aiProvider || "auto")} />
+      <SettingsValue label="Last Provider Used" value={value.lastProviderUsed || "None"} />
+      <SettingsValue label="API Status"><SettingStatus enabled={String(value.apiStatus || "").toLowerCase() === "ready"} label={value.apiStatus || "Unknown"} /></SettingsValue>
+      <SettingsValueStatus label="AI Assistant" enabled={value.aiAssistant} />
+      <SettingsValueStatus label="AI Auto Reply" enabled={value.aiAutoReply} />
+      <SettingsValueStatus label="AI Recommendation" enabled={value.aiRecommendation} />
+      <SettingsValue label="Temperature" value={Number(value.aiChatTemperature ?? 0).toFixed(2)} />
+    </SettingsValueGrid>
+  );
+}
+
+function NotificationsSettingsView({ value }) {
+  const groups = [
+    ["Order Alerts", [["New Order Notifications", value.newOrderNotifications]]],
+    ["Inventory Alerts", [["Low Stock Alerts", value.lowStockAlerts], ["Out of Stock Alerts", value.outOfStockAlerts]]],
+    ["Communication", [["Refund Alerts", value.refundAlerts], ["Email Notifications", value.emailNotifications], ["Push Notifications", value.pushNotifications], ["Sound Notifications", value.soundNotifications]]],
+    ["Meetup Reminders", [["24 Hours Before", value.meetup24HourReminder !== false], ["1 Hour Before", value.meetup1HourReminder !== false]]]
+  ];
+  return <div className="settings-view-groups">{groups.map(([title, rows]) => <div key={title} className="settings-view-group"><span className="settings-view-group__title">{title}</span><SettingsValueGrid>{rows.map(([label, enabled]) => <SettingsValueStatus key={label} label={label} enabled={enabled} />)}</SettingsValueGrid></div>)}</div>;
+}
+
+function PaymentSettingsView({ value, qrPreview, summary, loading, error, onManage, onRetry }) {
+  const payment = value.payment;
+  const general = value.general;
+  const address = [general.shopAddress, general.shopMunicipality, general.shopProvince].filter(Boolean).join(", ") || "Not set";
+  return (
+    <div className="settings-view-content">
+      <div className="settings-view-payment-top">
+        <SettingsValueGrid>
+          <SettingsValue label="GCash Number" value={payment.gcashNumber} />
+          <SettingsValue label="GCash Status"><SettingStatus enabled={Boolean(payment.gcashQrUrl)} label={payment.gcashQrUrl ? "Saved" : "Not configured"} /></SettingsValue>
+          <SettingsValue label="Shop Location" value={address} wide />
+        </SettingsValueGrid>
+        <div className="settings-qr-preview">{qrPreview ? <img src={qrPreview} alt="Saved GCash QR code" /> : <span><Upload size={20} /> QR not configured</span>}</div>
+      </div>
+      <div className="settings-view-group"><span className="settings-view-group__title">Delivery & Shipping</span><SettingsValueGrid>
+        <SettingsValue label="Nearby Shipping Fee" value="FREE" />
+        <SettingsValue label="Free Delivery Radius" value={`${Number(payment.freeDeliveryRadiusKm ?? 0)} km`} />
+        <SettingsValue label="Outside Area Shipping" value={formatAdminPhp(payment.outsideAreaShippingFee)} />
+        <SettingsValue label="Free / Nearby Municipalities" wide><div className="settings-chip-list">{(payment.freeDeliveryMunicipalities || []).map((item) => <span key={item} className="settings-chip">{item}</span>)}</div></SettingsValue>
+      </SettingsValueGrid></div>
+      <div className="settings-view-group"><span className="settings-view-group__title">Payment Options</span><SettingsValueGrid><SettingsValueStatus label="COD" enabled={payment.codEnabled} /><SettingsValueStatus label="Online Payment" enabled={payment.onlinePaymentEnabled} /><SettingsValueStatus label="Payment Verification" enabled={payment.paymentVerificationAutomation} /></SettingsValueGrid></div>
+      <DeliveryAreaSummary summary={summary} loading={loading} error={error} onManage={onManage} onRetry={onRetry} />
+      <div className="settings-view-group"><span className="settings-view-group__title">Coupons</span><SettingsValue label="Configured Coupons" value={`${(payment.coupons || []).length}`} /></div>
+    </div>
+  );
+}
+
+function SecuritySettingsView({ value, onEdit }) {
+  return <div className="settings-view-content"><SettingsValueGrid><SettingsValueStatus label="Two-Factor Authentication" enabled={value.twoFactorAuthentication} /><SettingsValueStatus label="Admin Access Control" enabled={value.adminAccessControl} /><SettingsValueStatus label="Login Activity" enabled={value.loginActivity} /><SettingsValue label="Session Timeout" value={`${value.sessionTimeout} minutes`} /></SettingsValueGrid><div className="settings-password-preview"><div><span className="settings-value__label">Password</span><strong className="settings-value__text">Protected</strong></div><button type="button" className="settings-inline-button" onClick={onEdit}><LockKeyhole size={14} /> Change Password</button></div></div>;
+}
+
+function InventorySettingsView({ value }) {
+  return <SettingsValueGrid><SettingsValue label="Low Stock Threshold" value={value.lowStockThreshold} /><SettingsValueStatus label="Auto Restock Alert" enabled={value.autoRestockAlert} /><SettingsValueStatus label="Barcode" enabled={value.barcodeEnabled} /><SettingsValueStatus label="SKU Generator" enabled={value.skuGeneratorEnabled} /></SettingsValueGrid>;
+}
+
+function ReportsSettingsView({ value }) {
+  return <div className="settings-view-content"><SettingsValueGrid><SettingsValueStatus label="Auto Generate Reports" enabled={value.autoGenerateReports} /><SettingsValueStatus label="Daily Reports" enabled={value.dailyReports} /><SettingsValueStatus label="Weekly Reports" enabled={value.weeklyReports} /><SettingsValueStatus label="Monthly Reports" enabled={value.monthlyReports} /><SettingsValueStatus label="PDF Export" enabled={value.exportPdf} /><SettingsValueStatus label="Excel Export" enabled={value.exportExcel} /></SettingsValueGrid></div>;
+}
+
+function AppearanceSettingsView({ value, theme }) {
+  return <SettingsValueGrid><SettingsValue label="Theme" value={titleCase(theme || (value.darkMode ? "dark" : "light"))} /><SettingsValue label="Sidebar" value={value.sidebarCollapse ? "Collapsed" : "Expanded"} /><SettingsValue label="Dashboard Layout" value={value.dashboardLayout} /><SettingsValue label="Theme Color"><span className="settings-color-value"><i style={{ backgroundColor: value.themeColor }} /> {value.themeColor}</span></SettingsValue></SettingsValueGrid>;
+}
+
+function CustomerSettingsView({ value }) {
+  return <SettingsValueGrid><SettingsValueStatus label="Auto Welcome Message" enabled={value.autoWelcomeMessage} /><SettingsValueStatus label="Loyalty Rewards" enabled={value.loyaltyRewards} /><SettingsValueStatus label="Customer Broadcast Notifications" enabled={value.customerBroadcastNotifications} /></SettingsValueGrid>;
+}
+
+const aboutViewGroups = [
+  ["story", "Shop Story", [["Mission", "mission"], ["Vision", "vision"]]],
+  ["store", "Store Information", [["Full Address", "fullAddress"], ["Store Landmark", "landmark"], ["Business Days", "businessDays"], ["Opening Time", "openingTime"], ["Closing Time", "closingTime"]]],
+  ["social", "Social Media", [["Facebook", "facebookPage"], ["Instagram", "instagramLink"], ["Messenger", "messengerLink"]]],
+  ["customer", "Customer Information", [["Payment Methods", "paymentMethods"], ["Delivery Areas", "deliveryAreas"], ["Estimated Delivery Time", "estimatedDeliveryTime"], ["Support Channels", "supportChannels"]]],
+  ["policies", "Policies", [["Return Conditions", "returnConditions"], ["Refund Process", "refundProcess"], ["Delivery & Meetup Safety", "deliverySafetyPolicy"]]],
+  ["people", "People", [["Owner/Admin Profile", "ownerProfile"], ["Developers", "developers"], ["Thesis Members", "thesisMembers"]]]
+];
+
+function AboutSettingsView({ value }) {
+  const [openGroups, setOpenGroups] = useState({ story: true });
+  function toggleGroup(key) {
+    setOpenGroups((current) => ({ ...current, [key]: !current[key] }));
+  }
+  return <div className="settings-about-groups">{aboutViewGroups.map(([key, title, fields]) => <div key={key} className="settings-about-group"><button type="button" className="settings-about-group__trigger" onClick={() => toggleGroup(key)} aria-expanded={Boolean(openGroups[key])}><span>{title}</span><ChevronDown size={18} className={openGroups[key] ? "is-open" : ""} /></button>{openGroups[key] ? <div className="settings-about-group__body"><SettingsValueGrid>{fields.map(([label, field]) => <SettingsValue key={field} label={label} value={value[field]} wide={String(value[field] || "").length > 100} />)}</SettingsValueGrid></div> : null}</div>)}</div>;
+}
+
+function formatAdminPhp(value) {
+  return `PHP ${Number(value || 0).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 function DataManagementButton({ icon: Icon, title, description, onClick }) {
@@ -1726,7 +1949,7 @@ function ShopLocationSetting({ value, onChange, error, containerRef }) {
   );
 }
 
-function SettingsMiniMap({ latitude, longitude, hasPin, resolving, onSelect }) {
+function SettingsMiniMap({ latitude, longitude, hasPin, resolving, onSelect, compact = false, readOnly = false }) {
   const [zoom, setZoom] = useState(15);
   const [tileState, setTileState] = useState("loading");
   const [tileVersion, setTileVersion] = useState(0);
@@ -1757,7 +1980,7 @@ function SettingsMiniMap({ latitude, longitude, hasPin, resolving, onSelect }) {
 
   return (
     <div className="retela-delivery-map-card">
-      <div className="retela-delivery-map h-72" onClick={handleMapClick} role="button" tabIndex={0} aria-label="Tap map to set exact shop pin">
+      <div className={`retela-delivery-map ${compact ? "h-36" : "h-72"}`} onClick={readOnly ? undefined : handleMapClick} role={readOnly ? "img" : "button"} tabIndex={readOnly ? -1 : 0} aria-label={readOnly ? "Shop location map preview" : "Tap map to set exact shop pin"}>
         {tileState !== "error" && tiles.map((tile) => (
           <img
             key={`${tile.tileX}-${tile.tileY}-${zoom}-${tileVersion}`}
@@ -1775,10 +1998,10 @@ function SettingsMiniMap({ latitude, longitude, hasPin, resolving, onSelect }) {
         {tileState === "error" ? <div className="retela-map-status-overlay"><span>Map could not be loaded.</span><button type="button" onClick={(event) => { event.stopPropagation(); retryTiles(); }}>Retry</button></div> : null}
         {tileState === "loading" ? <div className="retela-map-status-overlay is-loading"><Loader2 size={16} className="animate-spin" /> Loading map...</div> : null}
         {tileState === "ready" ? <span className={`retela-delivery-map-pin ${hasPin ? "" : "opacity-60"}`}><MapPin size={30} /></span> : null}
-        <div className="retela-delivery-map-tools">
+        {!readOnly ? <div className="retela-delivery-map-tools">
           <button type="button" onClick={(event) => { event.stopPropagation(); setZoom((current) => Math.min(18, current + 1)); }}>+</button>
           <button type="button" onClick={(event) => { event.stopPropagation(); setZoom((current) => Math.max(11, current - 1)); }}>-</button>
-        </div>
+        </div> : null}
         {resolving ? <span className="retela-delivery-map-status"><Loader2 size={14} className="animate-spin" /> Resolving address</span> : null}
       </div>
       <p>Search, then tap the map to fine-tune the RETELA shop pin.</p>
@@ -2062,7 +2285,7 @@ function Toast({ type, message, onClose }) {
   const success = type === "success";
   return (
     <motion.div
-      className={`fixed right-5 top-5 z-[160] flex max-w-[min(380px,calc(100vw-2rem))] items-start gap-3 rounded-2xl border p-3 text-white shadow-2xl backdrop-blur-2xl ${success ? "border-neonbrand/25 bg-black/85" : "border-rose-300/25 bg-rose-950/85"}`}
+      className={`settings-toast fixed right-5 top-5 z-[160] flex max-w-[min(380px,calc(100vw-2rem))] items-start gap-3 rounded-2xl border p-3 shadow-2xl backdrop-blur-2xl ${success ? "settings-toast--success" : "settings-toast--error"}`}
       initial={{ opacity: 0, y: 18, scale: 0.96 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
       exit={{ opacity: 0, y: 18, scale: 0.96 }}
@@ -2070,9 +2293,9 @@ function Toast({ type, message, onClose }) {
       <span className={`mt-0.5 ${success ? "text-neonbrand" : "text-rose-200"}`}>{success ? <CheckCircle2 size={20} /> : <AlertCircle size={20} />}</span>
       <div className="min-w-0 flex-1">
         <strong className="block text-sm">{success ? "Success" : "Action needed"}</strong>
-        <p className="mt-1 text-sm text-white/65">{message}</p>
+        <p className="settings-toast__message mt-1 text-sm">{message}</p>
       </div>
-      <button type="button" onClick={onClose} className="rounded-full p-1 text-white/50 transition hover:bg-white/10 hover:text-white" aria-label="Close notification">x</button>
+      <button type="button" onClick={onClose} className="settings-toast__close rounded-full p-1 transition" aria-label="Close notification">x</button>
     </motion.div>
   );
 }
