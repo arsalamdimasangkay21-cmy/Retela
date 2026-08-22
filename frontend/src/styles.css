@@ -11470,18 +11470,32 @@ button {
   background: #ffffff !important;
 }
 
-.inventory-action-button {
-  min-width: 92px;
-  min-height: 42px;
-  padding-inline: 12px !important;
-  white-space: nowrap;
-  flex-shrink: 0;
+.inventory-stock-list-card .inventory-actions {
+  min-width: max-content;
 }
 
-.inventory-action-button > span {
-  overflow: visible;
-  text-overflow: clip;
+.inventory-stock-list-card .inventory-action-button {
+  min-width: 84px;
+  min-height: 40px;
+  flex: 0 0 auto;
+  gap: 6px;
+  padding: 0 10px !important;
   white-space: nowrap;
+  overflow: visible;
+  font-size: 0.75rem;
+  line-height: 1;
+}
+
+.inventory-stock-list-card .inventory-action-button > span {
+  display: inline-block;
+  max-width: none !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+  white-space: nowrap !important;
+}
+
+.inventory-stock-list-card .inventory-action-button svg {
+  flex: 0 0 auto;
 }
 
 .inventory-action-button--edit {
@@ -11510,29 +11524,39 @@ button {
   color: #8f1d16 !important;
 }
 
-.inventory-status-badge--sold {
+.inventory-stock-list-card .inventory-status-badge {
+  display: inline-flex;
+  min-height: 28px;
   align-items: center;
   justify-content: center;
-  line-height: 1.2;
+  padding: 5px 10px !important;
+  line-height: 1 !important;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.inventory-status-badge--sold {
+  min-width: 62px;
+  align-items: center;
+  justify-content: center;
   border-color: #8bd0a2 !important;
   background: #e9f8ed !important;
   color: #176b37 !important;
 }
 
 .inventory-status-badge--low {
-  min-width: 88px;
+  min-width: 86px;
   justify-content: center;
   text-align: center;
-  line-height: 1.2;
   border-color: #e4b86a !important;
   background: #fff7e6 !important;
   color: #8a4b08 !important;
 }
 
 .inventory-status-badge--available {
+  min-width: 88px;
   align-items: center;
   justify-content: center;
-  line-height: 1.2;
   border-color: #9bd3ad !important;
   background: #effaf2 !important;
   color: #176b37 !important;

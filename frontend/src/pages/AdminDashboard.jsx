@@ -1483,15 +1483,15 @@ function PremiumInventoryPage({
               <table className="w-full table-fixed text-left text-sm">
                 <colgroup>
                   <col className="w-[8%]" />
-                  <col className="w-[15%]" />
-                  <col className="w-[14%]" />
-                  <col className="w-[10%]" />
+                  <col className="w-[13%]" />
+                  <col className="w-[12%]" />
+                  <col className="w-[9%]" />
                   <col className="w-[7%]" />
-                  <col className="w-[10%]" />
+                  <col className="w-[9%]" />
                   <col className="w-[6%]" />
-                  <col className="w-[8%]" />
                   <col className="w-[7%]" />
-                  <col className="w-[15%]" />
+                  <col className="w-[9%]" />
+                  <col className="w-[20%]" />
                 </colgroup>
                 <thead>
                   <tr className="inventory-stock-list__head-row border-b border-white/10 bg-white/[0.035] text-[11px] uppercase tracking-[0.08em] text-white/42">
@@ -1705,10 +1705,10 @@ function AdminStockBadge({ stock, compact = false }) {
   return <StockStatusBadge stock={stock} compact={compact} showQuantity />;
 }
 
-function InventoryActions({ product, onEdit, onDelete, deletingProductIds = [], mobile = false }) {
+function InventoryActions({ product, onEdit, onDelete, deletingProductIds = [] }) {
   const deleting = isDeletingProduct(product, deletingProductIds);
   return (
-    <div className={mobile ? "grid grid-cols-2 gap-2" : "grid grid-cols-2 gap-2"}>
+    <div className="inventory-actions flex flex-nowrap items-center gap-2">
       <InventoryActionButton tone="edit" icon={Edit3} title="Edit item" onClick={() => onEdit(product)}>
         Edit
       </InventoryActionButton>
@@ -1727,7 +1727,7 @@ function InventoryActionButton({ tone, icon: Icon, children, onClick, disabled =
   return (
     <button type="button" disabled={disabled} title={title} onClick={onClick} className={`inventory-action-button inventory-action-button--${tone} inline-flex min-h-11 min-w-0 items-center justify-center gap-2 whitespace-nowrap rounded-[10px] border px-3 py-2 text-sm font-semibold leading-none shadow-sm transition duration-200 hover:-translate-y-0.5 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-45 ${styles[tone] || styles.edit} ${className}`}>
       {Icon ? <Icon size={16} className="shrink-0" /> : null}
-      <span className="truncate">{children}</span>
+      <span className="whitespace-nowrap">{children}</span>
     </button>
   );
 }
