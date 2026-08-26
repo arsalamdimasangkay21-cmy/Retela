@@ -2528,6 +2528,83 @@ button {
   opacity: 1 !important;
 }
 
+.retela-pos-page .retela-pos-add-item-button {
+  min-width: 132px;
+  flex: 0 0 auto;
+  border-color: #087f3d !important;
+  background: #087f3d !important;
+  color: #ffffff !important;
+  white-space: nowrap !important;
+  word-break: normal !important;
+  overflow-wrap: normal !important;
+  box-shadow: 0 8px 18px rgba(8, 127, 61, 0.2);
+}
+
+.retela-pos-page .retela-pos-add-item-button:hover {
+  border-color: #056b32 !important;
+  background: #056b32 !important;
+}
+
+.retela-pos-page .retela-pos-add-item-button:focus-visible {
+  outline: 3px solid rgba(8, 127, 61, 0.28);
+  outline-offset: 2px;
+}
+
+.retela-pos-page .retela-pos-add-item-button:active {
+  background: #045a2a !important;
+  transform: translateY(1px);
+}
+
+.retela-pos-page .retela-pos-add-item-button:disabled {
+  border-color: #b8cdbf !important;
+  background: #dbe8df !important;
+  color: #456056 !important;
+  box-shadow: none;
+}
+
+.retela-pos-gcash-qr-frame {
+  width: 100%;
+  min-width: 0;
+  overflow: visible;
+}
+
+.retela-pos-page .retela-pos-gcash-qr {
+  display: block;
+  width: 100%;
+  max-width: 320px;
+  height: clamp(180px, 58vw, 320px) !important;
+  margin-inline: auto;
+  object-fit: contain !important;
+  object-position: center;
+}
+
+.retela-pos-page .retela-pos-gcash-qr-empty {
+  max-width: 100%;
+  min-height: clamp(180px, 58vw, 224px);
+  height: auto;
+}
+
+@media (max-width: 1279px) {
+  .retela-pos-page .retela-pos-payment-card {
+    position: static;
+  }
+}
+
+@media (max-width: 639px) {
+  .retela-pos-page .retela-pos-card {
+    padding: 1rem;
+  }
+
+  .retela-pos-gcash-qr-frame {
+    padding: 0.75rem;
+  }
+
+  .retela-pos-page .retela-pos-gcash-qr {
+    max-width: 100%;
+    height: clamp(170px, 62vw, 250px) !important;
+  }
+}
+
 .retela-pos-page .retela-pos-card {
   border-color: #cfe3d7 !important;
   box-shadow: 0 16px 34px rgba(35, 75, 54, 0.09) !important;

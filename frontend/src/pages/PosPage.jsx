@@ -248,7 +248,7 @@ export default function PosPage() {
               Scan Barcode
             </button>
           </div>
-          <form className="mt-5 flex flex-col gap-3 sm:flex-row" onSubmit={(event) => { event.preventDefault(); submitSearch(); }}>
+          <form className="retela-pos-search-form mt-5 flex min-w-0 flex-col gap-3 sm:flex-row" onSubmit={(event) => { event.preventDefault(); submitSearch(); }}>
             <div ref={searchBoxRef} className="relative flex-1">
               <label className="relative block">
                 <Barcode className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
@@ -275,7 +275,7 @@ export default function PosPage() {
                 />
               ) : null}
             </div>
-            <button type="submit" disabled={busy || !barcode.trim()} className="inline-flex h-14 items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-slate-950 px-6 text-sm font-black text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50">
+            <button type="submit" disabled={busy || !barcode.trim()} className="retela-pos-add-item-button inline-flex h-14 w-full shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-2xl border px-6 text-sm font-black transition sm:w-auto sm:min-w-[132px]">
               <Search size={18} />
               Add Item
             </button>
@@ -302,7 +302,7 @@ export default function PosPage() {
         </div>
       </section>
 
-      <aside className="grid content-start gap-5">
+      <aside className="grid min-w-0 content-start gap-5">
         <PaymentPanel
           method={paymentMethod}
           setMethod={setPaymentMethod}
@@ -446,7 +446,7 @@ function CartLine({ item, onQuantity, onRemove }) {
 
 function PaymentPanel({ method, setMethod, subtotal, quantity, cashReceived, setCashReceived, change, gcashReference, setGcashReference, settings, canCheckout, busy, onCheckout }) {
   return (
-    <div className="retela-pos-card retela-pos-payment-card sticky top-28 rounded-[26px] border border-slate-200 bg-white p-5 shadow-xl shadow-slate-200/70">
+    <div className="retela-pos-card retela-pos-payment-card xl:sticky xl:top-28 rounded-[26px] border border-slate-200 bg-white p-5 shadow-xl shadow-slate-200/70">
       <h2 className="font-display text-xl font-bold text-slate-950">Payment</h2>
       <div className="retela-pos-payment-tabs mt-4 grid grid-cols-2 gap-2 rounded-2xl bg-slate-100 p-1">
         <button type="button" onClick={() => setMethod("cash")} className={`retela-pos-payment-option inline-flex h-12 items-center justify-center gap-2 rounded-xl text-sm font-black transition ${method === "cash" ? "bg-white text-emerald-700 shadow" : "text-slate-600"}`}><Banknote size={18} /> Cash</button>
@@ -470,8 +470,8 @@ function PaymentPanel({ method, setMethod, subtotal, quantity, cashReceived, set
         </div>
       ) : (
         <div className="mt-5 grid gap-3">
-          <div className="grid place-items-center rounded-2xl border border-slate-200 bg-slate-50 p-4">
-            {settings?.gcashQrUrl ? <img src={assetUrl(settings.gcashQrUrl)} alt="Store GCash QR Code" className="max-h-72 w-full rounded-xl object-contain" /> : <div className="grid h-56 w-full place-items-center rounded-xl border border-dashed border-slate-300 text-center text-sm font-bold text-slate-400">GCash QR Code not configured</div>}
+          <div className="retela-pos-gcash-qr-frame grid place-items-center rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            {settings?.gcashQrUrl ? <img src={assetUrl(settings.gcashQrUrl)} alt="Store GCash QR Code" className="retela-pos-gcash-qr rounded-xl" /> : <div className="retela-pos-gcash-qr-empty grid h-56 w-full place-items-center rounded-xl border border-dashed border-slate-300 text-center text-sm font-bold text-slate-400">GCash QR Code not configured</div>}
             {settings?.gcashNumber ? <p className="mt-3 text-sm font-black text-slate-700">GCash: {settings.gcashNumber}</p> : null}
           </div>
           <label className="text-sm font-bold text-slate-700">GCash Reference Number</label>
