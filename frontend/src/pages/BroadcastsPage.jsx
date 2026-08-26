@@ -101,7 +101,8 @@ const emptyForm = {
     sms: false,
     aiChat: true
   },
-  image_url: ""
+  image_url: "",
+  image_urls: []
 };
 
 function assetUrl(url) {
@@ -160,7 +161,8 @@ export default function BroadcastsPage() {
     activeCampaigns: 0
   });
   const [audienceCounts, setAudienceCounts] = useState({});
-  const [imageFile, setImageFile] = useState(null);
+  const [imageFiles, setImageFiles] = useState([]);
+  const [savedImageUrls, setSavedImageUrls] = useState([]);
   const [editingId, setEditingId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [submittingAction, setSubmittingAction] = useState("");
@@ -190,10 +192,13 @@ export default function BroadcastsPage() {
     return summary;
   }, [history]);
 
-  const imagePreview = useMemo(() => {
-    if (imageFile) return URL.createObjectURL(imageFile);
-    return assetUrl(form.image_url);
-  }, [imageFile, form.image_url]);
+  const [imagePreviews, setImagePreviews] = useState([]);
+
+  useEffect(() => {
+    const previews = imageFiles.map((file) => ({ file, url: URL.createObjectURL(file) }));
+    setImagePreviews(previews);
+    return () => previews.forEach((preview) => URL.revokeObjectURL(preview.url));
+  }, [imageFiles]);
 
   const loadBroadcasts = useCallback(async ({ cancelled, force = false } = {}) => {
     try {
@@ -248,10 +253,6 @@ export default function BroadcastsPage() {
     };
   }, []);
 
-  useEffect(() => () => {
-    if (imageFile && imagePreview) URL.revokeObjectURL(imagePreview);
-  }, [imageFile, imagePreview]);
-
   function pushToast(type, message) {
     setToast({ type, message });
     window.clearTimeout(pushToast.timer);
@@ -288,7 +289,9 @@ export default function BroadcastsPage() {
 
   function resetForm() {
     setForm(emptyForm);
-    setImageFile(null);
+    setImageFiles([]);
+    setSavedImageUrls([]);
+    setImagePreviews([]);
     setEditingId(null);
     setAiPrompt("");
     setSubmitProgress(0);
@@ -332,7 +335,8 @@ export default function BroadcastsPage() {
     payload.append("action", action);
     payload.append("channels", JSON.stringify(form.channels));
     payload.append("image_url", form.image_url || "");
-    if (imageFile) payload.append("image", imageFile);
+    imageFiles.forEach((file) => payload.append("images", file));
+    payload.append("image_urls", JSON.stringify(savedImageUrls));
 
     setSubmittingAction(action);
     setSubmitProgress(action === "send" ? 8 : 0);
@@ -378,7 +382,9 @@ export default function BroadcastsPage() {
 
   function startEdit(item) {
     setEditingId(item.id);
-    setImageFile(null);
+    setImageFiles([]);
+    const urls = Array.isArray(item.image_urls) ? item.image_urls : (item.image_url ? [item.image_url] : []);
+    setSavedImageUrls(urls);
     setForm({
       title: item.title || "",
       message: item.message || "",
@@ -399,7 +405,8 @@ export default function BroadcastsPage() {
         sms: Boolean(item.channels?.sms),
         aiChat: Boolean(item.channels?.aiChat)
       },
-      image_url: item.image_url || ""
+      image_url: item.image_url || "",
+      image_urls: urls
     });
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
@@ -449,6 +456,32 @@ export default function BroadcastsPage() {
     if (item.status === "scheduled") return 20;
     return 0;
   }
+
+  function handleImageSelection(event) {
+    const selected = Array.from(event.target.files || []);
+    event.target.value = "";
+    const allowed = selected.filter((file) => ["image/jpeg", "image/png", "image/webp"].includes(file.type) && file.size <= 5 * 1024 * 1024);
+    const invalidCount = selected.length - allowed.length;
+    const room = Math.max(0, 10 - savedImageUrls.length - imageFiles.length);
+    if (invalidCount) pushToast("error", "Only JPG, PNG, or WEBP images up to 5MB each are allowed.");
+    if (selected.length > room) pushToast("error", "You can upload up to 10 images.");
+    if (!room || !allowed.length) return;
+    setImageFiles((current) => [...current, ...allowed.slice(0, room)]);
+  }
+
+  function removeNewImage(file) {
+    setImageFiles((current) => current.filter((item) => item !== file));
+  }
+
+  function removeSavedImage(url) {
+    setSavedImageUrls((current) => current.filter((item) => item !== url));
+  }
+
+  const allImagePreviews = [
+    ...savedImageUrls.map((url) => ({ key: `saved-${url}`, url, saved: true })),
+    ...imagePreviews.map(({ file, url }) => ({ key: `new-${file.name}-${file.lastModified}`, url, file, saved: false }))
+  ];
+  const primaryImagePreview = allImagePreviews[0]?.url || assetUrl(form.image_url);
 
   const hasPreviewContent = Boolean(form.title.trim() || form.message.trim());
   const previewTitle = form.title.trim() || "RETELA Broadcast";
@@ -682,7 +715,7 @@ export default function BroadcastsPage() {
               ) : null}
             </section>
 
-            <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_260px]">
+            <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_300px]">
               <label className="grid gap-2">
                 <span className="text-xs font-bold uppercase tracking-[0.16em] text-white/42">Image Upload</span>
                 <label className="flex min-h-24 cursor-pointer items-center gap-4 rounded-[24px] border border-dashed border-emerald-300/25 bg-emerald-300/5 px-4 py-4 transition hover:border-emerald-300/40">
@@ -690,16 +723,21 @@ export default function BroadcastsPage() {
                     <ImagePlus size={22} />
                   </span>
                   <span className="min-w-0 flex-1">
-                    <strong className="block truncate text-sm text-white">{imageFile ? imageFile.name : form.image_url ? "Current campaign image" : "Upload broadcast image"}</strong>
-                    <span className="mt-1 block text-xs text-white/45">PNG, JPG, or WEBP up to 5MB</span>
+                    <strong className="block truncate text-sm text-white">{allImagePreviews.length ? `${allImagePreviews.length} / 10 images selected` : "Upload broadcast images"}</strong>
+                    <span className="mt-1 block text-xs text-white/55">You can upload up to 10 images · PNG, JPG, or WEBP · 5MB each</span>
                   </span>
-                  <input type="file" accept="image/*" className="hidden" onChange={(event) => setImageFile(event.target.files?.[0] || null)} />
+                  <input type="file" accept="image/jpeg,image/png,image/webp" multiple className="hidden" onChange={handleImageSelection} />
                 </label>
               </label>
               <div className="rounded-[24px] border border-white/10 bg-black/20 p-3">
                 <span className="text-xs font-bold uppercase tracking-[0.16em] text-white/42">Preview</span>
-                <div className="mt-2 grid h-[124px] place-items-center overflow-hidden rounded-[18px] border border-white/10 bg-white/[0.05]">
-                  {imagePreview ? <img src={imagePreview} className="h-full w-full object-cover" alt="Broadcast preview" /> : <span className="text-sm text-white/35">No image selected</span>}
+                <div className="mt-2 grid grid-cols-3 gap-2 rounded-[18px] border border-white/10 bg-white/[0.05] p-2">
+                  {allImagePreviews.length ? allImagePreviews.map((preview, index) => (
+                    <div key={preview.key} className="group relative aspect-square overflow-hidden rounded-xl border border-white/10 bg-black/20">
+                      <img src={preview.url} className="h-full w-full object-cover" alt={`Broadcast image ${index + 1}`} />
+                      <button type="button" onClick={() => preview.saved ? removeSavedImage(preview.url) : removeNewImage(preview.file)} className="absolute right-1 top-1 grid h-6 w-6 place-items-center rounded-full bg-black/75 text-white opacity-0 transition group-hover:opacity-100" aria-label={`Remove image ${index + 1}`}><Trash2 size={13} /></button>
+                    </div>
+                  )) : <span className="col-span-3 py-8 text-center text-sm text-white/45">No image selected</span>}
                 </div>
               </div>
             </div>
@@ -795,7 +833,7 @@ export default function BroadcastsPage() {
                         <h4 className="break-words text-lg font-black uppercase leading-snug text-slate-950">{previewTitle}</h4>
                         <p className="mt-2 whitespace-pre-line break-words text-sm leading-6 text-slate-700">{previewMessage || "Add your message to complete the customer notification."}</p>
                         {previewPromo ? <p className="mt-3 rounded-2xl border border-emerald-100 bg-emerald-50 px-3 py-2 text-sm font-black text-emerald-800">Promo Code: {previewPromo}</p> : null}
-                        {imagePreview ? <img src={imagePreview} className="mt-3 h-28 w-full rounded-2xl object-cover shadow-sm" alt="Customer notification preview" /> : null}
+                        {primaryImagePreview ? <img src={primaryImagePreview} className="mt-3 h-28 w-full rounded-2xl object-cover shadow-sm" alt="Customer notification preview" /> : null}
                         <button type="button" className="mt-4 inline-flex items-center gap-2 rounded-2xl bg-emerald-600 px-4 py-2 text-sm font-black text-white shadow-lg shadow-emerald-700/20">
                           Shop Now
                         </button>
@@ -921,6 +959,7 @@ export default function BroadcastsPage() {
                       <td className="py-4 pr-4">
                         <strong className="block text-white">{item.title}</strong>
                         <span className="mt-1 block text-xs text-white/40">{titleCase(item.broadcast_type)}</span>
+                        <BroadcastImageStrip urls={item.image_urls} />
                       </td>
                       <td className="py-4 pr-4">{titleCase(item.audience)}</td>
                       <td className="py-4 pr-4">{formatDateTime(item.sent_at || item.scheduled_at || item.created_at)}</td>
@@ -958,6 +997,7 @@ export default function BroadcastsPage() {
                     <MiniStat label="Recipients" value={Number(item.total_recipients || 0).toLocaleString()} />
                     <MiniStat label="Conversion" value={`${Number(item.conversion_rate || item.click_rate || 0).toFixed(1)}%`} />
                   </div>
+                  <BroadcastImageStrip urls={item.image_urls} />
                   <div className="mt-4"><ProgressBar value={progressFor(item)} /></div>
                   <div className="mt-4 flex flex-wrap gap-2">
                     <TableAction icon={Edit3} label="Edit" onClick={() => startEdit(item)} />
@@ -1155,6 +1195,12 @@ function TableAction({ icon: Icon, label, onClick, danger = false, disabled = fa
       {label}
     </button>
   );
+}
+
+function BroadcastImageStrip({ urls = [] }) {
+  const images = Array.isArray(urls) ? urls : [];
+  if (!images.length) return null;
+  return <div className="mt-2 flex flex-wrap gap-1.5">{images.slice(0, 10).map((url, index) => <img key={`${url}-${index}`} src={assetUrl(url)} className="h-9 w-9 rounded-lg border border-white/10 object-cover" alt={`Broadcast image ${index + 1}`} />)}</div>;
 }
 
 function Toast({ toast, onClose }) {

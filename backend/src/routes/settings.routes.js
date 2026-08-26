@@ -225,6 +225,17 @@ router.post("/shipping/quote", requireAuth, asyncHandler(async (req, res) => {
 
 router.use(requireAuth, requireRole("admin"));
 
+router.put("/inventory-threshold", asyncHandler(async (req, res) => {
+  const { threshold } = z.object({ threshold: z.coerce.number().int().min(0).max(999) }).parse(req.body || {});
+  const current = await loadSystemSettings();
+  const next = normalizeSystemSettings({
+    ...current.config,
+    inventory: { ...current.config.inventory, lowStockThreshold: threshold }
+  });
+  const saved = await saveSystemSettings(next);
+  res.json({ threshold: saved.config.inventory.lowStockThreshold });
+}));
+
 async function getDatabaseStatus() {
   try {
     const [status] = await query("SELECT DATABASE() AS database_name, NOW() AS checked_at");

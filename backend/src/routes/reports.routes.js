@@ -98,6 +98,8 @@ async function ensureReviewColumns() {
 
 const getAnalyticsSummary = asyncHandler(async (req, res) => {
   await ensureProductColumns();
+  const { config } = await loadSystemSettings();
+  const lowStockThreshold = Math.max(0, Number(config?.inventory?.lowStockThreshold ?? 3));
   const start = req.query.start || req.query.startDate;
   const end = req.query.end || req.query.endDate;
   const { range, where: rangeSql, params: rangeParams } = reportDateFilter(req.query.range, start, end, "o");
@@ -124,7 +126,7 @@ const getAnalyticsSummary = asyncHandler(async (req, res) => {
   const [inventory] = await query(`
     SELECT COUNT(*) AS product_count,
       COALESCE(SUM(stock),0) AS total_stock,
-      COALESCE(SUM(stock > 0 AND stock <= 5),0) AS low_stock_count
+      COALESCE(SUM(stock > 0 AND stock <= ${lowStockThreshold}),0) AS low_stock_count
     FROM products p
     WHERE ${nonDeletedProductWhere("p.")} AND ${productRangeSql}
   `, productRangeParams);
@@ -223,6 +225,8 @@ router.get("/summary", getAnalyticsSummary);
 router.get("/sales", asyncHandler(async (req, res) => {
   await ensureProductColumns();
   await ensureReviewColumns();
+  const { config } = await loadSystemSettings();
+  const lowStockThreshold = Math.max(0, Number(config?.inventory?.lowStockThreshold ?? 3));
   const start = req.query.start || req.query.startDate;
   const end = req.query.end || req.query.endDate;
   const { range, where: rangeSql, params: rangeParams } = reportDateFilter(req.query.range, start, end, "o");
@@ -230,8 +234,6 @@ router.get("/sales", asyncHandler(async (req, res) => {
   const { where: productRangeSql, params: productRangeParams } = reportDateFilter(req.query.range, start, end, "p");
   const { channel, where: channelSql, params: channelParams } = reportChannelFilter(req.query.channel, "o");
   const { where: reviewChannelSql } = reportChannelFilter(req.query.channel, "o");
-  const { config } = await loadSystemSettings();
-
   const [orderSummary] = await query(`
     SELECT
       COUNT(DISTINCT o.id) AS total_orders,
@@ -336,7 +338,7 @@ router.get("/sales", asyncHandler(async (req, res) => {
     SELECT
       COUNT(*) AS product_count,
       COALESCE(SUM(stock), 0) AS total_stock,
-      COALESCE(SUM(stock > 0 AND stock <= 3), 0) AS low_stock_count,
+      COALESCE(SUM(stock > 0 AND stock <= ${lowStockThreshold}), 0) AS low_stock_count,
       COALESCE(SUM(stock = 0), 0) AS out_of_stock_count
     FROM products p
     WHERE ${nonDeletedProductWhere("p.")} AND ${productRangeSql}
@@ -352,7 +354,7 @@ router.get("/sales", asyncHandler(async (req, res) => {
   const lowStockProducts = await query(`
     SELECT id, name, brand, category, size, stock, status
     FROM products p
-    WHERE ${nonDeletedProductWhere("p.")} AND ${productRangeSql} AND stock > 0 AND stock <= 5
+    WHERE ${nonDeletedProductWhere("p.")} AND ${productRangeSql} AND stock > 0 AND stock <= ${lowStockThreshold}
     ORDER BY stock ASC, name ASC
   `, productRangeParams);
 
@@ -465,7 +467,9 @@ router.get("/sales", asyncHandler(async (req, res) => {
 
 router.get("/inventory", asyncHandler(async (req, res) => {
   await ensureProductColumns();
-  const rows = await query(`SELECT id, name, brand, category, size, stock, price, stock > 0 AND stock <= 5 AS low_stock FROM products WHERE ${nonDeletedProductWhere()} ORDER BY stock ASC`);
+  const { config } = await loadSystemSettings();
+  const lowStockThreshold = Math.max(0, Number(config?.inventory?.lowStockThreshold ?? 3));
+  const rows = await query(`SELECT id, name, brand, category, size, stock, price, stock > 0 AND stock <= ${lowStockThreshold} AS low_stock FROM products WHERE ${nonDeletedProductWhere()} ORDER BY stock ASC`);
   res.json(rows);
 }));
 

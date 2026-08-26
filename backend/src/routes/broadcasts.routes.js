@@ -40,6 +40,21 @@ function normalizeChannels(input) {
   };
 }
 
+function broadcastFiles(req) {
+  const files = [
+    ...(Array.isArray(req.files?.images) ? req.files.images : []),
+    ...(Array.isArray(req.files?.image) ? req.files.image : [])
+  ];
+  return files.slice(0, 10);
+}
+
+function broadcastImageUrls(row) {
+  const parsed = parseJson(row?.image_urls_json, []);
+  const urls = Array.isArray(parsed) ? parsed.filter(Boolean).map(String) : [];
+  if (row?.image_url && !urls.includes(row.image_url)) urls.unshift(row.image_url);
+  return urls.slice(0, 10);
+}
+
 function toMysqlDatetime(value) {
   if (!value) return null;
   const date = new Date(value);
@@ -55,6 +70,7 @@ async function ensureBroadcastSchema() {
         title VARCHAR(160) NOT NULL,
         message TEXT NOT NULL,
         image_url VARCHAR(255) NULL,
+        image_urls_json JSON NULL,
         promo_code VARCHAR(80) NULL,
         audience ENUM('all_customers','by_location','by_product_interest','active_customers','new_customers','customers_with_orders','vip_customers') NOT NULL DEFAULT 'all_customers',
         audience_filter VARCHAR(160) NULL,
@@ -89,11 +105,14 @@ async function ensureBroadcastSchema() {
        FROM INFORMATION_SCHEMA.COLUMNS
        WHERE TABLE_SCHEMA = DATABASE()
          AND TABLE_NAME = 'broadcasts'
-         AND COLUMN_NAME IN ('audience_filter', 'is_deleted', 'deleted_at', 'deleted_by', 'sale_enabled', 'sale_discount_percent', 'sale_product_ids_json', 'sale_starts_at', 'sale_ends_at')`
+       AND COLUMN_NAME IN ('audience_filter', 'image_urls_json', 'is_deleted', 'deleted_at', 'deleted_by', 'sale_enabled', 'sale_discount_percent', 'sale_product_ids_json', 'sale_starts_at', 'sale_ends_at')`
     );
     const broadcastColumnSet = new Set(broadcastColumns.map((row) => row.COLUMN_NAME));
     if (!broadcastColumnSet.has("audience_filter")) {
       await query("ALTER TABLE broadcasts ADD COLUMN audience_filter VARCHAR(160) NULL AFTER audience");
+    }
+    if (!broadcastColumnSet.has("image_urls_json")) {
+      await query("ALTER TABLE broadcasts ADD COLUMN image_urls_json JSON NULL AFTER image_url");
     }
     if (!broadcastColumnSet.has("is_deleted")) {
       await query("ALTER TABLE broadcasts ADD COLUMN is_deleted BOOLEAN NOT NULL DEFAULT FALSE AFTER created_by");
@@ -285,7 +304,8 @@ function toNotificationPayload(broadcast, imageUrl) {
     type: "broadcast",
     title: broadcast.title,
     body: broadcast.message,
-    product: imageUrl ? { image_url: imageUrl } : null
+    product: imageUrl ? { image_url: imageUrl, image_urls: broadcastImageUrls(broadcast) } : null,
+    image_urls: broadcastImageUrls(broadcast)
   };
 }
 
@@ -521,6 +541,7 @@ async function getBroadcastsResponse(app) {
       return {
         ...broadcast,
         channels: normalizeChannels(parseJson(broadcast.channels_json, {})),
+        image_urls: broadcastImageUrls(broadcast),
         total_recipients: totalRecipients,
         opened_recipients: openedRecipients,
         clicked_recipients: clickedRecipients,
@@ -554,7 +575,8 @@ function parseFormPayload(body) {
       email: body.channel_email === "true",
       sms: body.channel_sms === "true",
       aiChat: body.channel_ai_chat === "true"
-    })
+    }),
+    image_urls: typeof body.image_urls === "string" ? parseJson(body.image_urls, []) : body.image_urls
   };
   const schema = z.object({
     title: z.string().trim().min(3).max(160),
@@ -576,7 +598,8 @@ function parseFormPayload(body) {
       email: z.boolean(),
       sms: z.boolean(),
       aiChat: z.boolean()
-    }).refine((channels) => Object.values(channels).some(Boolean), "Select at least one delivery channel.")
+    }).refine((channels) => Object.values(channels).some(Boolean), "Select at least one delivery channel."),
+    image_urls: z.array(z.string().trim().max(500)).max(10).optional().default([])
   });
   return schema.parse(payload);
 }
@@ -630,7 +653,7 @@ router.get("/trash", asyncHandler(async (req, res) => {
      WHERE is_deleted = TRUE
      ORDER BY deleted_at DESC, updated_at DESC`
   );
-  res.json(rows.map((broadcast) => ({ ...broadcast, channels: normalizeChannels(parseJson(broadcast.channels_json, {})) })));
+  res.json(rows.map((broadcast) => ({ ...broadcast, channels: normalizeChannels(parseJson(broadcast.channels_json, {})), image_urls: broadcastImageUrls(broadcast) })));
 }));
 
 router.post("/generate", asyncHandler(async (req, res) => {
@@ -693,7 +716,7 @@ router.post("/generate", asyncHandler(async (req, res) => {
   res.json({ message });
 }));
 
-router.post("/", upload.single("image"), asyncHandler(async (req, res) => {
+router.post("/", upload.fields([{ name: "images", maxCount: 10 }, { name: "image", maxCount: 1 }]), asyncHandler(async (req, res) => {
   await ensureBroadcastSchema();
   const input = parseFormPayload(req.body);
   const scheduledAt = toMysqlDatetime(input.scheduled_at);
@@ -702,16 +725,20 @@ router.post("/", upload.single("image"), asyncHandler(async (req, res) => {
   }
 
   const status = input.action === "draft" ? "draft" : input.action === "schedule" ? "scheduled" : "sending";
+  const files = broadcastFiles(req);
+  const uploadedImageUrls = files.map((file) => `/uploads/${file.filename}`);
+  const imageUrls = uploadedImageUrls.length ? uploadedImageUrls : input.image_urls;
   const result = await query(
     `INSERT INTO broadcasts (
-      title, message, image_url, promo_code, audience, audience_filter, broadcast_type, status, channels_json, scheduled_at, ai_generated, created_by, sale_enabled, sale_discount_percent, sale_product_ids_json, sale_starts_at, sale_ends_at
+      title, message, image_url, image_urls_json, promo_code, audience, audience_filter, broadcast_type, status, channels_json, scheduled_at, ai_generated, created_by, sale_enabled, sale_discount_percent, sale_product_ids_json, sale_starts_at, sale_ends_at
     ) VALUES (
-      :title, :message, :imageUrl, :promoCode, :audience, :audienceFilter, :broadcastType, :status, :channelsJson, :scheduledAt, :aiGenerated, :createdBy, :saleEnabled, :saleDiscountPercent, :saleProductIdsJson, :saleStartsAt, :saleEndsAt
+      :title, :message, :imageUrl, :imageUrlsJson, :promoCode, :audience, :audienceFilter, :broadcastType, :status, :channelsJson, :scheduledAt, :aiGenerated, :createdBy, :saleEnabled, :saleDiscountPercent, :saleProductIdsJson, :saleStartsAt, :saleEndsAt
     )`,
     {
       title: input.title,
       message: input.message,
-      imageUrl: req.file ? `/uploads/${req.file.filename}` : null,
+      imageUrl: imageUrls[0] || null,
+      imageUrlsJson: JSON.stringify(imageUrls),
       promoCode: input.promo_code || null,
       audience: input.audience,
       audienceFilter: input.audience_filter || null,
@@ -741,7 +768,7 @@ router.post("/", upload.single("image"), asyncHandler(async (req, res) => {
   });
 }));
 
-router.put("/:id", upload.single("image"), asyncHandler(async (req, res) => {
+router.put("/:id", upload.fields([{ name: "images", maxCount: 10 }, { name: "image", maxCount: 1 }]), asyncHandler(async (req, res) => {
   await ensureBroadcastSchema();
   const existingRows = await query("SELECT * FROM broadcasts WHERE id = :id LIMIT 1", { id: req.params.id });
   if (!existingRows.length) throw new HttpError(404, "Broadcast not found.");
@@ -753,11 +780,18 @@ router.put("/:id", upload.single("image"), asyncHandler(async (req, res) => {
   }
 
   const status = input.action === "draft" ? "draft" : input.action === "schedule" ? "scheduled" : "sending";
+  const files = broadcastFiles(req);
+  const uploadedImageUrls = files.map((file) => `/uploads/${file.filename}`);
+  const existingImageUrls = broadcastImageUrls(existing);
+  const hasImageUrlsField = Object.prototype.hasOwnProperty.call(req.body || {}, "image_urls");
+  const requestedImageUrls = hasImageUrlsField && Array.isArray(input.image_urls) ? input.image_urls : existingImageUrls;
+  const imageUrls = [...requestedImageUrls, ...uploadedImageUrls].slice(0, 10);
   await query(
     `UPDATE broadcasts
      SET title = :title,
          message = :message,
          image_url = :imageUrl,
+         image_urls_json = :imageUrlsJson,
          promo_code = :promoCode,
          audience = :audience,
          audience_filter = :audienceFilter,
@@ -777,7 +811,8 @@ router.put("/:id", upload.single("image"), asyncHandler(async (req, res) => {
       id: req.params.id,
       title: input.title,
       message: input.message,
-      imageUrl: req.file ? `/uploads/${req.file.filename}` : (req.body.image_url || existing.image_url || null),
+      imageUrl: imageUrls[0] || null,
+      imageUrlsJson: JSON.stringify(imageUrls),
       promoCode: input.promo_code || null,
       audience: input.audience,
       audienceFilter: input.audience_filter || null,
@@ -815,14 +850,15 @@ router.post("/:id/resend", asyncHandler(async (req, res) => {
   const source = rows[0];
   const clone = await query(
     `INSERT INTO broadcasts (
-      title, message, image_url, promo_code, audience, audience_filter, broadcast_type, status, channels_json, ai_generated, created_by
+      title, message, image_url, image_urls_json, promo_code, audience, audience_filter, broadcast_type, status, channels_json, ai_generated, created_by
     ) VALUES (
-      :title, :message, :imageUrl, :promoCode, :audience, :audienceFilter, :broadcastType, 'sending', :channelsJson, :aiGenerated, :createdBy
+      :title, :message, :imageUrl, :imageUrlsJson, :promoCode, :audience, :audienceFilter, :broadcastType, 'sending', :channelsJson, :aiGenerated, :createdBy
     )`,
     {
       title: source.title,
       message: source.message,
       imageUrl: source.image_url,
+      imageUrlsJson: JSON.stringify(broadcastImageUrls(source)),
       promoCode: source.promo_code,
       audience: source.audience,
       audienceFilter: source.audience_filter,
@@ -848,14 +884,15 @@ router.post("/:id/duplicate", asyncHandler(async (req, res) => {
   const source = rows[0];
   await query(
     `INSERT INTO broadcasts (
-      title, message, image_url, promo_code, audience, audience_filter, broadcast_type, status, channels_json, ai_generated, created_by
+      title, message, image_url, image_urls_json, promo_code, audience, audience_filter, broadcast_type, status, channels_json, ai_generated, created_by
     ) VALUES (
-      :title, :message, :imageUrl, :promoCode, :audience, :audienceFilter, :broadcastType, 'draft', :channelsJson, :aiGenerated, :createdBy
+      :title, :message, :imageUrl, :imageUrlsJson, :promoCode, :audience, :audienceFilter, :broadcastType, 'draft', :channelsJson, :aiGenerated, :createdBy
     )`,
     {
       title: `${source.title} Copy`.slice(0, 160),
       message: source.message,
       imageUrl: source.image_url,
+      imageUrlsJson: JSON.stringify(broadcastImageUrls(source)),
       promoCode: source.promo_code,
       audience: source.audience,
       audienceFilter: source.audience_filter,

@@ -346,6 +346,8 @@ router.get("/:id/items", requireAuth, requireApproved, asyncHandler(async (req, 
 router.patch("/:id/cancel", requireAuth, requireApproved, asyncHandler(async (req, res) => {
   await ensureOrderColumns();
   await ensureProductInventoryColumns();
+  const { config } = await loadSystemSettings();
+  const lowStockThreshold = Number(config?.inventory?.lowStockThreshold ?? 3);
   const orderId = Number(req.params.id);
   if (!Number.isInteger(orderId) || orderId <= 0) throw new HttpError(400, "A valid order ID is required");
 
@@ -378,7 +380,7 @@ router.patch("/:id/cancel", requireAuth, requireApproved, asyncHandler(async (re
          SET stock = stock + ?,
              status = CASE
                WHEN stock + ? <= 0 THEN 'Out of Stock'
-               WHEN stock + ? <= 5 THEN 'Low Stock'
+               WHEN stock + ? <= ${lowStockThreshold} THEN 'Low Stock'
                ELSE 'In Stock'
              END
          WHERE id = ?`,
@@ -390,7 +392,7 @@ router.patch("/:id/cancel", requireAuth, requireApproved, asyncHandler(async (re
         id: Number(item.product_id),
         name: updatedProducts[0]?.name,
         stock: nextStock,
-        status: nextStock <= 0 ? "Out of Stock" : nextStock <= 5 ? "Low Stock" : "In Stock"
+        status: nextStock <= 0 ? "Out of Stock" : nextStock <= lowStockThreshold ? "Low Stock" : "In Stock"
       });
     }
 
@@ -450,6 +452,8 @@ router.patch("/:id/cancel", requireAuth, requireApproved, asyncHandler(async (re
 }));
 
 async function createOrderTransactionAttempt(req, input, pricing, attempt) {
+  const { config } = await loadSystemSettings();
+  const lowStockThreshold = Number(config?.inventory?.lowStockThreshold ?? 3);
   const conn = await pool.getConnection();
   const startedAt = Date.now();
   const userId = req.user.id;
@@ -531,7 +535,7 @@ async function createOrderTransactionAttempt(req, input, pricing, attempt) {
          SET stock = stock - ?,
              status = CASE
                WHEN stock - ? <= 0 THEN 'Out of Stock'
-               WHEN stock - ? <= 5 THEN 'Low Stock'
+               WHEN stock - ? <= ${lowStockThreshold} THEN 'Low Stock'
                ELSE 'In Stock'
              END
          WHERE id = ?
@@ -545,7 +549,7 @@ async function createOrderTransactionAttempt(req, input, pricing, attempt) {
       }
       const [updatedProducts] = await conn.execute("SELECT id, name, stock FROM products WHERE id = ?", [item.product_id]);
       const nextStock = Number(updatedProducts[0]?.stock || 0);
-      const nextStatus = nextStock <= 0 ? "Out of Stock" : nextStock <= 5 ? "Low Stock" : "In Stock";
+      const nextStatus = nextStock <= 0 ? "Out of Stock" : nextStock <= lowStockThreshold ? "Low Stock" : "In Stock";
       inventoryUpdates.push({
         id: Number(item.product_id),
         name: updatedProducts[0]?.name,

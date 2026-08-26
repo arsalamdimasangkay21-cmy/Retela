@@ -23,10 +23,12 @@ export function normalizeProductMatchValue(value) {
   return String(value || "").trim().replace(/\s+/g, " ").toLowerCase();
 }
 
-export function productStatusForStock(stock) {
+export const DEFAULT_LOW_STOCK_THRESHOLD = 3;
+
+export function productStatusForStock(stock, lowStockThreshold = DEFAULT_LOW_STOCK_THRESHOLD) {
   const quantity = Number(stock || 0);
   if (quantity <= 0) return "Out of Stock";
-  if (quantity <= 5) return "Low Stock";
+  if (quantity <= Number(lowStockThreshold)) return "Low Stock";
   return "In Stock";
 }
 
@@ -38,10 +40,11 @@ export function availableProductWhere(alias = "") {
   return `${nonDeletedProductWhere(alias)} AND ${alias}stock > 0 AND ${alias}is_active = TRUE`;
 }
 
-export function inventoryStatusSql(stockExpression = "stock") {
+export function inventoryStatusSql(stockExpression = "stock", lowStockThreshold = DEFAULT_LOW_STOCK_THRESHOLD) {
+  const threshold = Math.max(0, Math.min(999999, Number(lowStockThreshold) || DEFAULT_LOW_STOCK_THRESHOLD));
   return `CASE
     WHEN ${stockExpression} <= 0 THEN 'Out of Stock'
-    WHEN ${stockExpression} <= 5 THEN 'Low Stock'
+    WHEN ${stockExpression} <= ${threshold} THEN 'Low Stock'
     ELSE 'In Stock'
   END`;
 }

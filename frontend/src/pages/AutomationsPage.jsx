@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { Button, Card, Field } from "../components/ui";
 import ConfirmDialog from "../components/ConfirmDialog";
+import { api, cachedGet, getApiErrorMessage } from "../api/client";
 
 const storageKey = "retela_automations_config";
 const logStorageKey = "retela_automations_logs";
@@ -46,7 +47,7 @@ const automationSeed = [
     icon: "lowStock",
     title: "Low Stock Alert",
     description: "Watches product quantities and warns the admin before items run out.",
-    trigger: "Apparel stock is 5 or below",
+    trigger: "Apparel stock is 3 or below",
     action: "Notify admin",
     active: true,
     lastTriggered: "May 19, 2026 10:42 AM"
@@ -191,6 +192,7 @@ function initialLogs() {
 
 export default function AutomationsPage() {
   const [automations, setAutomations] = useState(() => safeParse(localStorage.getItem(storageKey), automationSeed));
+  const [, setLowStockThreshold] = useState(3);
   const [logs, setLogs] = useState(() => safeParse(localStorage.getItem(logStorageKey), initialLogs()));
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -205,6 +207,21 @@ export default function AutomationsPage() {
   useEffect(() => {
     localStorage.setItem(logStorageKey, JSON.stringify(logs.slice(0, 30)));
   }, [logs]);
+
+  useEffect(() => {
+    let active = true;
+    cachedGet("/settings", {}, { cacheMs: 10000, retries: 1 })
+      .then(({ data }) => {
+        const threshold = Number(data?.inventory?.lowStockThreshold);
+        if (!active || !Number.isFinite(threshold) || threshold < 0) return;
+        setLowStockThreshold(threshold);
+        setAutomations((items) => items.map((item) => item.id === "low-stock-alert"
+          ? { ...item, trigger: `Apparel stock is ${threshold} or below` }
+          : item));
+      })
+      .catch(() => {});
+    return () => { active = false; };
+  }, []);
 
   const filteredAutomations = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -238,7 +255,7 @@ export default function AutomationsPage() {
     addLog("triggered", automation.title, `${automation.action} after: ${automation.trigger}.`);
   }
 
-  function saveAutomation(values) {
+  async function saveAutomation(values) {
     const title = values.title.trim() || "Untitled Automation";
     const payload = {
       ...values,
@@ -248,6 +265,20 @@ export default function AutomationsPage() {
       action: values.action.trim(),
       lastTriggered: values.lastTriggered || "Not triggered yet"
     };
+
+    if (values.id === "low-stock-alert" || payload.title.toLowerCase().includes("low stock")) {
+      const thresholdMatch = payload.trigger.match(/\b(\d+)\b/);
+      if (thresholdMatch) {
+        const threshold = Math.max(0, Number(thresholdMatch[1]));
+        try {
+          await api.put("/settings/inventory-threshold", { threshold });
+          setLowStockThreshold(threshold);
+          payload.trigger = `Apparel stock is ${threshold} or below`;
+        } catch (error) {
+          setToast({ message: getApiErrorMessage(error, "Could not save the low-stock threshold.") });
+        }
+      }
+    }
 
     if (values.id) {
       setAutomations((items) => items.map((automation) => automation.id === values.id ? payload : automation));
@@ -441,7 +472,7 @@ function AutomationCard({ automation, index, onToggle, onEdit, onTrigger, onDele
             <Edit3 size={15} />
             Edit
           </button>
-          <button type="button" onClick={onDelete} className="inline-flex items-center gap-2 rounded-2xl border border-rose-300/25 bg-rose-300/10 px-3 py-2 text-xs font-bold text-rose-200 transition hover:border-rose-300/45 hover:bg-rose-300/20">
+          <button type="button" onClick={onDelete} className="inline-flex items-center gap-2 rounded-2xl border border-red-400/50 bg-red-500/15 px-3 py-2 text-xs font-extrabold text-red-300 transition hover:border-red-300 hover:bg-red-500/25 hover:text-red-200">
             <Trash2 size={15} />
             Delete
           </button>

@@ -6,6 +6,7 @@ import { requireApproved, requireAuth, requireRole } from "../middleware/auth.js
 import { productUpload } from "../middleware/upload.js";
 import { ensureApparelOptionTables } from "./apparel-options.routes.js";
 import { productImageSelect, productImageUrlForRow } from "../utils/productImages.js";
+import { loadSystemSettings } from "../utils/systemSettings.js";
 import {
   availableProductWhere,
   ensureProductInventoryColumns,
@@ -20,6 +21,12 @@ import {
 
 const router = Router();
 const allowedBrands = ["Adidas", "Nike", "Lacoste", "Essentials", "Uniqlo", "H&M", "Zara", "Bench", "Penshoppe", "Champion", "Puma", "Reebok", "Under Armour", "Jordan", "Levi's", "Ralph Lauren", "Tommy Hilfiger", "GAP", "Old Navy", "Dickies", "Carhartt", "Stussy", "Converse", "Vans", "New Balance", "Gildan", "Hanes", "Fruit of the Loom", "Blue Corner", "Regatta", "Other"];
+
+async function configuredLowStockThreshold() {
+  const { config } = await loadSystemSettings();
+  const threshold = Number(config?.inventory?.lowStockThreshold);
+  return Number.isFinite(threshold) && threshold >= 0 ? threshold : 3;
+}
 
 async function notifyApprovedCustomersAboutNewProduct(app, product) {
   const customers = await query("SELECT id FROM users WHERE role = 'customer' AND status = 'approved'");
@@ -400,6 +407,7 @@ function logProductImageSaveFailure(error) {
 
 router.get("/", requireAuth, requireApproved, asyncHandler(async (req, res) => {
   const table = await productWriteTable();
+  const lowStockThreshold = await configuredLowStockThreshold();
   const schema = z.object({
     search: z.string().trim().optional().default(""),
     brand: z.string().trim().optional().default(""),
@@ -419,8 +427,8 @@ router.get("/", requireAuth, requireApproved, asyncHandler(async (req, res) => {
   clauses.push(isAdmin ? nonDeletedProductWhere() : availableProductWhere());
 
   if (isAdmin && filters.stock === "available") clauses.push("stock > 0");
-  if (filters.stock === "in_stock") clauses.push(isAdmin ? "stock > 5" : "stock > 0");
-  if (filters.stock === "low_stock") clauses.push(isAdmin ? "stock BETWEEN 1 AND 5" : "stock BETWEEN 1 AND 5");
+  if (filters.stock === "in_stock") clauses.push(isAdmin ? `stock > ${lowStockThreshold}` : "stock > 0");
+  if (filters.stock === "low_stock") clauses.push(`stock BETWEEN 1 AND ${lowStockThreshold}`);
   if (isAdmin && filters.stock === "out_of_stock") clauses.push("stock <= 0");
   if (!isAdmin && filters.stock === "out_of_stock") clauses.push("1 = 0");
 
@@ -457,15 +465,16 @@ router.get("/", requireAuth, requireApproved, asyncHandler(async (req, res) => {
         ? "ORDER BY name ASC, created_at DESC"
       : "ORDER BY created_at DESC";
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
-  const products = await query(`SELECT ${productSelect(table)}, ${inventoryStatusSql("stock")} AS computed_status FROM \`${table}\` ${where} ${orderBy}`, params);
+  const products = await query(`SELECT ${productSelect(table)}, ${inventoryStatusSql("stock", lowStockThreshold)} AS computed_status FROM \`${table}\` ${where} ${orderBy}`, params);
   const mapped = await hydrateAdditionalImages(products.map(productListResponse));
   res.json(mapped);
 }));
 
 router.get("/inventory", requireAuth, requireRole("admin"), asyncHandler(async (req, res) => {
   const table = await productWriteTable();
+  const lowStockThreshold = await configuredLowStockThreshold();
   const products = await query(
-    `SELECT ${productSelect(table)}, ${inventoryStatusSql("stock")} AS computed_status
+    `SELECT ${productSelect(table)}, ${inventoryStatusSql("stock", lowStockThreshold)} AS computed_status
      FROM \`${table}\`
      WHERE ${nonDeletedProductWhere()}
      ORDER BY created_at DESC`
@@ -744,6 +753,7 @@ router.put(
 
 router.patch("/:id/stock", requireAuth, requireRole("admin"), asyncHandler(async (req, res) => {
   const table = await productWriteTable();
+  const lowStockThreshold = await configuredLowStockThreshold();
   const productId = parseProductId(req.params.id);
   const schema = z.object({
     delta: z.coerce.number().int().optional(),
@@ -758,9 +768,9 @@ router.patch("/:id/stock", requireAuth, requireRole("admin"), asyncHandler(async
   const products = await query("SELECT id, stock FROM products WHERE id = :id AND is_deleted = FALSE", { id: productId });
   if (!products.length) throw new HttpError(404, "Apparel item not found");
   const nextStock = input.stock !== undefined ? input.stock : Math.max(0, Number(products[0].stock) + input.delta);
-  const nextStatus = productStatusForStock(nextStock);
+  const nextStatus = productStatusForStock(nextStock, lowStockThreshold);
   await query(`UPDATE \`${table}\` SET stock = :stock, status = :status, updated_at = NOW() WHERE id = :id`, { id: productId, stock: nextStock, status: nextStatus });
-  if (nextStock > 0 && nextStock <= 5) {
+  if (nextStock > 0 && nextStock <= lowStockThreshold) {
     const notificationResult = await query(
       "INSERT INTO notifications (type, title, body, product_id) VALUES ('inventory', 'Low stock alert', :body, :id)",
       { id: productId, body: `Apparel item #${productId} is now at ${nextStock} stock.` }

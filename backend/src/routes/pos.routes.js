@@ -147,6 +147,8 @@ router.get("/barcode/:barcode", asyncHandler(async (req, res) => {
 
 router.post("/checkout", asyncHandler(async (req, res) => {
   await ensurePosSchema();
+  const { config } = await loadSystemSettings();
+  const lowStockThreshold = Number(config?.inventory?.lowStockThreshold ?? 3);
   const schema = z.object({
     payment_method: z.enum(["cash", "gcash"]),
     cash_received: z.coerce.number().min(0).optional(),
@@ -236,12 +238,12 @@ router.post("/checkout", asyncHandler(async (req, res) => {
         [orderResult.insertId, item.product_id, item.quantity, item.price]
       );
       await conn.execute(
-        "UPDATE products SET stock = stock - ?, status = CASE WHEN stock - ? <= 0 THEN 'Out of Stock' WHEN stock - ? <= 5 THEN 'Low Stock' ELSE 'In Stock' END WHERE id = ?",
+        `UPDATE products SET stock = stock - ?, status = CASE WHEN stock - ? <= 0 THEN 'Out of Stock' WHEN stock - ? <= ${lowStockThreshold} THEN 'Low Stock' ELSE 'In Stock' END WHERE id = ?`,
         [item.quantity, item.quantity, item.quantity, item.product_id]
       );
       const [updatedProducts] = await conn.execute("SELECT id, name, stock FROM products WHERE id = ?", [item.product_id]);
       const nextStock = Number(updatedProducts[0]?.stock || 0);
-      const status = productStatusForStock(nextStock);
+      const status = productStatusForStock(nextStock, lowStockThreshold);
       inventoryUpdates.push({ id: item.product_id, name: updatedProducts[0]?.name, stock: nextStock, status });
       if (nextStock === 0) {
         outOfStockProducts.push(updatedProducts[0]?.name || item.name);

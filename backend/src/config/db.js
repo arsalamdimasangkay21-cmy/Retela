@@ -525,7 +525,7 @@ async function ensureProductColumns(storageTable) {
     SET sku = CASE WHEN sku IS NULL OR sku = '' OR sku = 'RETELA-000000' THEN CONCAT('RETELA-', LPAD(id, 6, '0')) ELSE sku END,
         is_active = COALESCE(is_active, TRUE),
         is_deleted = COALESCE(is_deleted, FALSE),
-        status = CASE WHEN stock <= 0 THEN 'Out of Stock' WHEN stock <= 5 THEN 'Low Stock' ELSE 'In Stock' END`);
+        status = CASE WHEN stock <= 0 THEN 'Out of Stock' WHEN stock <= 3 THEN 'Low Stock' ELSE 'In Stock' END`);
   await ensureIndex(storageTable, `idx_${storageTable}_sku`, `CREATE UNIQUE INDEX idx_${storageTable}_sku ON \`${storageTable}\` (sku)`, ["sku"]);
   await ensureIndex(storageTable, `idx_${storageTable}_deleted`, `CREATE INDEX idx_${storageTable}_deleted ON \`${storageTable}\` (is_deleted)`, ["is_deleted"]);
 }
@@ -988,6 +988,7 @@ async function ensureCommunicationTables() {
       title VARCHAR(160) NOT NULL,
       message TEXT NOT NULL,
       image_url VARCHAR(255) NULL,
+      image_urls_json JSON NULL,
       promo_code VARCHAR(80) NULL,
       audience ENUM('all_customers','by_location','by_product_interest','active_customers','new_customers','customers_with_orders','vip_customers') NOT NULL DEFAULT 'all_customers',
       audience_filter VARCHAR(160) NULL,
@@ -1015,6 +1016,7 @@ async function ensureCommunicationTables() {
   await ensureAutoIncrementId("broadcasts");
   await requireUsableAutoIncrementId("broadcasts");
   await ensureColumn("broadcasts", "audience_filter", "audience_filter VARCHAR(160) NULL AFTER audience");
+  await ensureColumn("broadcasts", "image_urls_json", "image_urls_json JSON NULL AFTER image_url");
   await ensureColumn("broadcasts", "is_deleted", "is_deleted BOOLEAN NOT NULL DEFAULT FALSE AFTER created_by");
   await ensureColumn("broadcasts", "deleted_at", "deleted_at DATETIME NULL AFTER is_deleted");
   await ensureColumn("broadcasts", "deleted_by", "deleted_by INT NULL AFTER deleted_at");

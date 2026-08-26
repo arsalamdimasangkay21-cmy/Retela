@@ -236,6 +236,7 @@ export default function AdminDashboard({ active, onChange }) {
   const [apparelOptions, setApparelOptions] = useState({ brands: [], categories: [], types: [], sizes: [], conditions: [], colors: [] });
   const [deletingProductIds, setDeletingProductIds] = useState([]);
   const [productSaving, setProductSaving] = useState(false);
+  const [lowStockThreshold, setLowStockThreshold] = useState(3);
   const [busyAction, setBusyAction] = useState("");
   const [pendingProductDelete, setPendingProductDelete] = useState(null);
   const [pendingCustomerDelete, setPendingCustomerDelete] = useState(null);
@@ -267,13 +268,13 @@ export default function AdminDashboard({ active, onChange }) {
     const brand = (product.brand || "").trim();
     const matchesBrand = filters.brand === "all" || brand === filters.brand;
     const matchesStock = filters.stock === "all"
-      || (filters.stock === "low" && product.stock <= 5)
+      || (filters.stock === "low" && product.stock > 0 && product.stock <= lowStockThreshold)
       || (filters.stock === "available" && product.stock > 0)
       || (filters.stock === "high" && product.stock >= 10);
     const matchesSize = filters.size === "all" || product.size === filters.size;
     const matchesCondition = filters.condition === "all" || product.condition === filters.condition;
     return matchesSearch && matchesCategory && matchesBrand && matchesStock && matchesSize && matchesCondition;
-  }), [products, filters]);
+  }), [products, filters, lowStockThreshold]);
 
   function showProductToast(message, tone = "success", placement = "bottom-right") {
     setProductToast({ message, tone, placement });
@@ -304,12 +305,13 @@ export default function AdminDashboard({ active, onChange }) {
   const loadDashboardData = useCallback(async ({ cancelled, force = false } = {}) => {
     if (canUpdate(cancelled)) setNotificationsLoading(true);
     try {
-      const [reportRes, inventoryRes, orderRes, userRes, notificationRes] = await Promise.all([
+      const [reportRes, inventoryRes, orderRes, userRes, notificationRes, settingsRes] = await Promise.all([
         getShared("/reports/summary", {}, { force }),
         getShared("/products/inventory", {}, { force }),
         getShared("/orders", {}, { force }),
         getShared("/users", {}, { force }),
-        getShared("/notifications", {}, { cacheMs: 0, force: true })
+        getShared("/notifications", {}, { cacheMs: 0, force: true }),
+        getShared("/settings", {}, { force })
       ]);
       if (!canUpdate(cancelled)) return;
       setSummary(reportRes.data);
@@ -317,6 +319,8 @@ export default function AdminDashboard({ active, onChange }) {
       setOrders(orderRes.data);
       setUsers(userRes.data);
       setNotifications(notificationRowsFromResponse(notificationRes.data));
+      const threshold = Number(settingsRes.data?.inventory?.lowStockThreshold);
+      if (Number.isFinite(threshold) && threshold >= 0) setLowStockThreshold(threshold);
     } finally {
       if (canUpdate(cancelled)) setNotificationsLoading(false);
     }
@@ -332,12 +336,15 @@ export default function AdminDashboard({ active, onChange }) {
   }, [canUpdate, getShared, loadApparelOptions]);
 
   const loadInventoryData = useCallback(async ({ cancelled, force = false } = {}) => {
-    const [inventoryRes] = await Promise.all([
+    const [inventoryRes, , settingsRes] = await Promise.all([
       getShared("/products/inventory", {}, { force }),
-      loadApparelOptions({ cancelled })
+      loadApparelOptions({ cancelled }),
+      getShared("/settings", {}, { force })
     ]);
     if (!canUpdate(cancelled)) return;
     setInventoryProducts(normalizeProductRows(inventoryRes.data));
+    const threshold = Number(settingsRes.data?.inventory?.lowStockThreshold);
+    if (Number.isFinite(threshold) && threshold >= 0) setLowStockThreshold(threshold);
   }, [canUpdate, getShared, loadApparelOptions]);
 
   const loadOrdersData = useCallback(async ({ cancelled, force = false } = {}) => {
@@ -701,7 +708,7 @@ export default function AdminDashboard({ active, onChange }) {
   }
 
   if (active === "Dashboard") {
-    return <FuturisticDashboard summary={summary} products={inventoryProducts} orders={orders} users={users} notifications={notifications} notificationsLoading={notificationsLoading} onChange={onChange} onNotificationClick={openAdminNotification} />;
+    return <FuturisticDashboard summary={summary} products={inventoryProducts} orders={orders} users={users} notifications={notifications} notificationsLoading={notificationsLoading} lowStockThreshold={lowStockThreshold} onChange={onChange} onNotificationClick={openAdminNotification} />;
   }
 
   if (active === "Apparel") {
@@ -1327,16 +1334,33 @@ function PremiumInventoryPage({
   const [focusedSku, setFocusedSku] = useState("");
   const [barcodeModalOpen, setBarcodeModalOpen] = useState(false);
   const [selectedBarcodeIds, setSelectedBarcodeIds] = useState([]);
+  const [lowStockThreshold, setLowStockThreshold] = useState(3);
+  const [inventoryStatusFilter, setInventoryStatusFilter] = useState("all");
   const pageSize = 6;
+  useEffect(() => {
+    let active = true;
+    cachedGet("/settings", {}, { cacheMs: 10000, retries: 1 })
+      .then(({ data }) => {
+        const threshold = Number(data?.inventory?.lowStockThreshold);
+        if (active && Number.isFinite(threshold) && threshold >= 0) setLowStockThreshold(threshold);
+      })
+      .catch(() => {});
+    return () => { active = false; };
+  }, []);
   const visibleProducts = useMemo(() => sourceProducts.filter((product) => {
     const text = `${productSku(product)} ${product.name} ${product.brand || ""} ${product.category} ${product.size} ${product.condition}`.toLowerCase();
     const matchesSearch = text.includes(filters.search.toLowerCase());
     const matchesCategory = filters.category === "all" || product.category === filters.category;
     const matchesSize = filters.size === "all" || product.size === filters.size;
     const matchesCondition = filters.condition === "all" || product.condition === filters.condition;
-    return matchesSearch && matchesCategory && matchesSize && matchesCondition;
-  }), [sourceProducts, filters]);
+    const status = stockFilterValue(product, lowStockThreshold);
+    const matchesStatus = inventoryStatusFilter === "all"
+      || status === inventoryStatusFilter
+      || (Number(product.stock || 0) <= 0 && ["out_of_stock", "sold"].includes(inventoryStatusFilter));
+    return matchesSearch && matchesCategory && matchesSize && matchesCondition && matchesStatus;
+  }), [sourceProducts, filters, inventoryStatusFilter, lowStockThreshold]);
   const totalPages = Math.max(1, Math.ceil(visibleProducts.length / pageSize));
+  useEffect(() => { setPage(1); }, [filters, inventoryStatusFilter, lowStockThreshold]);
   const pageProducts = visibleProducts.slice((page - 1) * pageSize, page * pageSize);
   const scannedProduct = useMemo(() => findProductByBarcode(sourceProducts, barcodeQuery), [sourceProducts, barcodeQuery]);
   const allBarcodeIds = useMemo(() => visibleProducts.map((product) => Number(product.id)).filter(Boolean), [visibleProducts]);
@@ -1452,11 +1476,12 @@ function PremiumInventoryPage({
       />
 
       <Card className="inventory-filter-card">
-        <div className="grid gap-3 lg:grid-cols-[minmax(220px,1fr)_160px_150px_170px_auto]">
+        <div className="grid gap-3 lg:grid-cols-[minmax(220px,1fr)_160px_150px_170px_180px_auto]">
           <Field icon={Search} placeholder="Search apparel inventory" value={filters.search} onChange={(e) => setFilters({ ...filters, search: e.target.value })} />
           <InventorySelect label="Category" value={filters.category} onChange={(value) => setFilters({ ...filters, category: value })} options={["all", ...(optionValues.categories || []).filter((value) => value !== "Other")]} />
           <InventorySelect label="Size" value={filters.size} onChange={(value) => setFilters({ ...filters, size: value })} options={["all", ...(optionValues.sizes || []).filter((value) => value !== "Other")]} />
           <InventorySelect label="Condition" value={filters.condition} onChange={(value) => setFilters({ ...filters, condition: value })} options={["all", ...(optionValues.conditions || []).filter((value) => value !== "Other")]} />
+          <InventorySelect label="Stock Status" value={inventoryStatusFilter} onChange={setInventoryStatusFilter} options={["all", "in_stock", "low_stock", "out_of_stock", "sold"]} />
           <button type="button" className="inline-flex items-center justify-center gap-2 rounded-2xl border border-neonbrand/30 bg-neonbrand/10 px-5 py-3 text-sm font-bold text-neonbrand transition hover:bg-neonbrand hover:text-black hover:shadow-[0_0_30px_rgba(56,255,136,0.18)]">
             <SlidersHorizontal size={17} />
             Filter
@@ -1539,7 +1564,7 @@ function PremiumInventoryPage({
                       <td className="break-words px-3 py-4 text-white/70">{normalizeCondition(product.condition)}</td>
                       <td className="px-3 py-4"><span className="font-display text-lg font-bold text-white">{product.stock}</span></td>
                       <td className="break-words px-3 py-4 font-bold text-white">PHP {Number(product.price || 0).toLocaleString()}</td>
-                      <td className="px-3 py-4"><InventoryStatusBadge stock={product.stock} status={product.status} /></td>
+                      <td className="px-3 py-4"><InventoryStatusBadge stock={product.stock} status={product.status} lowStockThreshold={lowStockThreshold} /></td>
                       <td className="px-3 py-4">
                         <InventoryActions product={product} onEdit={onEdit} onDelete={onDelete} deletingProductIds={deletingProductIds} />
                       </td>
@@ -1559,8 +1584,8 @@ function PremiumInventoryPage({
                       <strong className="block break-words text-white">{product.name}</strong>
                       <span className="mt-1 block break-words text-xs text-white/45">{product.brand || "Other"} | {product.category || "Apparel"} | {product.size || "Free Size"}</span>
                       <div className="mt-2 flex flex-wrap items-center gap-2">
-                        <InventoryStatusBadge stock={product.stock} status={product.status} />
-                        <AdminStockBadge stock={product.stock} />
+                        <InventoryStatusBadge stock={product.stock} status={product.status} lowStockThreshold={lowStockThreshold} />
+                        <AdminStockBadge stock={product.stock} lowStockThreshold={lowStockThreshold} />
                       </div>
                     </div>
                   </div>
@@ -1675,34 +1700,44 @@ function InventoryStatCard({ title, value, subtitle, icon: Icon, index }) {
 }
 
 function InventorySelect({ label, value, onChange, options }) {
+  const displayLabel = (option) => option === "all" ? label : String(option).replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
   return (
     <label className="grid gap-1">
       <span className="sr-only">{label}</span>
       <select className="h-full rounded-2xl border border-white/10 bg-white/[0.06] px-3 py-3 text-sm text-white outline-none transition focus:border-neonbrand/60 focus:ring-4 focus:ring-neonbrand/10" value={value} onChange={(event) => onChange(event.target.value)}>
-        {options.map((option) => <option key={option} value={option}>{option === "all" ? label : option}</option>)}
+        {options.map((option) => <option key={option} value={option}>{displayLabel(option)}</option>)}
       </select>
     </label>
   );
 }
 
-function StockStatusBadge({ stock, status, compact = false, showQuantity = false }) {
+function stockFilterValue(product, threshold = 3) {
+  const quantity = Number(product?.stock || 0);
+  const normalizedStatus = String(product?.status || product?.computed_status || "").toLowerCase();
+  if (normalizedStatus.includes("sold") || product?.is_sold === true) return "sold";
+  if (quantity <= 0) return "out_of_stock";
+  if (quantity <= Number(threshold)) return "low_stock";
+  return "in_stock";
+}
+
+function StockStatusBadge({ stock, compact = false, showQuantity = false, lowStockThreshold = 3 }) {
   const quantity = Number(stock || 0);
   const sold = quantity <= 0;
   if (sold) {
     return <span className={`admin-sold-badge inventory-status-badge inventory-status-badge--sold inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-1 font-bold ${compact ? "text-[11px]" : "text-xs"}`}><span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-current" />SOLD</span>;
   }
-  const badgeStatus = status || (quantity <= 5 ? "Low Stock" : "In Stock");
+  const badgeStatus = quantity <= Number(lowStockThreshold) ? "Low Stock" : "In Stock";
   const tone = badgeStatus === "Low Stock" ? "border-orange-400/20 bg-orange-400/10 text-orange-300" : "border-emerald-400/20 bg-emerald-400/10 text-emerald-300";
   const semanticTone = badgeStatus === "Low Stock" ? "inventory-status-badge--low" : "inventory-status-badge--available";
   return <span className={`inventory-status-badge ${semanticTone} inline-flex whitespace-nowrap rounded-full border px-2.5 py-1 font-bold ${compact ? "text-[11px]" : "text-xs"} ${tone}`}>{showQuantity ? `${quantity} stock` : badgeStatus}</span>;
 }
 
-function InventoryStatusBadge({ stock, status }) {
-  return <StockStatusBadge stock={stock} status={status} />;
+function InventoryStatusBadge({ stock, lowStockThreshold = 3 }) {
+  return <StockStatusBadge stock={stock} lowStockThreshold={lowStockThreshold} />;
 }
 
-function AdminStockBadge({ stock, compact = false }) {
-  return <StockStatusBadge stock={stock} compact={compact} showQuantity />;
+function AdminStockBadge({ stock, compact = false, lowStockThreshold = 3 }) {
+  return <StockStatusBadge stock={stock} compact={compact} showQuantity lowStockThreshold={lowStockThreshold} />;
 }
 
 function InventoryActions({ product, onEdit, onDelete, deletingProductIds = [] }) {
@@ -2362,7 +2397,7 @@ function normalizeInventoryProduct(product) {
     ...product,
     category: normalizeInventoryCategory(product.category),
     condition: normalizeCondition(product.condition),
-    status: product.status || (Number(product.stock) <= 0 ? "Out of Stock" : Number(product.stock) <= 5 ? "Low Stock" : "In Stock")
+    status: product.status || (Number(product.stock) <= 0 ? "Out of Stock" : Number(product.stock) <= 3 ? "Low Stock" : "In Stock")
   };
 }
 
@@ -2410,7 +2445,7 @@ function DashboardRevenueTooltip({ active, payload, label }) {
   );
 }
 
-function FuturisticDashboard({ summary, products, orders, users, notifications, notificationsLoading = false, onChange, onNotificationClick }) {
+function FuturisticDashboard({ summary, products, orders, users, notifications, notificationsLoading = false, lowStockThreshold = 3, onChange, onNotificationClick }) {
   const totalRevenue = Number(summary?.sales?.total_sales || 0);
   const totalOrders = Number(summary?.sales?.order_count || orders.length || 0);
   const customerCount = users.filter((row) => row.status !== "rejected").length;
@@ -2418,7 +2453,7 @@ function FuturisticDashboard({ summary, products, orders, users, notifications, 
   const conversionRate = customerCount ? Math.min(100, Math.round((totalOrders / customerCount) * 100)) : 0;
   const monthlySales = summary?.monthlySales || [];
   const salesTrendRows = buildDashboardMonthlyTrend(monthlySales);
-  const lowStockProducts = products.filter((product) => Number(product.stock) > 0 && Number(product.stock) <= 5);
+  const lowStockProducts = products.filter((product) => Number(product.stock) > 0 && Number(product.stock) <= lowStockThreshold);
   const stockTotal = products.reduce((sum, product) => sum + Number(product.stock || 0), 0);
   const cards = [
     { title: "Total Revenue", value: money(totalRevenue), hint: "Reportable sales", icon: TrendingUp, action: () => onChange("Sales Analytics") },
@@ -4729,6 +4764,7 @@ function AdminNotifications({ rows, loading = false, users, rejectingUserIds = [
 }
 
 function AdminFeedback({ reviews }) {
+  const [selectedReview, setSelectedReview] = useState(null);
   const average = reviews.length ? reviews.reduce((sum, review) => sum + Number(review.rating || 0), 0) / reviews.length : 0;
   return (
     <div className="grid gap-5">
@@ -4747,7 +4783,8 @@ function AdminFeedback({ reviews }) {
       </section>
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {reviews.length ? reviews.map((review) => (
-          <Card key={review.id}>
+          <button key={review.id} type="button" onClick={() => setSelectedReview(review)} className="text-left">
+          <Card className="h-full cursor-pointer transition hover:-translate-y-0.5 hover:border-neonbrand/35 hover:shadow-[0_16px_45px_rgba(0,0,0,0.28)]">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <p className="text-xs font-bold uppercase tracking-[0.16em] text-neonbrand/65">Order #{review.order_id || "N/A"}</p>
@@ -4759,10 +4796,42 @@ function AdminFeedback({ reviews }) {
             {review.image_url ? <img src={assetUrl(review.image_url)} className="mt-4 h-40 w-full rounded-2xl object-cover" alt="Customer feedback" /> : null}
             <p className="mt-4 text-sm leading-6 text-white/58">{review.comment}</p>
           </Card>
+          </button>
         )) : <Card className="feedback-empty-card md:col-span-2 xl:col-span-3"><EmptyState title="No customer feedback yet" subtitle="Feedback from completed orders will appear here." /></Card>}
       </div>
+      {selectedReview ? createPortal(
+        <div className="fixed inset-0 z-[230] grid place-items-center bg-black/70 p-4 backdrop-blur-md" role="dialog" aria-modal="true" aria-label="Feedback details" onMouseDown={(event) => { if (event.target === event.currentTarget) setSelectedReview(null); }}>
+          <Card className="max-h-[min(760px,calc(100vh-2rem))] w-full max-w-2xl overflow-y-auto border-white/15 bg-[#101d17] p-5 shadow-2xl sm:p-7">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-[0.18em] text-neonbrand">Feedback Details</p>
+                <h2 className="mt-2 font-display text-2xl font-bold text-white">{selectedReview.username || "Customer feedback"}</h2>
+              </div>
+              <button type="button" onClick={() => setSelectedReview(null)} className="grid h-11 w-11 shrink-0 place-items-center rounded-xl border border-white/15 bg-white/[0.06] text-white/80 transition hover:border-neonbrand/40 hover:text-neonbrand" aria-label="Close feedback details"><X size={19} /></button>
+            </div>
+            <div className="mt-5 grid gap-3 sm:grid-cols-2">
+              <FeedbackDetail label="Order" value={selectedReview.order_number || (selectedReview.order_id ? `#${selectedReview.order_id}` : "N/A")} />
+              <FeedbackDetail label="Rating" value={`${selectedReview.rating || 0}/5`} />
+              <FeedbackDetail label="Category" value={selectedReview.category || "Overall Experience"} />
+              <FeedbackDetail label="Submitted" value={selectedReview.created_at ? new Date(selectedReview.created_at).toLocaleString() : "Unknown"} />
+              <FeedbackDetail label="Experience" value={selectedReview.order_products || selectedReview.product_name || "Order feedback"} />
+              <FeedbackDetail label="Amount" value={selectedReview.amount_paid != null ? `PHP ${Number(selectedReview.amount_paid).toLocaleString()}` : "Not provided"} />
+            </div>
+            <div className="mt-5 rounded-2xl border border-white/10 bg-white/[0.05] p-4">
+              <p className="text-xs font-bold uppercase tracking-[0.16em] text-neonbrand/80">Comment</p>
+              <p className="mt-2 whitespace-pre-wrap text-sm leading-7 text-white/80">{selectedReview.comment || "No comment provided."}</p>
+            </div>
+            {selectedReview.image_url ? <img src={assetUrl(selectedReview.image_url)} className="mt-5 max-h-[360px] w-full rounded-2xl object-contain" alt="Customer feedback attachment" /> : null}
+          </Card>
+        </div>,
+        document.body
+      ) : null}
     </div>
   );
+}
+
+function FeedbackDetail({ label, value }) {
+  return <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-3"><p className="text-[11px] font-bold uppercase tracking-[0.15em] text-white/45">{label}</p><p className="mt-1 break-words text-sm font-semibold text-white">{value}</p></div>;
 }
 
 function AdminReturns({ rows, decideReturn }) {
