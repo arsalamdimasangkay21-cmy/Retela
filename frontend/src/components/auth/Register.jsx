@@ -72,7 +72,7 @@ export default function Register({ onBackToLogin, onComplete, message, setMessag
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(values.email.trim())) nextErrors.email = "Invalid email address.";
     if (!/^09\d{9}$/.test(values.phone)) nextErrors.phone = "Invalid phone number.";
     const locationError = locationValidationMessage({
-      formattedAddress: values.formattedAddress || values.location,
+      formattedAddress: values?.formattedAddress || values?.location,
       barangay: values.barangay,
       municipality: values.municipality,
       province: values.province,
@@ -199,7 +199,7 @@ export default function Register({ onBackToLogin, onComplete, message, setMessag
         </ValidatedField>
         <StructuredLocationPicker
           value={{
-            formattedAddress: form.formattedAddress || form.location,
+            formattedAddress: form?.formattedAddress || form?.location,
             barangay: form.barangay,
             municipality: form.municipality,
             province: form.province,

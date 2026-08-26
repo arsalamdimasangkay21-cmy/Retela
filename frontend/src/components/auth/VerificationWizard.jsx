@@ -43,7 +43,7 @@ function validateRegistrationContinue(registration, verification) {
   const email = String(registration.email || "").trim();
   const governmentIdVerified = Boolean(verification.idQualityVerified);
   const locationError = locationValidationMessage({
-    formattedAddress: registration.formattedAddress || registration.location,
+    formattedAddress: registration?.formattedAddress || registration?.location,
     barangay: registration.barangay,
     municipality: registration.municipality,
     province: registration.province,

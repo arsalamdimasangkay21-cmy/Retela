@@ -171,6 +171,12 @@ function codRestrictionMessage(shopMunicipality = "") {
     : "Cash on Delivery is only available within the shop municipality. Please select an online payment method.";
 }
 
+function codEligibilityMessage(location, shopMunicipality = "") {
+  return location?.formattedAddress
+    ? codRestrictionMessage(shopMunicipality)
+    : "Add a delivery address to check Cash on Delivery availability.";
+}
+
 function setModalBodyLock(active) {
   document.body.classList.toggle("retela-modal-open", Boolean(active));
 }
@@ -722,8 +728,9 @@ export default function CustomerDashboard({ active, onChange }) {
 
   function selectPaymentMethod(method) {
     if (method === "cod" && !codEligible) {
-      setPaymentError(codRestrictionMessage(shopMunicipality));
-      notifyCart(codRestrictionMessage(shopMunicipality), "warning");
+      const message = codEligibilityMessage(currentDeliveryLocation, shopMunicipality);
+      setPaymentError(message);
+      notifyCart(message, "warning");
       return;
     }
     setPaymentMethod(method);
@@ -747,7 +754,7 @@ export default function CustomerDashboard({ active, onChange }) {
       return;
     }
     if (paymentMethod === "cod" && !codEligible) {
-      const message = codRestrictionMessage(shopMunicipality);
+      const message = codEligibilityMessage(selectedDeliveryLocation, shopMunicipality);
       setPaymentError(message);
       notifyCart(message, "warning");
       return;
@@ -847,8 +854,8 @@ export default function CustomerDashboard({ active, onChange }) {
       notifyCart("Please select at least one item.", "warning");
       return;
     }
-    if (paymentMethod === "cod" && codEligibilityResolved && !codEligible) {
-      const message = codRestrictionMessage(shopMunicipality);
+    if (paymentMethod === "cod" && !codEligible) {
+      const message = codEligibilityMessage(currentDeliveryLocation, shopMunicipality);
       setPaymentError(message);
       notifyCart(message, "warning");
       return;
@@ -1312,7 +1319,7 @@ function CartPage({
               </button>
             ))}
           </div>
-          {!codEligible ? <p className="text-xs font-semibold leading-5 text-amber-700">{codRestrictionMessage(shopMunicipality)}</p> : null}
+          {!codEligible ? <p className="text-xs font-semibold leading-5 text-amber-700">{codEligibilityMessage(normalizedDeliveryLocation, shopMunicipality)}</p> : null}
         </div>
         <div className="mt-4 grid gap-2 rounded-2xl border border-slate-200 bg-white p-3">
           <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">Coupon Code</p>
@@ -3893,6 +3900,7 @@ function Profile({ profile, profilePhoto, setProfilePhoto, saveProfile, shipping
   const verification = verificationRecovery.verification;
   const governmentIdMissing = verification?.government_id_image?.reason === "FILE_MISSING";
   const selfieMissing = verification?.selfie_verification_image?.reason === "FILE_MISSING";
+  const currentLocation = locationFromProfile(current);
   const displayName = current.display_name || current.username || "RETELA Customer";
   const username = current.username || "customer";
   const email = current.email || "Email not set";
@@ -4085,7 +4093,7 @@ function Profile({ profile, profilePhoto, setProfilePhoto, saveProfile, shipping
                   />
                 </div>
               ) : (
-                <CustomerProfileField label="Complete Address / Location" value={current.formatted_address || current.location || ""} editing={false} empty="Not set" wide />
+                <CustomerProfileField label="Complete Address / Location" value={currentLocation.formattedAddress || ""} editing={false} empty="No delivery address set" wide />
               )}
               {!editing && (shippingQuote || shippingQuoteLoading) ? (
                 <div className="customer-profile-field is-wide">
