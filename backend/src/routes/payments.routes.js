@@ -1,7 +1,7 @@
 import crypto from "crypto";
 import { Router } from "express";
 import { z } from "zod";
-import { query, safeModifyColumn } from "../config/db.js";
+import { query, safeModifyColumn, transaction } from "../config/db.js";
 import { asyncHandler, HttpError } from "../utils/errors.js";
 import { requireApproved, requireAuth } from "../middleware/auth.js";
 import { createAdminNotification } from "../utils/adminNotifications.js";
@@ -32,7 +32,8 @@ async function ensurePaymentColumns() {
     const columns = new Set(rows.map((row) => row.COLUMN_NAME));
     await safeModifyColumn("orders", "status", "status enum update", "ALTER TABLE orders MODIFY status ENUM('pending','awaiting_payment','paid','approved','processing','ready','completed','cancelled','payment_failed') NOT NULL DEFAULT 'pending'");
     await safeModifyColumn("orders", "payment_method", "payment_method enum update", "ALTER TABLE orders MODIFY payment_method ENUM('cod','cash','gcash','qrph','debit','credit','maya') NOT NULL DEFAULT 'cod'");
-    if (!columns.has("payment_status")) await query("ALTER TABLE orders ADD COLUMN payment_status ENUM('unpaid','awaiting_payment','paid','failed','cancelled','refunded') NOT NULL DEFAULT 'unpaid' AFTER payment_method");
+    await safeModifyColumn("orders", "payment_status", "payment_status enum update", "ALTER TABLE orders MODIFY payment_status ENUM('unpaid','awaiting_payment','paid','failed','expired','cancelled','refunded') NOT NULL DEFAULT 'unpaid'");
+    if (!columns.has("payment_status")) await query("ALTER TABLE orders ADD COLUMN payment_status ENUM('unpaid','awaiting_payment','paid','failed','expired','cancelled','refunded') NOT NULL DEFAULT 'unpaid' AFTER payment_method");
     if (!columns.has("payment_reference")) await query("ALTER TABLE orders ADD COLUMN payment_reference VARCHAR(160) NULL AFTER payment_status");
     if (!columns.has("transaction_id")) await query("ALTER TABLE orders ADD COLUMN transaction_id VARCHAR(160) NULL AFTER payment_reference");
     if (!columns.has("paid_at")) await query("ALTER TABLE orders ADD COLUMN paid_at DATETIME NULL AFTER transaction_id");
@@ -141,13 +142,24 @@ function resourceId(value) {
 
 function paymentIntentIdFromResource(resource) {
   const attributes = resource?.attributes || {};
-  return resource?.type === "payment_intent" ? resource.id : resourceId(attributes.payment_intent);
+  return resource?.type === "payment_intent"
+    ? resource.id
+    : resourceId(attributes.payment_intent_id)
+      || resourceId(attributes.payment_intent)
+      || resourceId(resource?.payment_intent_id)
+      || null;
 }
 
 function orderIdFromResource(resource) {
-  const metadataId = Number(resource?.attributes?.metadata?.order_id || 0);
+  const attributes = resource?.attributes || {};
+  const metadataId = Number(attributes.metadata?.order_id || attributes.metadata?.orderId || 0);
   if (Number.isInteger(metadataId) && metadataId > 0) return metadataId;
-  return orderIdFromReference(resource?.attributes?.reference_number || resource?.attributes?.description);
+  return orderIdFromReference(
+    attributes.reference_number
+      || attributes.external_reference_number
+      || attributes.description
+      || attributes.metadata?.order_number
+  );
 }
 
 function paymongoErrorDetails(data) {
@@ -315,12 +327,31 @@ function orderIdFromSession(session) {
   const attributes = checkoutSessionAttributes(session);
   const metadataId = attributes.metadata?.order_id ? Number(attributes.metadata.order_id) : null;
   if (Number.isInteger(metadataId) && metadataId > 0) return metadataId;
-  return orderIdFromReference(attributes.reference_number || attributes.external_reference_number || attributes.description);
+  return orderIdFromReference(
+    attributes.reference_number
+      || attributes.external_reference_number
+      || attributes.description
+      || attributes.metadata?.order_number
+  );
 }
 
 function referenceFromSession(session) {
   const attributes = checkoutSessionAttributes(session);
-  return attributes.reference_number || attributes.external_reference_number || attributes.description || null;
+  return attributes.reference_number
+    || attributes.external_reference_number
+    || attributes.description
+    || attributes.metadata?.reference
+    || attributes.metadata?.order_number
+    || null;
+}
+
+function referenceFromResource(resource) {
+  const attributes = resource?.attributes || {};
+  return attributes.reference_number
+    || attributes.external_reference_number
+    || attributes.description
+    || attributes.metadata?.reference
+    || null;
 }
 
 function transactionIdFromSession(session, fallback = null) {
@@ -342,24 +373,42 @@ function emitPaymentFailureUpdate(io, order) {
 }
 
 async function markOrderFailed({ orderId, transactionId, reference, io = null }) {
-  const rows = await query("SELECT id, user_id, status, payment_status, payment_reference, transaction_id FROM orders WHERE id = :orderId", { orderId });
-  if (!rows.length || rows[0].payment_status === "paid") return;
-  if (rows[0].status === "cancelled" || rows[0].payment_status === "cancelled") return;
-  await query(
-    `UPDATE orders
-     SET status = 'payment_failed',
-         payment_status = 'failed',
-         transaction_id = COALESCE(:transactionId, transaction_id),
-         payment_reference = COALESCE(:reference, payment_reference),
-         payment_provider = 'paymongo'
-     WHERE id = :orderId`,
-    { orderId, transactionId: transactionId || null, reference: reference || null }
-  );
-  await query(
-    "INSERT INTO notifications (user_id, type, title, body) VALUES (:userId, 'order', 'Payment failed', :body)",
-    { userId: rows[0].user_id, body: `Payment for Order #${orderId} failed or was cancelled.` }
-  );
-  emitPaymentFailureUpdate(io, rows[0]);
+  const result = await transaction(async (run) => {
+    const rows = await run(
+      "SELECT id, user_id, status, payment_status FROM orders WHERE id = :orderId FOR UPDATE",
+      { orderId }
+    );
+    if (!rows.length || ["paid", "failed", "expired"].includes(rows[0].payment_status) || rows[0].status === "cancelled" || rows[0].payment_status === "cancelled") {
+      return { updated: false, userId: rows[0]?.user_id || null };
+    }
+    await run(
+      `UPDATE orders
+       SET status = 'payment_failed',
+           payment_status = 'failed',
+           transaction_id = COALESCE(:transactionId, transaction_id),
+           payment_reference = COALESCE(:reference, payment_reference),
+           payment_provider = 'paymongo'
+       WHERE id = :orderId`,
+      { orderId, transactionId: transactionId || null, reference: reference || null }
+    );
+    await run(
+      "INSERT INTO notifications (user_id, type, title, body) VALUES (:userId, 'order', 'Payment failed', :body)",
+      { userId: rows[0].user_id, body: `Payment for Order #${orderId} failed or was cancelled.` }
+    );
+    return { updated: true, userId: rows[0].user_id };
+  });
+  const order = await getOrderPaymentStatus(orderId);
+  if (result.updated) {
+    emitPaymentFailureUpdate(io, order);
+    io?.to(`user:${result.userId}`).emit("notification:new", {
+      type: "order",
+      title: "Payment failed",
+      body: `Payment for Order #${orderId} failed or was cancelled.`,
+      order_id: Number(orderId),
+      created_at: new Date().toISOString()
+    });
+  }
+  return { order, updated: result.updated };
 }
 
 function paymongoEventResource(payload) {
@@ -391,6 +440,10 @@ function statusLooksPaid(value) {
   return /checkout_session\.payment\.paid|payment\.paid|\bpaid\b/i.test(String(value || ""));
 }
 
+function statusIsSuccessful(value) {
+  return ["paid", "succeeded", "success"].includes(String(value || "").toLowerCase());
+}
+
 function paymongoMode() {
   const key = process.env.PAYMONGO_SECRET_KEY || "";
   if (key.startsWith("sk_test_")) return "test";
@@ -418,6 +471,7 @@ function paymentStateLabel(status) {
   if (normalized === "awaiting_payment") return "Awaiting Payment";
   if (normalized === "paid") return "Paid";
   if (normalized === "failed") return "Payment Failed";
+  if (normalized === "expired") return "Payment Expired";
   if (normalized === "cancelled" || normalized === "canceled") return "Cancelled";
   if (normalized === "refunded") return "Refunded";
   if (normalized === "unpaid") return "Unpaid";
@@ -440,6 +494,7 @@ function paymentStatusResponse(order, extras = {}) {
       payment_provider: order.payment_provider,
       total_amount: order.total_amount,
       payment_intent_id: order.payment_intent_id || null,
+      payment_id: order.transaction_id || null,
       qr_image: order.qr_code_url || null,
       payment_expires_at: order.payment_expires_at || null
     } : {})
@@ -523,8 +578,12 @@ function emitPaymentOrderUpdate(io, order) {
     id: Number(order.id),
     status: order.status,
     payment_status: order.payment_status,
+    payment_method: order.payment_method || null,
+    payment_provider: order.payment_provider || null,
     payment_reference: order.payment_reference || null,
     transaction_id: order.transaction_id || null,
+    payment_id: order.transaction_id || null,
+    payment_intent_id: order.payment_intent_id || null,
     paid_at: order.paid_at || null
   };
   if (order.user_id) io?.to(`user:${order.user_id}`).emit("order:update", payload);
@@ -544,18 +603,28 @@ async function getOrderPaymentStatus(orderId) {
 
 function paymentIntentStatus(payload) {
   const attributes = payload?.data?.attributes || payload?.attributes || {};
-  return String(attributes.status || "").toLowerCase();
+  const intentStatus = String(attributes.status || "").toLowerCase();
+  if (intentStatus) return intentStatus;
+  const payments = Array.isArray(attributes.payments) ? attributes.payments : [];
+  return String(payments.find((payment) => payment?.attributes?.status || payment?.status)?.attributes?.status
+    || payments.find((payment) => payment?.attributes?.status || payment?.status)?.status
+    || "").toLowerCase();
+}
+
+function paymentResourceId(payload) {
+  return payload?.data?.id || payload?.id || null;
 }
 
 async function verifyQrPaymentIntent(order, io) {
   if (!order?.payment_intent_id) return { order, providerStatus: null, expired: true };
   const intent = await paymongoRequest(`/payment_intents/${encodeURIComponent(order.payment_intent_id)}`, null, "GET");
   const providerStatus = paymentIntentStatus(intent);
+  const paymentId = paymentResourceId(intent) || order.payment_intent_id;
   console.log("[paymongo-qrph] intent status", { orderId: order.id, status: providerStatus || null });
-  if (["succeeded", "paid"].includes(providerStatus)) {
+  if (statusIsSuccessful(providerStatus)) {
     const result = await markOrderPaid({
       orderId: order.id,
-      transactionId: order.payment_intent_id,
+      transactionId: paymentId,
       reference: order.payment_reference,
       paymentIntentId: order.payment_intent_id,
       io
@@ -564,11 +633,71 @@ async function verifyQrPaymentIntent(order, io) {
     return { order: result.order, providerStatus, confirmed: true, expired: false };
   }
   if (["failed", "cancelled", "canceled"].includes(providerStatus)) {
-    await markOrderFailed({ orderId: order.id, transactionId: order.payment_intent_id, reference: order.payment_reference, io });
+    await markOrderFailed({ orderId: order.id, transactionId: paymentId, reference: order.payment_reference, io });
   }
   const latest = await getOrderPaymentStatus(order.id);
   const expiresAt = latest?.payment_expires_at ? new Date(latest.payment_expires_at) : null;
-  return { order: latest, providerStatus, confirmed: false, expired: Boolean(expiresAt && expiresAt <= new Date()) };
+  const expired = Boolean(expiresAt && expiresAt <= new Date()) && !statusIsSuccessful(providerStatus);
+  if (expired && latest?.payment_status !== "expired") {
+    await query(
+      `UPDATE orders
+       SET status = CASE WHEN status = 'awaiting_payment' THEN 'payment_failed' ELSE status END,
+           payment_status = 'expired',
+           qr_code_url = NULL,
+           payment_expires_at = NULL
+       WHERE id = :orderId AND payment_status NOT IN ('paid', 'cancelled')`,
+      { orderId: order.id }
+    );
+  }
+  return { order: expired ? await getOrderPaymentStatus(order.id) : latest, providerStatus, confirmed: false, expired };
+}
+
+async function verifyCheckoutPaymentSession(order, io) {
+  if (!order?.checkout_session_id) return { order, confirmed: false, sessionStatus: null, paymentStatus: null };
+  const sessionResponse = await fetchPaymongoCheckoutSession(order.checkout_session_id);
+  const session = checkoutSessionFromPaymongoPayload(sessionResponse);
+  const summary = paymongoSessionSummary(session);
+  console.log("[paymongo-reconcile] checkout session", {
+    orderId: order.id,
+    sessionId: summary.sessionId || order.checkout_session_id,
+    sessionStatus: summary.sessionStatus || null,
+    paymentStatus: summary.paymentStatus || null
+  });
+  if (isSessionPaymentConfirmed(session)) {
+    const paidResult = await markOrderPaid({
+      orderId: order.id,
+      transactionId: summary.paymentId || summary.paymentIntentId || summary.sessionId,
+      reference: summary.reference || order.payment_reference,
+      checkoutSessionId: summary.sessionId || order.checkout_session_id,
+      paymentIntentId: summary.paymentIntentId || order.payment_intent_id,
+      io
+    });
+    if (paidResult.adminNotification) io?.to("admin").emit("notification:new", { ...paidResult.adminNotification, created_at: new Date().toISOString() });
+    console.log("[paymongo-reconcile] payment synchronized", { orderId: order.id, confirmed: true });
+    return { order: paidResult.order, confirmed: true, sessionStatus: summary.sessionStatus, paymentStatus: summary.paymentStatus };
+  }
+  if (isSessionPaymentFailed(session)) {
+    await markOrderFailed({
+      orderId: order.id,
+      transactionId: transactionIdFromSession(session),
+      reference: summary.reference || order.payment_reference,
+      io
+    });
+  }
+  return {
+    order: await getOrderPaymentStatus(order.id),
+    confirmed: false,
+    sessionStatus: summary.sessionStatus,
+    paymentStatus: summary.paymentStatus
+  };
+}
+
+async function reconcilePaymongoOrder(order, io) {
+  if (!order || order.payment_status === "paid") return { order, confirmed: order?.payment_status === "paid" };
+  if (!process.env.PAYMONGO_SECRET_KEY) return { order, confirmed: false };
+  if (order.payment_method === PAYMONGO_QRPH_TYPE && order.payment_intent_id) return verifyQrPaymentIntent(order, io);
+  if (order.checkout_session_id) return verifyCheckoutPaymentSession(order, io);
+  return { order, confirmed: false };
 }
 
 function verifyWebhookSignature(req) {
@@ -581,55 +710,73 @@ function verifyWebhookSignature(req) {
   if (!header || !Buffer.isBuffer(req.body)) return false;
   const parts = Object.fromEntries(String(header).split(",").map((part) => part.split("=").map((value) => value.trim())));
   const timestamp = parts.t;
-  const signature = parts.v1 || parts.li || parts.te;
-  if (!timestamp || !signature) return false;
+  const signatures = [parts.v1, parts.li, parts.te].filter(Boolean);
+  if (!timestamp || !signatures.length) return false;
   const payload = `${timestamp}.${req.body.toString("utf8")}`;
   const expected = crypto.createHmac("sha256", secret).update(payload).digest("hex");
   const expectedBuffer = Buffer.from(expected, "hex");
-  const signatureBuffer = Buffer.from(signature, "hex");
-  return expectedBuffer.length === signatureBuffer.length && crypto.timingSafeEqual(expectedBuffer, signatureBuffer);
+  return signatures.some((signature) => {
+    try {
+      const signatureBuffer = Buffer.from(signature, "hex");
+      return expectedBuffer.length === signatureBuffer.length && crypto.timingSafeEqual(expectedBuffer, signatureBuffer);
+    } catch {
+      return false;
+    }
+  });
 }
 
 async function markOrderPaid({ orderId, transactionId, reference, checkoutSessionId, paymentIntentId, io = null }) {
-  const rows = await query("SELECT id, user_id, status, payment_status FROM orders WHERE id = :orderId", { orderId });
-  if (!rows.length) return { order: null, adminNotification: null, updated: false };
-  if (rows[0].payment_status === "paid") {
+  const result = await transaction(async (run) => {
+    const rows = await run(
+      "SELECT id, user_id, status, payment_status FROM orders WHERE id = :orderId FOR UPDATE",
+      { orderId }
+    );
+    if (!rows.length) return { updated: false, userId: null };
+    if (rows[0].payment_status === "paid" || rows[0].status === "cancelled" || rows[0].payment_status === "cancelled") {
+      return { updated: false, userId: rows[0].user_id };
+    }
+    await run(
+      `UPDATE orders
+       SET status = CASE
+             WHEN status IN ('awaiting_payment', 'payment_failed') THEN 'pending'
+             ELSE status
+           END,
+           payment_status = 'paid',
+           transaction_id = COALESCE(:transactionId, transaction_id),
+           payment_reference = COALESCE(:reference, payment_reference),
+           paid_at = COALESCE(paid_at, NOW()),
+           payment_provider = 'paymongo',
+           checkout_session_id = COALESCE(:checkoutSessionId, checkout_session_id),
+           payment_intent_id = COALESCE(:paymentIntentId, payment_intent_id)
+       WHERE id = :orderId`,
+      { orderId, transactionId: transactionId || null, reference: reference || null, checkoutSessionId: checkoutSessionId || null, paymentIntentId: paymentIntentId || null }
+    );
+    await run(
+      "INSERT INTO notifications (user_id, type, title, body) VALUES (:userId, 'order', 'Payment received', :body)",
+      { userId: rows[0].user_id, body: `Payment for Order #${orderId} was confirmed.` }
+    );
+    return { updated: true, userId: rows[0].user_id };
+  });
+  if (!result.updated) {
     const order = await getOrderPaymentStatus(orderId);
     return { order, adminNotification: null, updated: false };
   }
-  if (rows[0].status === "cancelled" || rows[0].payment_status === "cancelled") {
-    const order = await getOrderPaymentStatus(orderId);
-    return { order, adminNotification: null, updated: false };
-  }
-  await query(
-    `UPDATE orders
-     SET status = CASE
-           WHEN status IN ('awaiting_payment', 'payment_failed') THEN 'pending'
-           ELSE status
-         END,
-         payment_status = 'paid',
-         transaction_id = COALESCE(:transactionId, transaction_id),
-         payment_reference = COALESCE(:reference, payment_reference),
-         paid_at = NOW(),
-         payment_provider = 'paymongo',
-         checkout_session_id = COALESCE(:checkoutSessionId, checkout_session_id),
-         payment_intent_id = COALESCE(:paymentIntentId, payment_intent_id)
-     WHERE id = :orderId`,
-    { orderId, transactionId: transactionId || null, reference: reference || null, checkoutSessionId: checkoutSessionId || null, paymentIntentId: paymentIntentId || null }
-  );
-  await query(
-    "INSERT INTO notifications (user_id, type, title, body) VALUES (:userId, 'order', 'Payment received', :body)",
-    { userId: rows[0].user_id, body: `Payment for Order #${orderId} was confirmed.` }
-  );
   const adminNotification = await createAdminNotification({
     type: "payment",
     title: "Payment received",
     body: `Payment for Order #${orderId} was confirmed.`,
-    customerId: rows[0].user_id,
+    customerId: result.userId,
     emit: false
   });
   const order = await getOrderPaymentStatus(orderId);
   emitPaymentOrderUpdate(io, order);
+  io?.to(`user:${result.userId}`).emit("notification:new", {
+    type: "order",
+    title: "Payment received",
+    body: `Payment for Order #${orderId} was confirmed.`,
+    order_id: Number(orderId),
+    created_at: new Date().toISOString()
+  });
   return { order, adminNotification, updated: true };
 }
 
@@ -806,6 +953,7 @@ router.post("/create-gcash-checkout", requireAuth, requireApproved, asyncHandler
     });
     throw new HttpError(502, "Payment checkout URL was not returned by the payment provider.");
   }
+  const checkoutPaymentIntentId = resourceId(data?.data?.attributes?.payment_intent);
 
   await query(
     `UPDATE orders
@@ -815,14 +963,16 @@ router.post("/create-gcash-checkout", requireAuth, requireApproved, asyncHandler
          payment_reference = :reference,
          payment_provider = 'paymongo',
          checkout_session_id = :sessionId,
-         checkout_url = :checkoutUrl
+         checkout_url = :checkoutUrl,
+         payment_intent_id = COALESCE(:paymentIntentId, payment_intent_id)
      WHERE id = :orderId`,
     {
       orderId: order.id,
       paymentMethod: input.paymentMethod,
       reference,
       sessionId: data.data.id,
-      checkoutUrl
+      checkoutUrl,
+      paymentIntentId: checkoutPaymentIntentId
     }
   );
 
@@ -844,68 +994,31 @@ router.post("/orders/:orderId/verify", requireAuth, requireApproved, asyncHandle
   if (order.payment_status === "paid") {
     return res.json(paymentStatusResponse(order, { confirmed: true, alreadyPaid: true }));
   }
-  if (!order.checkout_session_id) {
-    console.warn("[paymongo-verify] missing checkout session", {
-      orderId: order.id,
-      hasReference: Boolean(order.payment_reference)
-    });
-    throw new HttpError(409, "This order does not have a PayMongo checkout session to verify.");
-  }
-  const sessionResponse = await fetchPaymongoCheckoutSession(order.checkout_session_id);
-  const session = checkoutSessionFromPaymongoPayload(sessionResponse);
-  const summary = paymongoSessionSummary(session);
-  console.log("[paymongo-verify] session status:", summary.sessionStatus || null);
-  console.log("[paymongo-verify] payment status:", summary.paymentStatus || null);
-  if (isSessionPaymentConfirmed(session)) {
-    const transactionId = summary.paymentId || summary.paymentIntentId || summary.sessionId;
-    const reference = summary.reference || order.payment_reference;
-    const paidResult = await markOrderPaid({
-      orderId: order.id,
-      transactionId,
-      reference,
-      checkoutSessionId: summary.sessionId || order.checkout_session_id,
-      io: req.app.get("io")
-    });
-    if (paidResult.adminNotification) {
-      req.app.get("io")?.to("admin").emit("notification:new", {
-        ...paidResult.adminNotification,
-        created_at: new Date().toISOString()
-      });
-    }
-    console.log("[paymongo-verify] order payment_status updated to paid", { order: order.id });
-    return res.json(paymentStatusResponse(paidResult.order, {
-      confirmed: true,
-      sessionStatus: summary.sessionStatus,
-      paymentStatus: summary.paymentStatus
-    }));
-  }
-  if (isSessionPaymentFailed(session)) {
-    await markOrderFailed({
-      orderId: order.id,
-      transactionId: transactionIdFromSession(session),
-      reference: summary.reference || order.payment_reference,
-      io: req.app.get("io")
-    });
-  }
-  const latestOrder = await getOrderPaymentStatus(order.id);
-  res.json(paymentStatusResponse(latestOrder, {
-    confirmed: false,
-    sessionStatus: summary.sessionStatus,
-    paymentStatus: summary.paymentStatus
+  const result = await reconcilePaymongoOrder(order, req.app.get("io"));
+  res.json(paymentStatusResponse(result.order, {
+    confirmed: Boolean(result.confirmed),
+    sessionStatus: result.sessionStatus || null,
+    paymentStatus: result.paymentStatus || result.providerStatus || null,
+    expired: Boolean(result.expired)
   }));
 }));
 
 router.post(["/webhook", "/paymongo/webhook"], asyncHandler(async (req, res) => {
   await ensurePaymentColumns();
   if (!verifyWebhookSignature(req)) throw new HttpError(401, "Invalid PayMongo webhook signature.");
-  const payload = Buffer.isBuffer(req.body) ? JSON.parse(req.body.toString("utf8")) : req.body;
+  let payload;
+  try {
+    payload = Buffer.isBuffer(req.body) ? JSON.parse(req.body.toString("utf8")) : req.body;
+  } catch {
+    throw new HttpError(400, "Invalid PayMongo webhook payload.");
+  }
   const event = payload?.data || {};
   const eventType = eventTypeFromPayload(payload);
   const resource = paymongoResource(payload);
   const session = isPaymongoCheckoutSessionResource(resource) ? sessionForWebhookPayload(payload) : null;
   const summary = session ? paymongoSessionSummary(session) : {};
   const resourceAttributes = resource?.attributes || {};
-  const reference = summary.reference || resourceAttributes.reference_number || resourceAttributes.description || null;
+  const reference = summary.reference || referenceFromResource(resource) || null;
   const paymentIntentId = summary.paymentIntentId || paymentIntentIdFromResource(resource);
   const orderId = summary.orderId || orderIdFromResource(resource) || orderIdFromReference(reference);
   const order = await findOrderForPaymongo({
@@ -915,9 +1028,11 @@ router.post(["/webhook", "/paymongo/webhook"], asyncHandler(async (req, res) => 
     reference
   });
 
-  console.log("[paymongo-webhook] event received");
-  console.log("[paymongo-webhook] event type:", eventType || "unknown");
-  console.log("[paymongo-webhook] order:", order?.id || orderId || null);
+  console.log("[paymongo-webhook] event received", {
+    eventType: eventType || "unknown",
+    resourceId: resource?.id || null,
+    paymentIntentId: paymentIntentId || null
+  });
 
   if (!order) {
     console.warn("[paymongo-webhook] order not found for PayMongo event", {
@@ -942,7 +1057,8 @@ router.post(["/webhook", "/paymongo/webhook"], asyncHandler(async (req, res) => 
       paymentIntentId,
       io: req.app.get("io")
     });
-    console.log("[paymongo-webhook] payment confirmed", { order: order.id });
+    console.log("[paymongo-webhook] order matched", { orderId: order.id, orderNumber: `RETELA-${order.id}` });
+    console.log("[paymongo-webhook] payment confirmed", { orderId: order.id, paymentId: transactionId || null });
     if (paidResult.updated) console.log("[paymongo-webhook] order payment_status updated to paid", { order: order.id });
     if (paidResult.adminNotification) {
       req.app.get("io")?.to("admin").emit("notification:new", {
@@ -952,7 +1068,15 @@ router.post(["/webhook", "/paymongo/webhook"], asyncHandler(async (req, res) => 
     }
   }
   if (!paymentConfirmed && qrExpired) {
-    await query("UPDATE orders SET qr_code_url = NULL, payment_expires_at = NULL WHERE id = :orderId AND payment_status <> 'paid'", { orderId: order.id });
+    await query(
+      `UPDATE orders
+       SET status = CASE WHEN status = 'awaiting_payment' THEN 'payment_failed' ELSE status END,
+           payment_status = CASE WHEN payment_status IN ('paid', 'cancelled') THEN payment_status ELSE 'expired' END,
+           qr_code_url = NULL,
+           payment_expires_at = NULL
+       WHERE id = :orderId`,
+      { orderId: order.id }
+    );
   } else if (!paymentConfirmed && (statusLooksFailed(eventType) || isSessionPaymentFailed(session))) {
     await markOrderFailed({
       orderId: order.id,
@@ -970,11 +1094,20 @@ router.get("/orders/:orderId/status", requireAuth, requireApproved, asyncHandler
   if (!Number.isInteger(orderId) || orderId <= 0) throw new HttpError(400, "A valid order ID is required.");
   const order = await findOrderForPaymongo({ orderId, userId: req.user.id, isAdmin: req.user.role === "admin" });
   if (!order) throw new HttpError(404, "Order not found");
-  if (order.payment_method === PAYMONGO_QRPH_TYPE && order.payment_status !== "paid") {
-    const result = await verifyQrPaymentIntent(order, req.app.get("io"));
-    return res.json(qrPaymentResponse(result.order, { confirmed: result.confirmed, providerStatus: result.providerStatus, expired: result.expired }));
-  }
-  return res.json(paymentStatusResponse(order, { confirmed: order.payment_status === "paid" }));
+  if (order.payment_status === "paid") return res.json(paymentStatusResponse(order, { confirmed: true }));
+  const result = await reconcilePaymongoOrder(order, req.app.get("io"));
+  return res.json(paymentStatusResponse(result.order, {
+    confirmed: Boolean(result.confirmed),
+    providerStatus: result.providerStatus || null,
+    sessionStatus: result.sessionStatus || null,
+    paymentStatus: result.paymentStatus || null,
+    expired: Boolean(result.expired),
+    ...(order.payment_method === PAYMONGO_QRPH_TYPE ? {
+      paymentIntentId: result.order?.payment_intent_id || order.payment_intent_id || null,
+      qrImage: result.order?.qr_code_url || order.qr_code_url || null,
+      expiresAt: result.order?.payment_expires_at || order.payment_expires_at || null
+    } : {})
+  }));
 }));
 
 router.get("/status/:id", requireAuth, requireApproved, asyncHandler(async (req, res) => {

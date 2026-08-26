@@ -950,6 +950,13 @@ export default function CustomerDashboard({ active, onChange }) {
     }
   }
 
+  const applyPaymentOrderUpdate = useCallback((updatedOrder) => {
+    if (!updatedOrder?.id) return;
+    setOrders((current) => current.map((order) => Number(order.id) === Number(updatedOrder.id)
+      ? { ...order, ...updatedOrder }
+      : order));
+  }, []);
+
   if (active === "Home") {
     return (
       <div className="grid min-w-0 gap-5">
@@ -1139,6 +1146,7 @@ export default function CustomerDashboard({ active, onChange }) {
       returnRequests={returnRequests}
       deliverySafetyPolicy={deliverySafetyPolicyFromShop(shopInfo)}
       onNavigate={onChange}
+      onPaymentUpdated={applyPaymentOrderUpdate}
         onMeetupConfirmation={confirmMeetup}
         onQrPayment={(payment) => { setQrPayment(payment); onChange("Cart"); }}
       onOrderCancelled={(updatedOrder) => {
@@ -2569,7 +2577,7 @@ function formatNotificationDate(value) {
   return date.toLocaleString(undefined, { month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
-function Orders({ rows, profile, reviews = [], returnRequests = [], deliverySafetyPolicy, onNavigate, onOrderCancelled, onMeetupConfirmation, onQrPayment }) {
+function Orders({ rows, profile, reviews = [], returnRequests = [], deliverySafetyPolicy, onNavigate, onOrderCancelled, onMeetupConfirmation, onQrPayment, onPaymentUpdated }) {
   const flow = ["pending", "awaiting_payment", "paid", "processing", "completed"];
   const [selectedOrderId, setSelectedOrderId] = useState(null);
   const [selectedOrder, setSelectedOrder] = useState(null);
@@ -2584,6 +2592,43 @@ function Orders({ rows, profile, reviews = [], returnRequests = [], deliverySafe
     returnRequests.forEach((request) => map.set(Number(request.order_id), request.status));
     return map;
   }, [returnRequests]);
+
+  useEffect(() => {
+    const pendingOnlineOrders = rows.filter((order) => {
+      const method = String(order?.payment_method || "").toLowerCase();
+      const paymentStatus = String(order?.payment_status || "").toLowerCase();
+      return ["gcash", "qrph", "debit", "credit", "maya"].includes(method)
+        && ["unpaid", "awaiting_payment"].includes(paymentStatus)
+        && !isOrderCancelled(order)
+        && !["completed", "cancelled", "canceled", "refunded"].includes(normalizeOrderStatus(order?.status));
+    });
+    if (!pendingOnlineOrders.length) return undefined;
+    let alive = true;
+    let requestInFlight = false;
+    const reconcile = async () => {
+      if (!alive || requestInFlight) return;
+      requestInFlight = true;
+      try {
+        const results = await Promise.all(pendingOnlineOrders.map(async (order) => {
+          try {
+            const { data } = await api.get(`/payments/orders/${order.id}/status`);
+            return data?.order || null;
+          } catch {
+            return null;
+          }
+        }));
+        if (alive) results.filter(Boolean).forEach((updatedOrder) => onPaymentUpdated?.(updatedOrder));
+      } finally {
+        requestInFlight = false;
+      }
+    };
+    reconcile();
+    const timer = window.setInterval(reconcile, 5000);
+    return () => {
+      alive = false;
+      window.clearInterval(timer);
+    };
+  }, [rows, onPaymentUpdated]);
 
   async function payOrder(order, event) {
     event?.stopPropagation();
