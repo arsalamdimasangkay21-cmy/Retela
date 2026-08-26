@@ -33,12 +33,13 @@ import {
 } from "../utils/location";
 import { emitUserThemeChange, readUserTheme, saveUserTheme } from "../utils/userTheme";
 import { orderStatusLabel as sharedOrderStatusLabel } from "../utils/orderStatus";
+import { canLeaveFeedback, feedbackStatusLabel } from "../utils/feedback";
 
 const assetUrl = (url) => resolveAssetUrl(url) || (!url ? "" : `${API_URL.replace(/\/api$/, "")}${url}`);
 const productCategories = ["T-Shirts", "Jackets", "Caps"];
 const productBrands = ["Nike", "Adidas", "Levi's", "Champion", "Uniqlo", "H&M", "Puma", "Lacoste", "Guess", "Other"];
 const productSizes = ["XS", "S", "M", "L", "XL", "XXL", "Free Size"];
-const feedbackCategories = ["Apparel Quality", "Delivery", "Customer Service", "Payment", "Overall Experience"];
+const feedbackCategories = ["Apparel Quality", "Delivery", "Customer Service", "Payment", "Overall Experience", "Other"];
 const returnReasons = ["Wrong item received", "Damaged apparel", "Size issue", "Defective item", "Missing item", "Other"];
 const refundTypes = ["Replacement", "Refund", "Store Credit"];
 const returnFlow = ["pending", "under_review", "approved", "rejected", "refunded"];
@@ -3186,15 +3187,18 @@ function AboutShop({ shop }) {
 }
 
 function Feedback({ orders, reviews, onSaved }) {
-  const reviewedOrderIds = new Set(reviews.map((review) => Number(review.order_id)));
-  const availableOrders = orders.filter((order) => !reviewedOrderIds.has(Number(order.id)));
-  const [form, setForm] = useState({ order_id: "", rating: 0, category: "", comment: "" });
-  const [image, setImage] = useState(null);
+  const reviewedOrderIds = new Set(reviews.filter((review) => !review.product_id).map((review) => Number(review.order_id)));
+  const availableOrders = orders.filter((order) => canLeaveFeedback(order) && !reviewedOrderIds.has(Number(order.id)));
+  const otherOrders = orders.filter((order) => !canLeaveFeedback(order));
+  const [form, setForm] = useState({ order_id: "", product_id: "", rating: 0, category: "", custom_category: "", comment: "" });
+  const [images, setImages] = useState([]);
   const [orderDetails, setOrderDetails] = useState(null);
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const selectedOrder = orders.find((order) => Number(order.id) === Number(form.order_id));
-  const feedbackBlocked = selectedOrder && selectedOrder.status !== "completed";
+  const selectedProductAlreadyReviewed = selectedOrder && form.product_id
+    ? reviews.some((review) => Number(review.order_id) === Number(selectedOrder.id) && (Number(review.product_id) === Number(form.product_id) || !review.product_id))
+    : false;
 
   useEffect(() => {
     if (!form.order_id) {
@@ -3210,39 +3214,44 @@ function Feedback({ orders, reviews, onSaved }) {
     return () => { alive = false; };
   }, [form.order_id]);
 
+  useEffect(() => {
+    if (!orderDetails?.items?.length) return;
+    setForm((current) => current.product_id ? current : { ...current, product_id: String(orderDetails.items[0].product_id) });
+  }, [orderDetails]);
+
   function showToast(type, message) {
     dispatchCustomerToast({ type, message });
   }
 
   async function submit(event) {
     event.preventDefault();
-    if (!form.order_id || !form.rating || !form.category || form.comment.trim().length < 10) {
+    if (!form.order_id || !form.rating || !form.category || (form.category === "Other" && !form.custom_category.trim()) || form.comment.trim().length < 10) {
       showToast("error", "Select an order, rating, category, and write at least 10 characters.");
       return;
     }
-    if (selectedOrder?.status !== "completed") {
-      showToast("error", "Cannot leave feedback until delivered.");
+    if (!canLeaveFeedback(selectedOrder)) {
+      showToast("error", "Feedback is available after this order is delivered.");
       return;
     }
-    if (reviewedOrderIds.has(Number(form.order_id))) {
-      showToast("error", "Feedback was already submitted for this order.");
+    if (selectedProductAlreadyReviewed || reviewedOrderIds.has(Number(form.order_id))) {
+      showToast("error", "Feedback was already submitted for this purchase.");
       return;
     }
     const payload = new FormData();
     payload.append("order_id", form.order_id);
+    if (form.product_id) payload.append("product_id", form.product_id);
     payload.append("rating", form.rating);
     payload.append("category", form.category);
+    if (form.category === "Other") payload.append("custom_category", form.custom_category.trim());
     payload.append("comment", form.comment.trim());
-    const firstItem = orderDetails?.items?.[0];
-    if (firstItem?.product_id) payload.append("product_id", firstItem.product_id);
-    if (image) payload.append("image", image);
+    images.forEach((image) => payload.append("images", image));
     setSubmitting(true);
     try {
       await api.post("/reviews", payload, { headers: { "Content-Type": "multipart/form-data" } });
       clearGetCache("/reviews");
       showToast("success", "Feedback submitted successfully.");
-      setForm({ order_id: "", rating: 0, category: "", comment: "" });
-      setImage(null);
+      setForm({ order_id: "", product_id: "", rating: 0, category: "", custom_category: "", comment: "" });
+      setImages([]);
       setOrderDetails(null);
       await onSaved?.();
     } catch (error) {
@@ -3267,18 +3276,48 @@ function Feedback({ orders, reviews, onSaved }) {
         <form onSubmit={submit} className="grid gap-4">
           <label className="grid gap-2">
             <span className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">Verified Purchase</span>
-            <select className="rounded-2xl border border-slate-200 bg-white p-3 text-sm text-slate-900 outline-none transition focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100" value={form.order_id} onChange={(event) => setForm({ ...form, order_id: event.target.value })}>
+            <select className="rounded-2xl border border-slate-200 bg-white p-3 text-sm text-slate-900 outline-none transition focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100" value={form.order_id} onChange={(event) => { setOrderDetails(null); setForm({ ...form, order_id: event.target.value, product_id: "" }); }}>
               <option value="">Select purchase</option>
               {availableOrders.map((order) => <option key={order.id} value={order.id}>{orderNumber(order)} - {order.first_product_name || order.product_names || "Apparel"} - {money(order.total_amount)}</option>)}
             </select>
           </label>
 
           {selectedOrder ? (
-            <VerifiedPurchaseCard order={selectedOrder} details={orderDetails} loading={loadingDetails} mode="feedback" />
+            <>
+              <VerifiedPurchaseCard order={selectedOrder} details={orderDetails} productId={form.product_id} loading={loadingDetails} mode="feedback" />
+              {orderDetails?.items?.length > 1 ? (
+                <label className="grid gap-2">
+                  <span className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">Purchased Item</span>
+                  <select className="rounded-2xl border border-slate-200 bg-white p-3 text-sm text-slate-900 outline-none transition focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100" value={form.product_id} onChange={(event) => setForm({ ...form, product_id: event.target.value })}>
+                    {orderDetails.items.map((item) => <option key={item.product_id} value={item.product_id}>{item.brand || "RETELA"} · {item.name || "Apparel"} · {money(item.price)}</option>)}
+                  </select>
+                  {selectedProductAlreadyReviewed ? <span className="text-xs font-bold text-amber-700">Feedback already submitted for this item.</span> : null}
+                </label>
+              ) : null}
+            </>
           ) : (
-            <EmptyPanel light title="No verified purchase selected" text={availableOrders.length ? "Choose a delivered order to preview brand and apparel details." : "No purchases are available for feedback."} />
+            <EmptyPanel light title="No verified purchase selected" text={availableOrders.length ? "Choose a delivered order to preview brand and apparel details." : "No delivered purchases are currently available for feedback."} />
           )}
-          {feedbackBlocked ? <ValidationMessage message="Cannot leave feedback until delivered." /> : null}
+
+          <section className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h2 className="font-display text-lg font-bold text-slate-950">Other Purchases</h2>
+              <span className="text-xs font-bold uppercase tracking-[0.12em] text-slate-500">Feedback unlocks after delivery</span>
+            </div>
+            {otherOrders.length ? (
+              <div className="mt-3 grid gap-2">
+                {otherOrders.map((order) => (
+                  <div key={order.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2">
+                    <div className="min-w-0">
+                      <strong className="block truncate text-sm text-slate-900">{orderNumber(order)} - {order.first_product_name || order.product_names || "Apparel"}</strong>
+                      <span className="text-xs text-slate-500">Feedback will become available after this order is delivered.</span>
+                    </div>
+                    <span className="shrink-0 rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 text-xs font-black text-slate-700">{feedbackStatusLabel(order)}</span>
+                  </div>
+                ))}
+              </div>
+            ) : <p className="mt-3 text-sm font-semibold text-slate-500">All of your visible purchases are eligible or already reviewed.</p>}
+          </section>
 
           <div className="grid gap-4 md:grid-cols-2">
             <label className="grid gap-2">
@@ -3287,6 +3326,7 @@ function Feedback({ orders, reviews, onSaved }) {
                 <option value="">Select category</option>
                 {feedbackCategories.map((category) => <option key={category} value={category}>{category}</option>)}
               </select>
+              {form.category === "Other" ? <input className="rounded-2xl border border-slate-200 bg-white p-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100" value={form.custom_category} onChange={(event) => setForm({ ...form, custom_category: event.target.value })} placeholder="Please specify your feedback category" maxLength={80} /> : null}
             </label>
             <div className="grid gap-2">
               <span className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">Rating</span>
@@ -3300,8 +3340,8 @@ function Feedback({ orders, reviews, onSaved }) {
             <span className="text-right text-xs font-semibold text-slate-400">{form.comment.length}/600</span>
           </label>
 
-          <FileDrop label="Image Upload" file={image} onChange={setImage} light />
-          <Button type="submit" disabled={submitting || !availableOrders.length || feedbackBlocked || !selectedOrder}><Send size={17} /> {submitting ? "Submitting..." : "Submit Feedback"}</Button>
+          <MultiFileDrop files={images} onChange={setImages} maxImages={10} label="Upload photos (optional)" light />
+          <Button type="submit" disabled={submitting || !availableOrders.length || !selectedOrder || selectedProductAlreadyReviewed}><Send size={17} /> {submitting ? "Submitting..." : "Submit Feedback"}</Button>
         </form>
       </Card>
 
@@ -3519,11 +3559,11 @@ function SparkleMark({ light = false }) {
   return <span className={`mx-auto grid h-11 w-11 place-items-center rounded-2xl border ${light ? "border-emerald-100 bg-white text-emerald-700" : "border-neonbrand/20 bg-neonbrand/10 text-neonbrand"}`}><Star size={19} /></span>;
 }
 
-function VerifiedPurchaseCard({ order, details, loading, mode = "feedback", validation }) {
-  const firstItem = details?.items?.[0];
+function VerifiedPurchaseCard({ order, details, productId, loading, mode = "feedback", validation }) {
+  const firstItem = details?.items?.find((item) => Number(item.product_id) === Number(productId)) || details?.items?.[0];
   const brand = firstItem?.brand || order.brands || "RETELA";
   const product = firstItem?.name || order.first_product_name || order.product_names || "Apparel";
-  const delivered = order.status === "completed";
+  const delivered = canLeaveFeedback(order);
   const heading = mode === "return" ? "Verified Purchase" : delivered ? "Verified Purchase" : "Purchase Selected";
   return (
     <section className="rounded-[20px] border border-emerald-100 bg-white p-4 shadow-[0_12px_30px_rgba(15,23,42,0.06)]">
@@ -3676,19 +3716,54 @@ function FileDrop({ label, file, onChange, light = false }) {
   );
 }
 
-function MultiFileDrop({ files, onChange, light = false }) {
+function MultiFileDrop({ files, onChange, maxImages = 10, label = "Upload proof photos", light = false }) {
+  const [error, setError] = useState("");
+  const previews = useMemo(() => files.map((file) => ({ file, url: URL.createObjectURL(file) })), [files]);
+
+  useEffect(() => () => previews.forEach((preview) => URL.revokeObjectURL(preview.url)), [previews]);
+
+  function handleFiles(event) {
+    const selected = Array.from(event.target.files || []);
+    event.target.value = "";
+    if (!selected.length) return;
+    if (selected.length > maxImages || files.length + selected.length > maxImages) {
+      setError(`You can upload up to ${maxImages} photos.`);
+    }
+    const allowed = selected.filter((file) => ["image/jpeg", "image/png", "image/webp"].includes(file.type) && file.size <= 5 * 1024 * 1024);
+    if (allowed.length !== selected.length) setError("Use JPG, PNG, or WEBP images up to 5MB each.");
+    const next = [...files, ...allowed].slice(0, maxImages);
+    onChange(next);
+  }
+
+  function removeFile(index) {
+    onChange(files.filter((_, fileIndex) => fileIndex !== index));
+    setError("");
+  }
+
   return (
-    <label className="grid cursor-pointer gap-2">
-      <span className={`text-xs font-bold uppercase tracking-[0.16em] ${light ? "text-slate-500" : "text-white/45"}`}>Image Upload</span>
-      <span className={`flex min-h-20 items-center gap-3 rounded-2xl border border-dashed p-3 ${light ? "border-emerald-200 bg-emerald-50/45" : "border-neonbrand/25 bg-neonbrand/5"}`}>
+    <div className="grid gap-2">
+      <span className={`text-xs font-bold uppercase tracking-[0.16em] ${light ? "text-slate-500" : "text-white/45"}`}>{label}</span>
+      <label className={`flex min-h-20 cursor-pointer items-center gap-3 rounded-2xl border border-dashed p-3 transition hover:border-emerald-400 ${light ? "border-emerald-200 bg-emerald-50/45" : "border-neonbrand/25 bg-neonbrand/5"}`}>
         <span className={`grid h-12 w-12 shrink-0 place-items-center rounded-2xl border ${light ? "border-emerald-100 bg-white text-emerald-700" : "border-white/10 bg-black/25 text-neonbrand"}`}><FileImage size={19} /></span>
         <span className="min-w-0 flex-1">
-          <strong className={`block truncate text-sm ${light ? "text-slate-900" : "text-white"}`}>{files.length ? `${files.length} proof photo${files.length > 1 ? "s" : ""} selected` : "Upload proof photos"}</strong>
-          <span className={`text-xs ${light ? "text-slate-500" : "text-white/45"}`}>Up to 4 images</span>
+          <strong className={`block truncate text-sm ${light ? "text-slate-900" : "text-white"}`}>{files.length ? `${files.length} / ${maxImages} images selected` : label}</strong>
+          <span className={`text-xs ${light ? "text-slate-500" : "text-white/45"}`}>Up to {maxImages} images · JPG, PNG, WEBP · 5MB each</span>
         </span>
-        <input type="file" accept="image/*" multiple className="hidden" onChange={(event) => onChange(Array.from(event.target.files || []).slice(0, 4))} />
-      </span>
-    </label>
+        <span className={`shrink-0 rounded-xl border px-3 py-2 text-xs font-bold ${light ? "border-emerald-200 bg-white text-emerald-700" : "border-white/15 bg-white/10 text-white"}`}>Add Images</span>
+        <input type="file" accept="image/jpeg,image/png,image/webp" multiple className="hidden" onChange={handleFiles} />
+      </label>
+      {error ? <p className="text-xs font-bold text-rose-600">{error}</p> : null}
+      {previews.length ? (
+        <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
+          {previews.map((preview, index) => (
+            <div key={`${preview.file.name}-${preview.file.lastModified}-${index}`} className="group relative aspect-square overflow-hidden rounded-xl border border-slate-200 bg-slate-100">
+              <img src={preview.url} alt={`Selected upload ${index + 1}`} className="h-full w-full object-cover" />
+              <button type="button" onClick={() => removeFile(index)} aria-label={`Remove image ${index + 1}`} className="absolute right-1 top-1 grid h-7 w-7 place-items-center rounded-full bg-slate-950/75 text-white transition hover:bg-rose-600"><X size={14} /></button>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
   );
 }
 

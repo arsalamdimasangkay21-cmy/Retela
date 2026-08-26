@@ -1448,6 +1448,17 @@ button {
   object-fit: contain;
 }
 
+.admin-feedback-image-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: 10px;
+}
+
+.admin-feedback-image-grid .admin-feedback-image-link {
+  aspect-ratio: 1;
+  margin-top: 12px;
+}
+
 .admin-feedback-no-image,
 .admin-feedback-details-empty {
   margin: 10px 0 0;

@@ -15,6 +15,20 @@ const returnReasons = ["Wrong item received", "Damaged apparel", "Damaged produc
 const refundTypes = ["Replacement", "Refund", "Store Credit"];
 const returnStatuses = ["pending", "under_review", "approved", "rejected", "refunded"];
 
+function parseImageList(value, fallback = null) {
+  if (Array.isArray(value)) return value.filter(Boolean).map(String);
+  if (value && typeof value === "object") return Object.values(value).filter(Boolean).map(String);
+  if (typeof value === "string" && value.trim()) {
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) return parsed.filter(Boolean).map(String);
+    } catch {
+      // Legacy rows may contain a single path rather than JSON.
+    }
+  }
+  return fallback ? [fallback] : [];
+}
+
 async function ensureReturnColumns() {
   returnColumnsReady ||= (async () => {
     const rows = await query(
@@ -156,10 +170,13 @@ router.get("/", requireAuth, asyncHandler(async (req, res) => {
   }
 );
 
-  res.json(rows);
+  res.json(rows.map((row) => ({
+    ...row,
+    images: parseImageList(row.proof_images, row.image_url)
+  })));
 }));
 
-router.post("/", requireAuth, requireApproved, upload.array("images", 4), asyncHandler(async (req, res) => {
+router.post("/", requireAuth, requireApproved, upload.array("images", 10), asyncHandler(async (req, res) => {
   await ensureReturnColumns();
   await ensureReturnNotificationTypes();
   const schema = z.object({
@@ -201,7 +218,7 @@ router.post("/", requireAuth, requireApproved, upload.array("images", 4), asyncH
   );
   if (duplicates.length) throw new HttpError(409, "Order Already Returned");
 
-  const imageUrls = (req.files || []).map((file) => `/uploads/${file.filename}`);
+  const imageUrls = (req.files || []).slice(0, 10).map((file) => `/uploads/${file.filename}`);
   const orderYear = orders[0].created_at ? new Date(orders[0].created_at).getFullYear() : new Date().getFullYear();
   const orderNumber = `#ORD-${orderYear}-${String(orders[0].id).padStart(5, "0")}`;
   const shippingFee = Number(input.shipping_fee || 0);

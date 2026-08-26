@@ -1083,6 +1083,7 @@ async function ensureCommunicationTables() {
       category VARCHAR(80) NOT NULL DEFAULT 'Overall Experience',
       comment TEXT NOT NULL,
       image_url VARCHAR(255) NULL,
+      image_urls_json JSON NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       INDEX idx_reviews_user (user_id),
       INDEX idx_reviews_customer (customer_id),
@@ -1091,6 +1092,7 @@ async function ensureCommunicationTables() {
     )
   `);
   await ensureAutoIncrementId("reviews");
+  await ensureColumn("reviews", "image_urls_json", "image_urls_json JSON NULL AFTER image_url");
 
   await ensureTable("returns", `
     CREATE TABLE IF NOT EXISTS returns (

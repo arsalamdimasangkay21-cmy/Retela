@@ -19,6 +19,7 @@ import ProductQuickView from "../components/ProductQuickView";
 import { Button, Card, Field, StatCard } from "../components/ui";
 import { useAuth } from "../context/AuthContext";
 import { orderStatusLabel as sharedOrderStatusLabel } from "../utils/orderStatus";
+import { feedbackImageList } from "../utils/feedback";
 import { getProductImageValue, normalizeProductImageFields, resolveProductImageUrl } from "../utils/productImage";
 import AutomationsPage from "./AutomationsPage";
 import AdminSettingsPage from "./AdminSettingsPage";
@@ -4834,6 +4835,7 @@ function AdminNotifications({ rows, loading = false, users, rejectingUserIds = [
 function AdminFeedback({ reviews }) {
   const [selectedReview, setSelectedReview] = useState(null);
   const average = reviews.length ? reviews.reduce((sum, review) => sum + Number(review.rating || 0), 0) / reviews.length : 0;
+  const selectedImages = feedbackImageList(selectedReview);
   return (
     <div className="grid gap-5">
       <section className="admin-feedback-hero relative overflow-hidden rounded-[30px] border border-white/10 bg-black/35 p-5 shadow-2xl shadow-black/30 backdrop-blur-2xl sm:p-7">
@@ -4861,7 +4863,7 @@ function AdminFeedback({ reviews }) {
               </div>
               <span className="shrink-0 rounded-full border border-amber-300/25 bg-amber-300/10 px-3 py-1 text-xs font-black text-amber-200">{review.rating}/5</span>
             </div>
-            {review.image_url ? <img src={assetUrl(review.image_url)} className="mt-4 h-40 w-full rounded-2xl object-cover" alt="Customer feedback" /> : null}
+            {feedbackImageList(review)[0] ? <img src={assetUrl(feedbackImageList(review)[0])} className="mt-4 h-40 w-full rounded-2xl object-cover" alt="Customer feedback" /> : null}
             <p className="mt-4 text-sm leading-6 text-white/58">{review.comment}</p>
           </Card>
           </button>
@@ -4898,11 +4900,15 @@ function AdminFeedback({ reviews }) {
                     <p>{selectedReview.comment || "No comment provided."}</p>
                   </section>
                   <section className="admin-feedback-image-section" aria-labelledby="admin-feedback-image-title">
-                    <h3 id="admin-feedback-image-title">Uploaded Image</h3>
-                    {selectedReview.image_url ? (
-                      <a href={assetUrl(selectedReview.image_url)} target="_blank" rel="noreferrer" className="admin-feedback-image-link">
-                        <img src={assetUrl(selectedReview.image_url)} alt="Customer feedback attachment" />
-                      </a>
+                    <h3 id="admin-feedback-image-title">Uploaded Photos</h3>
+                    {selectedImages.length ? (
+                      <div className="admin-feedback-image-grid">
+                        {selectedImages.map((image, index) => (
+                          <a key={`${image}-${index}`} href={assetUrl(image)} target="_blank" rel="noreferrer" className="admin-feedback-image-link">
+                            <img src={assetUrl(image)} alt={`Customer feedback attachment ${index + 1}`} />
+                          </a>
+                        ))}
+                      </div>
                     ) : <p className="admin-feedback-no-image">No image uploaded</p>}
                   </section>
                 </>
@@ -4924,6 +4930,8 @@ function FeedbackDetail({ label, value }) {
 }
 
 function AdminReturns({ rows, decideReturn }) {
+  const [selectedReturn, setSelectedReturn] = useState(null);
+  const selectedImages = feedbackImageList(selectedReturn);
   return (
     <div className="grid gap-5">
       <section className="relative overflow-hidden rounded-[30px] border border-white/10 bg-black/35 p-5 shadow-2xl shadow-black/30 backdrop-blur-2xl sm:p-7">
@@ -4935,7 +4943,8 @@ function AdminReturns({ rows, decideReturn }) {
       </section>
       <div className="grid gap-4">
         {rows.length ? rows.map((row) => (
-          <Card key={row.id}>
+          <div key={row.id} role="button" tabIndex={0} onClick={() => setSelectedReturn(row)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") setSelectedReturn(row); }} className="w-full text-left">
+          <Card className="transition hover:-translate-y-0.5 hover:border-neonbrand/35 hover:shadow-[0_16px_45px_rgba(0,0,0,0.28)]">
             <div className="grid gap-4 lg:grid-cols-[90px_minmax(0,1fr)_auto] lg:items-start">
               <div className="h-24 w-24 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.06]">
                 <ProductImage src={row.product_image} className="h-full w-full object-cover" alt={row.product_names || "Return product"} />
@@ -4950,15 +4959,51 @@ function AdminReturns({ rows, decideReturn }) {
                 <p className="mt-2 text-xs font-bold uppercase tracking-[0.14em] text-neonbrand/65">{row.refund_type || "Refund"}</p>
               </div>
               <div className="flex flex-wrap gap-2 lg:justify-end">
-                <button type="button" onClick={() => decideReturn(row.id, "under_review")} className="rounded-xl border border-sky-300/25 bg-sky-300/10 px-3 py-2 text-xs font-bold text-sky-200">Review</button>
-                <button type="button" onClick={() => decideReturn(row.id, "approved")} className="rounded-xl border border-neonbrand/25 bg-neonbrand/10 px-3 py-2 text-xs font-bold text-neonbrand">Approve</button>
-                <button type="button" onClick={() => decideReturn(row.id, "refunded")} className="rounded-xl border border-violet-300/25 bg-violet-300/10 px-3 py-2 text-xs font-bold text-violet-200">Refunded</button>
-                <button type="button" onClick={() => decideReturn(row.id, "rejected")} className="rounded-xl border border-rose-300/25 bg-rose-300/10 px-3 py-2 text-xs font-bold text-rose-200">Reject</button>
+                <button type="button" onClick={(event) => { event.stopPropagation(); decideReturn(row.id, "under_review"); }} className="rounded-xl border border-sky-300/25 bg-sky-300/10 px-3 py-2 text-xs font-bold text-sky-200">Review</button>
+                <button type="button" onClick={(event) => { event.stopPropagation(); decideReturn(row.id, "approved"); }} className="rounded-xl border border-neonbrand/25 bg-neonbrand/10 px-3 py-2 text-xs font-bold text-neonbrand">Approve</button>
+                <button type="button" onClick={(event) => { event.stopPropagation(); decideReturn(row.id, "refunded"); }} className="rounded-xl border border-violet-300/25 bg-violet-300/10 px-3 py-2 text-xs font-bold text-violet-200">Refunded</button>
+                <button type="button" onClick={(event) => { event.stopPropagation(); decideReturn(row.id, "rejected"); }} className="rounded-xl border border-rose-300/25 bg-rose-300/10 px-3 py-2 text-xs font-bold text-rose-200">Reject</button>
               </div>
             </div>
           </Card>
+          </div>
         )) : <Card><EmptyState title="No return requests" subtitle="Customer return and refund requests will appear here." /></Card>}
       </div>
+      {selectedReturn ? createPortal(
+        <div className="admin-feedback-details-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setSelectedReturn(null); }}>
+          <section className="admin-feedback-details-modal" role="dialog" aria-modal="true" aria-labelledby="admin-return-details-title">
+            <header className="admin-feedback-details-header">
+              <div className="min-w-0">
+                <p className="admin-feedback-details-eyebrow">Return Details</p>
+                <h2 id="admin-return-details-title">{selectedReturn.username || "Customer return request"}</h2>
+                <p className="admin-feedback-details-subtitle">{selectedReturn.order_number || `Order #${selectedReturn.order_id || "N/A"}`}</p>
+              </div>
+              <button type="button" onClick={() => setSelectedReturn(null)} className="admin-feedback-details-close" aria-label="Close return details"><X size={19} /></button>
+            </header>
+            <div className="admin-feedback-details-body">
+              <div className="admin-feedback-summary-grid">
+                <FeedbackDetail label="Customer" value={selectedReturn.username} />
+                <FeedbackDetail label="Order" value={selectedReturn.order_number || `#${selectedReturn.order_id || "N/A"}`} />
+                <FeedbackDetail label="Product" value={selectedReturn.product_name || selectedReturn.product_names} />
+                <FeedbackDetail label="Reason" value={selectedReturn.reason_category} />
+                <FeedbackDetail label="Refund Type" value={selectedReturn.refund_type} />
+                <FeedbackDetail label="Status" value={selectedReturn.status} />
+                <FeedbackDetail label="Submitted" value={selectedReturn.created_at ? new Date(selectedReturn.created_at).toLocaleString() : "Not provided"} />
+              </div>
+              <section className="admin-feedback-comment-section">
+                <h3>Details</h3>
+                <p>{selectedReturn.reason || "No additional details provided."}</p>
+              </section>
+              <section className="admin-feedback-image-section">
+                <h3>Proof Photos</h3>
+                {selectedImages.length ? <div className="admin-feedback-image-grid">{selectedImages.map((image, index) => <a key={`${image}-${index}`} href={assetUrl(image)} target="_blank" rel="noreferrer" className="admin-feedback-image-link"><img src={assetUrl(image)} alt={`Return proof ${index + 1}`} /></a>)}</div> : <p className="admin-feedback-no-image">No image uploaded</p>}
+              </section>
+            </div>
+            <footer className="admin-feedback-details-footer"><button type="button" onClick={() => setSelectedReturn(null)} className="admin-feedback-details-footer-button">Close</button></footer>
+          </section>
+        </div>,
+        document.body
+      ) : null}
     </div>
   );
 }
