@@ -21,11 +21,25 @@ export function canLeaveFeedback(order) {
 
 export function feedbackStatusLabel(order) {
   const status = normalizeFeedbackStatus(order?.status || order?.order_status || order?.delivery_status);
+  const paymentStatus = normalizeFeedbackStatus(order?.payment_status);
+  if (["payment_failed", "failed"].includes(paymentStatus)) return "Payment Failed";
   if (status === "awaiting_payment") return "Awaiting Payment";
   if (status === "out_for_delivery") return "Out for Delivery";
   if (status === "under_review") return "Under Review";
   if (!status) return "Pending";
   return status.split("_").map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(" ");
+}
+
+export function feedbackAvailabilityMessage(order) {
+  const status = normalizeFeedbackStatus(order?.status || order?.order_status || order?.delivery_status);
+  const paymentStatus = normalizeFeedbackStatus(order?.payment_status);
+  if (["cancelled", "canceled", "rejected"].includes(status)) {
+    return "This order was cancelled and is not eligible for feedback.";
+  }
+  if (["payment_failed", "failed", "expired", "awaiting_payment"].includes(status) || ["payment_failed", "failed", "expired"].includes(paymentStatus)) {
+    return "Payment was not completed for this order.";
+  }
+  return "Feedback will become available after this order is delivered.";
 }
 
 export function feedbackImageList(record) {

@@ -33,7 +33,7 @@ import {
 } from "../utils/location";
 import { emitUserThemeChange, readUserTheme, saveUserTheme } from "../utils/userTheme";
 import { orderStatusLabel as sharedOrderStatusLabel } from "../utils/orderStatus";
-import { canLeaveFeedback, feedbackStatusLabel } from "../utils/feedback";
+import { canLeaveFeedback, feedbackAvailabilityMessage, feedbackStatusLabel } from "../utils/feedback";
 
 const assetUrl = (url) => resolveAssetUrl(url) || (!url ? "" : `${API_URL.replace(/\/api$/, "")}${url}`);
 const productCategories = ["T-Shirts", "Jackets", "Caps"];
@@ -3195,6 +3195,8 @@ function Feedback({ orders, reviews, onSaved }) {
   const [orderDetails, setOrderDetails] = useState(null);
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const otherPurchaseValue = "__other__";
+  const showOtherPurchases = form.order_id === otherPurchaseValue;
   const selectedOrder = orders.find((order) => Number(order.id) === Number(form.order_id));
   const selectedProductAlreadyReviewed = selectedOrder && form.product_id
     ? reviews.some((review) => Number(review.order_id) === Number(selectedOrder.id) && (Number(review.product_id) === Number(form.product_id) || !review.product_id))
@@ -3279,10 +3281,31 @@ function Feedback({ orders, reviews, onSaved }) {
             <select className="rounded-2xl border border-slate-200 bg-white p-3 text-sm text-slate-900 outline-none transition focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100" value={form.order_id} onChange={(event) => { setOrderDetails(null); setForm({ ...form, order_id: event.target.value, product_id: "" }); }}>
               <option value="">Select purchase</option>
               {availableOrders.map((order) => <option key={order.id} value={order.id}>{orderNumber(order)} - {order.first_product_name || order.product_names || "Apparel"} - {money(order.total_amount)}</option>)}
+              <option value={otherPurchaseValue}>Other</option>
             </select>
           </label>
 
-          {selectedOrder ? (
+          {showOtherPurchases ? (
+            <section className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h2 className="font-display text-lg font-bold text-slate-950">Other Purchases</h2>
+                <span className="text-xs font-bold uppercase tracking-[0.12em] text-slate-500">View-only order status</span>
+              </div>
+              {otherOrders.length ? (
+                <div className="mt-3 grid gap-2">
+                  {otherOrders.map((order) => (
+                    <div key={order.id} className="rounded-xl border border-slate-200 bg-white px-3 py-2">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <strong className="min-w-0 truncate text-sm text-slate-900">{orderNumber(order)} - {order.first_product_name || order.product_names || "Apparel"}</strong>
+                        <span className="shrink-0 rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 text-xs font-black text-slate-700">{feedbackStatusLabel(order)}</span>
+                      </div>
+                      <p className="mt-1 text-xs leading-5 text-slate-500">{feedbackAvailabilityMessage(order)}</p>
+                    </div>
+                  ))}
+                </div>
+              ) : <p className="mt-3 text-sm font-semibold text-slate-500">There are no other purchases to show.</p>}
+            </section>
+          ) : selectedOrder ? (
             <>
               <VerifiedPurchaseCard order={selectedOrder} details={orderDetails} productId={form.product_id} loading={loadingDetails} mode="feedback" />
               {orderDetails?.items?.length > 1 ? (
@@ -3299,26 +3322,7 @@ function Feedback({ orders, reviews, onSaved }) {
             <EmptyPanel light title="No verified purchase selected" text={availableOrders.length ? "Choose a delivered order to preview brand and apparel details." : "No delivered purchases are currently available for feedback."} />
           )}
 
-          <section className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <h2 className="font-display text-lg font-bold text-slate-950">Other Purchases</h2>
-              <span className="text-xs font-bold uppercase tracking-[0.12em] text-slate-500">Feedback unlocks after delivery</span>
-            </div>
-            {otherOrders.length ? (
-              <div className="mt-3 grid gap-2">
-                {otherOrders.map((order) => (
-                  <div key={order.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2">
-                    <div className="min-w-0">
-                      <strong className="block truncate text-sm text-slate-900">{orderNumber(order)} - {order.first_product_name || order.product_names || "Apparel"}</strong>
-                      <span className="text-xs text-slate-500">Feedback will become available after this order is delivered.</span>
-                    </div>
-                    <span className="shrink-0 rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 text-xs font-black text-slate-700">{feedbackStatusLabel(order)}</span>
-                  </div>
-                ))}
-              </div>
-            ) : <p className="mt-3 text-sm font-semibold text-slate-500">All of your visible purchases are eligible or already reviewed.</p>}
-          </section>
-
+          {selectedOrder ? <>
           <div className="grid gap-4 md:grid-cols-2">
             <label className="grid gap-2">
               <span className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">Feedback Category</span>
@@ -3342,6 +3346,7 @@ function Feedback({ orders, reviews, onSaved }) {
 
           <MultiFileDrop files={images} onChange={setImages} maxImages={10} label="Upload photos (optional)" light />
           <Button type="submit" disabled={submitting || !availableOrders.length || !selectedOrder || selectedProductAlreadyReviewed}><Send size={17} /> {submitting ? "Submitting..." : "Submit Feedback"}</Button>
+          </> : null}
         </form>
       </Card>
 
