@@ -58,6 +58,7 @@ const paymentNumberHelp = {
   credit: "Credit card details are entered only on the secure PayMongo card page.",
   maya: "This number is sent to the secure checkout before opening Maya."
 };
+const checkoutPaymentMethods = [["cod", "COD"], ["qrph", "GCash / QR Ph"], ["debit", "Debit"], ["credit", "Credit"], ["maya", "Maya"]];
 const adminOnlyNotificationTypes = new Set([
   "inventory",
   "low_stock",
@@ -143,6 +144,31 @@ function deliveryAreaText(quote) {
   if (quote?.shippingZone === "nearby") return "Nearby / Free";
   if (quote?.shippingZone === "outside") return "Outside";
   return "";
+}
+
+function normalizeMunicipality(value) {
+  return String(value || "")
+    .toLowerCase()
+    .trim()
+    .replace(/[.,/\\-]+/g, " ")
+    .replace(/\s+/g, " ");
+}
+
+function addressMatchesMunicipality(address, municipality) {
+  const target = normalizeMunicipality(municipality);
+  const source = normalizeMunicipality(address);
+  if (!target || !source) return false;
+  const segments = source.split(/\s*,\s*/).map((segment) => segment.trim()).filter(Boolean);
+  if (segments.includes(target)) return true;
+  const escaped = target.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(?:^|\\s)${escaped}(?:$|\\s)`, "i").test(source);
+}
+
+function codRestrictionMessage(shopMunicipality = "") {
+  const location = String(shopMunicipality || "").trim();
+  return location
+    ? `Cash on Delivery is only available within ${location}. Please select an online payment method.`
+    : "Cash on Delivery is only available within the shop municipality. Please select an online payment method.";
 }
 
 function setModalBodyLock(active) {
@@ -602,6 +628,26 @@ export default function CustomerDashboard({ active, onChange }) {
     [selectedCartItems, promotions, appliedCoupon, fulfillmentMethod, shippingQuote]
   );
   const cartTotal = cartPricing.total;
+  const currentDeliveryLocation = normalizeDeliveryLocation(deliveryLocation);
+  const shopMunicipality = String(
+    shopInfo?.general?.shopMunicipality
+      || shopInfo?.general?.shop_municipality
+      || shopInfo?.shopMunicipality
+      || shopInfo?.shop_municipality
+      || ""
+  ).trim();
+  const codEligibilityResolved = Boolean(shopInfo && profile?.id);
+  const codEligible = codEligibilityResolved && addressMatchesMunicipality(
+    currentDeliveryLocation.municipality || currentDeliveryLocation.address,
+    shopMunicipality
+  );
+
+  useEffect(() => {
+    if (codEligibilityResolved && !codEligible && paymentMethod === "cod") {
+      setPaymentMethod("qrph");
+      setPaymentError("");
+    }
+  }, [codEligibilityResolved, codEligible, paymentMethod]);
 
   async function applyCoupon() {
     const code = couponCode.trim();
@@ -675,6 +721,11 @@ export default function CustomerDashboard({ active, onChange }) {
   }
 
   function selectPaymentMethod(method) {
+    if (method === "cod" && !codEligible) {
+      setPaymentError(codRestrictionMessage(shopMunicipality));
+      notifyCart(codRestrictionMessage(shopMunicipality), "warning");
+      return;
+    }
     setPaymentMethod(method);
     setPaymentError("");
     if (method !== "cod" && profile?.phone_number) {
@@ -693,6 +744,12 @@ export default function CustomerDashboard({ active, onChange }) {
     const selectedDeliveryLocation = normalizeDeliveryLocation(deliveryLocation);
     if (fulfillmentMethod === "delivery" && !hasDeliveryLocation(selectedDeliveryLocation)) {
       notifyCart("Please set your delivery location before checkout.", "warning");
+      return;
+    }
+    if (paymentMethod === "cod" && !codEligible) {
+      const message = codRestrictionMessage(shopMunicipality);
+      setPaymentError(message);
+      notifyCart(message, "warning");
       return;
     }
     const stockOk = await recheckCartStock({ productIds: selectedCartIds });
@@ -788,6 +845,12 @@ export default function CustomerDashboard({ active, onChange }) {
     if (!selectedCartItems.length) {
       setCouponError("Please select at least one item.");
       notifyCart("Please select at least one item.", "warning");
+      return;
+    }
+    if (paymentMethod === "cod" && codEligibilityResolved && !codEligible) {
+      const message = codRestrictionMessage(shopMunicipality);
+      setPaymentError(message);
+      notifyCart(message, "warning");
       return;
     }
     if (fulfillmentMethod === "delivery" && !hasDeliveryLocation(deliveryLocation)) {
@@ -926,6 +989,8 @@ export default function CustomerDashboard({ active, onChange }) {
           retryShippingQuote={() => loadShippingQuote({ method: fulfillmentMethod, coupon: appliedCoupon?.code || "" })}
           deliverySafetyPolicy={deliverySafetyPolicyFromShop(shopInfo)}
           onOpenLocationSelector={() => setLocationSelectorOpen(true)}
+          codEligible={codEligible}
+          shopMunicipality={shopMunicipality}
           paymentMethod={paymentMethod}
           selectPaymentMethod={selectPaymentMethod}
           paymentDetails={paymentDetails}
@@ -1024,7 +1089,7 @@ export default function CustomerDashboard({ active, onChange }) {
             <div className="grid gap-3 rounded-2xl border border-white/10 bg-white/[0.045] p-3">
               <p className="text-xs font-bold uppercase tracking-[0.16em] text-white/45">Payment Method</p>
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                {[["cod", "COD"], ["qrph", "GCash / QR Ph"], ["debit", "Debit"], ["credit", "Credit"], ["maya", "Maya"]].map(([value, label]) => (
+                {checkoutPaymentMethods.filter(([value]) => value !== "cod" || codEligible).map(([value, label]) => (
                   <button key={value} type="button" onClick={() => selectPaymentMethod(value)} className={`inline-flex items-center justify-center gap-1 rounded-xl px-2 py-2 text-xs font-bold transition ${paymentMethod === value ? "bg-neonbrand text-black" : "bg-white/[0.06] text-white/65 hover:text-neonbrand"}`}>
                     {value === "debit" ? <CreditCard size={14} /> : <WalletCards size={14} />}{label}
                   </button>
@@ -1129,6 +1194,8 @@ function CartPage({
   retryShippingQuote,
   deliverySafetyPolicy,
   onOpenLocationSelector,
+  codEligible,
+  shopMunicipality,
   paymentMethod,
   selectPaymentMethod,
   updateCartQuantity,
@@ -1239,12 +1306,13 @@ function CartPage({
         <div className="mt-4 grid gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-3">
           <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">Payment Method</p>
           <div className="payment-methods grid grid-cols-2 gap-2">
-            {[["cod", "COD"], ["qrph", "GCash / QR Ph"], ["debit", "Debit"], ["credit", "Credit"], ["maya", "Maya"]].map(([value, label]) => (
+            {checkoutPaymentMethods.filter(([value]) => value !== "cod" || codEligible).map(([value, label]) => (
               <button key={value} type="button" onClick={() => selectPaymentMethod(value)} className={`payment-method-option inline-flex items-center justify-center gap-1 rounded-xl px-2 py-2 text-xs font-bold transition ${paymentMethod === value ? "bg-emerald-600 text-white" : "bg-white text-slate-600 hover:text-emerald-700"}`}>
                 {value === "debit" ? <CreditCard size={14} /> : <WalletCards size={14} />}{label}
               </button>
             ))}
           </div>
+          {!codEligible ? <p className="text-xs font-semibold leading-5 text-amber-700">{codRestrictionMessage(shopMunicipality)}</p> : null}
         </div>
         <div className="mt-4 grid gap-2 rounded-2xl border border-slate-200 bg-white p-3">
           <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">Coupon Code</p>

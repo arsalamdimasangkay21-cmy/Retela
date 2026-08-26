@@ -29,6 +29,7 @@ const allowedAdminStatusTransitions = {
 };
 const transientOrderLockCodes = new Set(["ER_LOCK_WAIT_TIMEOUT", "ER_LOCK_DEADLOCK"]);
 const maxOrderCreateAttempts = 3;
+const codMunicipalityError = "Cash on Delivery is only available for customers within the shop municipality. Please select an online payment method.";
 let orderColumnsReady;
 
 function normalizeMunicipality(value) {
@@ -677,11 +678,16 @@ router.post("/", requireAuth, requireApproved, asyncHandler(async (req, res) => 
     items: z.array(z.object({ product_id: z.coerce.number().int().positive(), quantity: z.coerce.number().int().positive() })).min(1)
   });
   const input = schema.parse(req.body);
-  const savedLocation = input.fulfillment_method === "delivery"
-    ? await loadCustomerDeliveryLocation(req.user.id)
-    : null;
+  const savedLocation = await loadCustomerDeliveryLocation(req.user.id);
   if (input.fulfillment_method === "delivery" && !savedLocation?.formattedAddress) {
     throw new HttpError(400, "Please save your delivery location before checkout.");
+  }
+  if (input.payment_method === "cod") {
+    const { config } = await loadSystemSettings();
+    const customerLocation = savedLocation?.municipality || savedLocation?.formattedAddress || "";
+    if (!addressMatchesMunicipality(customerLocation, config.general.shopMunicipality)) {
+      throw new HttpError(400, codMunicipalityError);
+    }
   }
   const trustedInput = input.fulfillment_method === "delivery" ? {
     ...input,
