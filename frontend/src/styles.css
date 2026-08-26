@@ -1509,6 +1509,460 @@ button {
   color: #16864e;
 }
 
+.about-page-layout {
+  display: grid;
+  min-width: 0;
+  gap: 20px;
+}
+
+.about-hero-card {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid #cfe8d8;
+  border-radius: 26px;
+  background: linear-gradient(135deg, #f4fff7 0%, #ffffff 72%);
+  box-shadow: 0 16px 38px rgba(18, 92, 55, 0.1);
+  padding: 28px 30px;
+}
+
+.about-hero-card::after {
+  position: absolute;
+  right: -80px;
+  top: -100px;
+  width: 280px;
+  height: 280px;
+  border-radius: 999px;
+  background: rgba(53, 216, 120, 0.11);
+  content: "";
+  filter: blur(2px);
+}
+
+.about-hero-content {
+  position: relative;
+  z-index: 1;
+  max-width: 760px;
+}
+
+.about-eyebrow {
+  margin: 0;
+  color: #08764d;
+  font-size: 0.7rem;
+  font-weight: 900;
+  letter-spacing: 0.19em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.about-hero-card h1 {
+  margin: 11px 0 0;
+  color: #15221b;
+  font-family: var(--font-display, inherit);
+  font-size: clamp(2rem, 4vw, 2.8rem);
+  font-weight: 850;
+  line-height: 1.05;
+}
+
+.about-hero-card .about-hero-content > p:last-child {
+  margin: 13px 0 0;
+  color: #52645a;
+  font-size: 0.98rem;
+  line-height: 1.65;
+}
+
+.about-contact-grid {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.about-contact-grid > a {
+  min-width: 0;
+  color: inherit;
+  text-decoration: none;
+}
+
+.about-contact-card,
+.about-stat-card,
+.about-pillar-card,
+.about-info-card,
+.about-location-card {
+  min-width: 0;
+  border: 1px solid #d7ebdf;
+  border-radius: 18px;
+  background: #ffffff;
+  box-shadow: 0 10px 26px rgba(18, 92, 55, 0.06);
+}
+
+.about-contact-card {
+  display: flex;
+  min-height: 132px;
+  flex-direction: column;
+  align-items: flex-start;
+  padding: 15px;
+  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease, background-color 160ms ease;
+}
+
+.about-contact-card.is-link:hover,
+.about-contact-card.is-link:focus-within {
+  border-color: #86d9a7;
+  background: #f8fffa;
+  box-shadow: 0 14px 30px rgba(18, 92, 55, 0.11);
+  transform: translateY(-2px);
+}
+
+.about-contact-icon,
+.about-section-icon,
+.about-stat-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #b8e7ca;
+  background: #ecfff3;
+  color: #08764d;
+}
+
+.about-contact-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+}
+
+.about-contact-card > p {
+  margin: 13px 0 0;
+  color: #52645a;
+  font-size: 0.67rem;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.about-contact-card > strong {
+  display: block;
+  margin-top: 7px;
+  color: #15221b;
+  font-size: 0.9rem;
+  font-weight: 750;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.about-stat-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 220px);
+}
+
+.about-stat-card {
+  padding: 15px;
+}
+
+.about-stat-card p {
+  margin: 0;
+  color: #52645a;
+  font-size: 0.67rem;
+  font-weight: 900;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
+.about-stat-card strong {
+  display: block;
+  margin-top: 7px;
+  color: #15221b;
+  font-family: var(--font-display, inherit);
+  font-size: 1.8rem;
+  font-weight: 850;
+  line-height: 1;
+}
+
+.about-stat-icon {
+  width: 42px;
+  height: 42px;
+  border-radius: 14px;
+}
+
+.about-pillars-grid {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.about-pillar-card {
+  padding: 16px;
+}
+
+.about-section-icon {
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
+  border-radius: 12px;
+}
+
+.about-pillar-card h2,
+.about-info-card h2,
+.about-location-card h2 {
+  color: #15221b;
+  font-family: var(--font-display, inherit);
+  font-size: 1.03rem;
+  font-weight: 850;
+  line-height: 1.2;
+}
+
+.about-pillar-card > p {
+  margin: 12px 0 0;
+  color: #52645a;
+  font-size: 0.88rem;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.about-lower-grid {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 0.86fr) minmax(0, 0.86fr) minmax(320px, 1.28fr);
+  align-items: start;
+  gap: 16px;
+}
+
+.about-info-card,
+.about-location-card {
+  padding: 18px;
+}
+
+.about-info-list {
+  display: grid;
+  gap: 11px;
+  margin-top: 14px;
+}
+
+.about-info-item {
+  border: 1px solid #e0eee5;
+  border-radius: 14px;
+  background: #f8fcf9;
+  padding: 12px 13px;
+}
+
+.about-info-item span {
+  display: block;
+  color: #08764d;
+  font-size: 0.66rem;
+  font-weight: 900;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+
+.about-info-item strong {
+  display: block;
+  margin-top: 6px;
+  color: #25362d;
+  font-size: 0.88rem;
+  font-weight: 700;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.about-location-card {
+  overflow: hidden;
+}
+
+.about-location-heading {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 11px;
+}
+
+.about-location-heading .about-eyebrow {
+  font-size: 0.64rem;
+}
+
+.about-location-heading h2 {
+  margin-top: 5px;
+  overflow-wrap: anywhere;
+}
+
+.about-shop-map-container {
+  position: relative;
+  width: 100%;
+  height: 300px;
+  min-height: 280px;
+  margin-top: 16px;
+  overflow: hidden;
+  border: 1px solid #cfe8d8;
+  border-radius: 16px;
+  background: #e8f3eb;
+}
+
+.about-shop-map {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 280px;
+  border: 0;
+}
+
+.about-location-caption {
+  display: grid;
+  gap: 3px;
+  margin-top: 13px;
+  color: #52645a;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.about-location-caption strong {
+  color: #15221b;
+  font-size: 0.93rem;
+}
+
+.retela-dark .about-hero-card,
+.premium-shell.retela-dark-shell .about-hero-card {
+  border-color: rgba(142, 211, 171, 0.28);
+  background: linear-gradient(135deg, #1b3025 0%, #15231d 78%);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.24);
+}
+
+.retela-dark .about-hero-card h1,
+.premium-shell.retela-dark-shell .about-hero-card h1,
+.retela-dark .about-pillar-card h2,
+.premium-shell.retela-dark-shell .about-pillar-card h2,
+.retela-dark .about-info-card h2,
+.premium-shell.retela-dark-shell .about-info-card h2,
+.retela-dark .about-location-card h2,
+.premium-shell.retela-dark-shell .about-location-card h2,
+.retela-dark .about-stat-card strong,
+.premium-shell.retela-dark-shell .about-stat-card strong,
+.retela-dark .about-contact-card > strong,
+.premium-shell.retela-dark-shell .about-contact-card > strong,
+.retela-dark .about-location-caption strong,
+.premium-shell.retela-dark-shell .about-location-caption strong {
+  color: #f4fbf6;
+}
+
+.retela-dark .about-eyebrow,
+.premium-shell.retela-dark-shell .about-eyebrow,
+.retela-dark .about-info-item span,
+.premium-shell.retela-dark-shell .about-info-item span,
+.retela-dark .about-contact-card > p,
+.premium-shell.retela-dark-shell .about-contact-card > p {
+  color: #94e7b5;
+}
+
+.retela-dark .about-hero-card .about-hero-content > p:last-child,
+.premium-shell.retela-dark-shell .about-hero-card .about-hero-content > p:last-child,
+.retela-dark .about-pillar-card > p,
+.premium-shell.retela-dark-shell .about-pillar-card > p,
+.retela-dark .about-stat-card p,
+.premium-shell.retela-dark-shell .about-stat-card p,
+.retela-dark .about-location-caption,
+.premium-shell.retela-dark-shell .about-location-caption {
+  color: #b8c8bf;
+}
+
+.retela-dark .about-contact-card,
+.premium-shell.retela-dark-shell .about-contact-card,
+.retela-dark .about-stat-card,
+.premium-shell.retela-dark-shell .about-stat-card,
+.retela-dark .about-pillar-card,
+.premium-shell.retela-dark-shell .about-pillar-card,
+.retela-dark .about-info-card,
+.premium-shell.retela-dark-shell .about-info-card,
+.retela-dark .about-location-card,
+.premium-shell.retela-dark-shell .about-location-card {
+  border-color: rgba(142, 211, 171, 0.22);
+  background: #15231d;
+  box-shadow: 0 16px 34px rgba(0, 0, 0, 0.2);
+}
+
+.retela-dark .about-contact-card.is-link:hover,
+.retela-dark .about-contact-card.is-link:focus-within,
+.premium-shell.retela-dark-shell .about-contact-card.is-link:hover,
+.premium-shell.retela-dark-shell .about-contact-card.is-link:focus-within {
+  border-color: rgba(94, 228, 142, 0.62);
+  background: #1b3025;
+}
+
+.retela-dark .about-contact-icon,
+.retela-dark .about-section-icon,
+.retela-dark .about-stat-icon,
+.premium-shell.retela-dark-shell .about-contact-icon,
+.premium-shell.retela-dark-shell .about-section-icon,
+.premium-shell.retela-dark-shell .about-stat-icon {
+  border-color: rgba(142, 211, 171, 0.3);
+  background: rgba(53, 216, 120, 0.12);
+  color: #b8ffd0;
+}
+
+.retela-dark .about-info-item,
+.premium-shell.retela-dark-shell .about-info-item {
+  border-color: rgba(142, 211, 171, 0.18);
+  background: rgba(15, 26, 21, 0.7);
+}
+
+.retela-dark .about-info-item strong,
+.premium-shell.retela-dark-shell .about-info-item strong {
+  color: #e6f5eb;
+}
+
+.retela-dark .about-shop-map-container,
+.premium-shell.retela-dark-shell .about-shop-map-container {
+  border-color: rgba(142, 211, 171, 0.3);
+  background: #0f1a15;
+}
+
+@media (max-width: 1100px) {
+  .about-contact-grid,
+  .about-pillars-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .about-lower-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .about-location-card {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 640px) {
+  .about-page-layout {
+    gap: 14px;
+  }
+
+  .about-hero-card {
+    border-radius: 20px;
+    padding: 22px 18px;
+  }
+
+  .about-contact-grid,
+  .about-pillars-grid,
+  .about-lower-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .about-location-card {
+    grid-column: auto;
+  }
+
+  .about-contact-card {
+    min-height: 0;
+  }
+
+  .about-shop-map-container {
+    height: 250px;
+    min-height: 220px;
+  }
+
+  .about-shop-map {
+    min-height: 220px;
+  }
+}
+
 .broadcasts-page {
   color: #123526;
 }

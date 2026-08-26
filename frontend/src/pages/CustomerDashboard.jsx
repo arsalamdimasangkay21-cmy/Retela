@@ -3077,6 +3077,16 @@ function formatMeetupTime(value) {
   return new Date(2000, 0, 1, hours, minutes).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
 }
 
+function instagramDisplayLabel(value) {
+  try {
+    const pathname = new URL(value).pathname.replace(/\/+$/, "");
+    const handle = pathname.split("/").filter(Boolean).pop();
+    return handle ? `@${handle.replace(/^@/, "")}` : "@tela_to_pera";
+  } catch {
+    return "@tela_to_pera";
+  }
+}
+
 function Detail({ label, value }) {
   return (
     <div className="rounded-2xl border border-white/10 bg-white/[0.06] p-3">
@@ -3099,74 +3109,77 @@ function AboutShop({ shop }) {
   const general = shop?.general || {};
   const about = shop?.about || {};
   const stats = shop?.stats || {};
-  const description = general.shopDescription || "RETELA AI Ecommerce System is an online thrift shopping platform of Tela to Pera Thrift Shop that helps customers browse affordable ukay-ukay apparel, place orders, and communicate with the shop using AI assistance.";
+  const description = general.shopDescription || "AI-assisted thrift ecommerce for curated apparel and customer support.";
   const address = about.fullAddress || general.shopAddress || "Tela to Pera Thrift Shop, Philippines";
   const mapSrc = `https://www.google.com/maps?q=${encodeURIComponent(address)}&output=embed`;
+  const instagramLabel = about.instagramLink ? instagramDisplayLabel(about.instagramLink) : "Not set";
+  const locationLabel = about.landmark || address;
 
   return (
-    <motion.div className="grid gap-5" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }}>
-      <section className="relative overflow-hidden rounded-[30px] border border-neonbrand/20 bg-black/35 p-5 shadow-2xl shadow-black/30 backdrop-blur-2xl sm:p-7">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_12%_10%,rgba(56,255,136,0.18),transparent_35%),radial-gradient(circle_at_85%_25%,rgba(34,197,94,0.12),transparent_34%)]" />
-        <div className="relative max-w-4xl">
-          <p className="text-xs font-bold uppercase tracking-[0.22em] text-neonbrand/75">Tela to Pera Thrift Shop</p>
-          <h1 className="mt-3 font-display text-3xl font-bold text-white sm:text-4xl">About RETELA</h1>
-          <p className="mt-3 text-sm leading-7 text-white/62 sm:text-base">{description}</p>
+    <motion.div className="about-page-layout" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }}>
+      <section className="about-hero-card">
+        <div className="about-hero-content">
+          <p className="about-eyebrow">Tela to Pera Thrift Shop</p>
+          <h1>About RETELA</h1>
+          <p>{description}</p>
         </div>
       </section>
 
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="about-contact-grid">
+        <ContactCard icon={Phone} title="Phone Number" value={general.contactNumber || shop?.phone_number || "Not set"} />
+        <ContactCard icon={Mail} title="Email Address" value={general.emailAddress || "Not set"} />
+        <ContactCard icon={MessageCircle} title="Messenger" value={about.messengerLink ? "Message us on Messenger" : "Not set"} href={about.messengerLink} />
+        <ContactCard icon={Globe2} title="Facebook" value={about.facebookPage ? "Tela to Pera on Facebook" : "Not set"} href={about.facebookPage} />
+        <ContactCard icon={Globe2} title="Instagram" value={instagramLabel} href={about.instagramLink} />
+        <ContactCard icon={Clock3} title="Business Hours" value={`${about.businessDays || "Monday to Sunday"} | ${about.openingTime || "9:00 AM"} - ${about.closingTime || "7:00 PM"}`} />
+        <ContactCard icon={WalletCards} title="Payment Methods" value={about.paymentMethods || "GCash, COD, Online Payments"} />
+        <ContactCard icon={MapPin} title="Shop Location" value={locationLabel} />
+      </div>
+
+      <div className="about-stat-grid">
         <InfoStat icon={CheckCircle2} label="Orders Completed" value={stats.ordersCompleted || 0} />
       </div>
 
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)]">
-        <Card className="grid gap-4">
-          <AboutSection icon={Globe2} title="Mission" body={about.mission} />
-          <AboutSection icon={Star} title="Vision" body={about.vision} />
-          <AboutSection icon={RotateCcw} title="Return Policy" body={`${about.returnConditions || ""} ${about.refundProcess || ""}`.trim()} />
-          <AboutSection icon={MessageCircle} title="Customer Support" body={about.supportChannels} />
-        </Card>
+      <div className="about-pillars-grid">
+        <AboutSection icon={Globe2} title="Mission" body={about.mission} />
+        <AboutSection icon={Star} title="Vision" body={about.vision} />
+        <AboutSection icon={RotateCcw} title="Return Policy" body={`${about.returnConditions || ""} ${about.refundProcess || ""}`.trim()} />
+        <AboutSection icon={MessageCircle} title="Customer Support" body={about.supportChannels} />
+      </div>
 
-        <Card className="overflow-hidden p-0">
-          <div className="p-5">
-            <div className="flex items-center gap-3">
-              <span className="grid h-11 w-11 place-items-center rounded-2xl border border-neonbrand/20 bg-neonbrand/10 text-neonbrand"><MapPin size={20} /></span>
-              <div>
-                <h2 className="font-display text-xl font-bold text-white">Shop Location</h2>
-                <p className="mt-1 text-sm text-white/50">{about.landmark || "Store landmark is being updated."}</p>
-              </div>
+      <div className="about-lower-grid">
+        <section className="about-info-card">
+          <h2>Shipping Information</h2>
+          <div className="about-info-list">
+            <AboutInfoItem label="Delivery Areas" value={about.deliveryAreas || "Selected nearby areas and customer pickup points"} />
+            <AboutInfoItem label="Estimated Delivery Time" value={about.estimatedDeliveryTime || "1 to 5 business days after order confirmation"} />
+          </div>
+        </section>
+        <section className="about-info-card">
+          <h2>Meet the Team</h2>
+          <div className="about-info-list">
+            <AboutInfoItem label="Owner/Admin Profile" value={about.ownerProfile} />
+            <AboutInfoItem label="Developers" value={about.developers} />
+            <AboutInfoItem label="Thesis Members" value={about.thesisMembers} />
+          </div>
+        </section>
+        <section className="about-location-card">
+          <div className="about-location-heading">
+            <span className="about-section-icon"><MapPin size={19} /></span>
+            <div>
+              <p className="about-eyebrow">Shop Location</p>
+              <h2>{about.landmark || "Near Pilot Elementary School"}</h2>
             </div>
-            <p className="mt-4 rounded-2xl border border-white/10 bg-white/[0.05] p-3 text-sm leading-6 text-white/62">{address}</p>
           </div>
-          <iframe className="h-72 w-full border-0 grayscale-[0.15] hue-rotate-[65deg]" src={mapSrc} loading="lazy" title="Tela to Pera map" />
-        </Card>
-      </div>
-
-      <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
-        <ContactCard icon={Phone} title="Phone Number" value={general.contactNumber || shop?.phone_number || "Not set"} />
-        <ContactCard icon={Mail} title="Email Address" value={general.emailAddress || "Not set"} />
-        <ContactCard icon={MessageCircle} title="Messenger Link" value={about.messengerLink || "Not set"} href={about.messengerLink} />
-        <ContactCard icon={Globe2} title="Facebook Page" value={about.facebookPage || "Not set"} href={about.facebookPage} />
-        <ContactCard icon={Globe2} title="Instagram" value={about.instagramLink || "Not set"} href={about.instagramLink} />
-        <ContactCard icon={Clock3} title="Business Hours" value={`${about.businessDays || "Monday to Sunday"} | ${about.openingTime || "9:00 AM"} - ${about.closingTime || "7:00 PM"}`} />
-        <ContactCard icon={WalletCards} title="Payment Methods" value={about.paymentMethods || "GCash, COD, Online Payments"} />
-      </div>
-
-      <div className="grid gap-5 lg:grid-cols-2">
-        <Card>
-          <h2 className="font-display text-xl font-bold text-white">Shipping Information</h2>
-          <div className="mt-4 grid gap-3">
-            <Detail label="Delivery Areas" value={about.deliveryAreas} />
-            <Detail label="Estimated Delivery Time" value={about.estimatedDeliveryTime} />
+          <div className="about-shop-map-container">
+            <iframe className="about-shop-map" src={mapSrc} loading="lazy" title="Tela to Pera shop location map" />
           </div>
-        </Card>
-        <Card>
-          <h2 className="font-display text-xl font-bold text-white">Meet the Team</h2>
-          <div className="mt-4 grid gap-3">
-            <Detail label="Owner/Admin Profile" value={about.ownerProfile} />
-            <Detail label="Developers" value={about.developers} />
-            <Detail label="Thesis Members" value={about.thesisMembers} />
+          <div className="about-location-caption">
+            <strong>Tela to Pera Thrift Shop</strong>
+            <span>{about.landmark || "Near Pilot Elementary School"}</span>
+            <span>{address}</span>
           </div>
-        </Card>
+        </section>
       </div>
     </motion.div>
   );
@@ -3443,42 +3456,51 @@ function ReturnForm({ orders, returnRequests, onSaved }) {
 
 function InfoStat({ icon: Icon, label, value }) {
   return (
-    <Card className="group">
+    <div className="about-stat-card">
       <div className="flex items-center justify-between gap-4">
         <div>
-          <p className="text-xs font-bold uppercase tracking-[0.18em] text-white/45">{label}</p>
-          <strong className="mt-3 block font-display text-3xl font-bold text-white">{Number(value || 0).toLocaleString()}</strong>
+          <p>{label}</p>
+          <strong>{Number(value || 0).toLocaleString()}</strong>
         </div>
-        <span className="grid h-12 w-12 place-items-center rounded-2xl border border-neonbrand/20 bg-neonbrand/10 text-neonbrand shadow-[0_0_30px_rgba(56,255,136,0.12)] transition group-hover:scale-105">
+        <span className="about-stat-icon">
           <Icon size={23} />
         </span>
       </div>
-    </Card>
+    </div>
   );
 }
 
 function AboutSection({ icon: Icon, title, body }) {
   return (
-    <section className="rounded-2xl border border-white/10 bg-white/[0.045] p-4">
+    <section className="about-pillar-card">
       <div className="flex items-center gap-3">
-        <Icon size={19} className="text-neonbrand" />
-        <h2 className="font-display text-lg font-bold text-white">{title}</h2>
+        <span className="about-section-icon"><Icon size={18} /></span>
+        <h2>{title}</h2>
       </div>
-      <p className="mt-3 text-sm leading-6 text-white/58">{body || "This section is being updated by the shop admin."}</p>
+      <p>{body || "This section is being updated by the shop admin."}</p>
     </section>
   );
 }
 
 function ContactCard({ icon: Icon, title, value, href }) {
   const body = (
-    <Card className="h-full transition hover:border-neonbrand/30">
-      <Icon size={22} className="text-neonbrand" />
-      <p className="mt-4 text-xs font-bold uppercase tracking-[0.16em] text-white/40">{title}</p>
-      <strong className="mt-2 block break-words text-white/78">{value || "Not set"}</strong>
-    </Card>
+    <div className={`about-contact-card${href ? " is-link" : ""}`}>
+      <span className="about-contact-icon"><Icon size={19} /></span>
+      <p>{title}</p>
+      <strong>{value || "Not set"}</strong>
+    </div>
   );
   if (!href || href === "Not set") return body;
-  return <a href={href} target="_blank" rel="noreferrer">{body}</a>;
+  return <a href={href} target="_blank" rel="noopener noreferrer">{body}</a>;
+}
+
+function AboutInfoItem({ label, value }) {
+  return (
+    <div className="about-info-item">
+      <span>{label}</span>
+      <strong>{value || "Not provided"}</strong>
+    </div>
+  );
 }
 
 function EmptyPanel({ title, text, light = false }) {
