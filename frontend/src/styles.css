@@ -4321,6 +4321,114 @@ button {
   white-space: nowrap;
 }
 
+.retela-product-new-badge {
+  z-index: 3;
+  display: inline-flex;
+  min-height: 22px;
+  align-items: center;
+  justify-content: center;
+  border-color: #b8e7ca;
+  background: #ecfdf3;
+  color: #0c7044;
+  padding: 4px 8px;
+  font-size: 10px;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.retela-shop-pagination {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  margin-top: 22px;
+}
+
+.retela-shop-pagination-summary {
+  margin: 0;
+  color: #58675f;
+  font-size: 0.82rem;
+  font-weight: 600;
+  text-align: center;
+}
+
+.retela-shop-pagination-controls {
+  display: flex;
+  max-width: 100%;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.retela-shop-pagination-button {
+  display: inline-flex;
+  min-width: 40px;
+  height: 40px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #b8e7ca;
+  border-radius: 12px;
+  background: #ffffff;
+  color: #0c7044;
+  font-size: 0.85rem;
+  font-weight: 800;
+  line-height: 1;
+  transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease, transform 160ms ease;
+}
+
+.retela-shop-pagination-button:hover:not(:disabled) {
+  border-color: #5fdc8d;
+  background: #f0fff5;
+  transform: translateY(-1px);
+}
+
+.retela-shop-pagination-button.is-active {
+  border-color: #5af18e;
+  background: #36c96f;
+  color: #082b18;
+  box-shadow: 0 8px 18px rgba(54, 201, 111, 0.22);
+}
+
+.retela-shop-pagination-button:disabled {
+  cursor: not-allowed;
+  border-color: #dbe7df;
+  background: #f7faf8;
+  color: #8aa095;
+}
+
+.retela-dark .retela-shop-pagination-summary,
+.premium-shell.retela-dark-shell .retela-shop-pagination-summary {
+  color: #b8c8bf;
+}
+
+.retela-dark .retela-shop-pagination-button,
+.premium-shell.retela-dark-shell .retela-shop-pagination-button {
+  border-color: rgba(142, 211, 171, 0.28);
+  background: rgba(255, 255, 255, 0.07);
+  color: #f4fbf6;
+}
+
+.retela-dark .retela-shop-pagination-button:hover:not(:disabled),
+.premium-shell.retela-dark-shell .retela-shop-pagination-button:hover:not(:disabled) {
+  border-color: rgba(142, 211, 171, 0.6);
+  background: rgba(53, 216, 120, 0.14);
+}
+
+.retela-dark .retela-shop-pagination-button.is-active,
+.premium-shell.retela-dark-shell .retela-shop-pagination-button.is-active {
+  border-color: #5af18e;
+  background: #35d878;
+  color: #082b18;
+}
+
+.retela-dark .retela-shop-pagination-button:disabled,
+.premium-shell.retela-dark-shell .retela-shop-pagination-button:disabled {
+  border-color: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  color: rgba(255, 255, 255, 0.34);
+}
+
 .retela-product-card-body {
   gap: 5px;
   padding: 12px;
@@ -4876,6 +4984,34 @@ button {
     top: 6px;
     padding: 3px 6px;
     font-size: 9px;
+  }
+
+  .retela-product-new-badge {
+    left: 6px;
+    top: 6px;
+    min-height: 20px;
+    padding: 3px 6px;
+    font-size: 9px;
+  }
+
+  .retela-shop-pagination {
+    gap: 10px;
+    margin-top: 16px;
+  }
+
+  .retela-shop-pagination-summary {
+    font-size: 0.74rem;
+  }
+
+  .retela-shop-pagination-controls {
+    gap: 6px;
+  }
+
+  .retela-shop-pagination-button {
+    min-width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    font-size: 0.78rem;
   }
 
   .retela-product-eye-button {

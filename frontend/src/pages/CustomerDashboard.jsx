@@ -44,6 +44,7 @@ const refundTypes = ["Replacement", "Refund", "Store Credit"];
 const returnFlow = ["pending", "under_review", "approved", "rejected", "refunded"];
 const onlinePaymentMethods = ["gcash", "debit", "credit", "maya"];
 const defaultReturnShippingFee = 50;
+const customerShopPageSize = 8;
 const defaultCustomerFilters = { search: "", brand: "all", category: "all", size: "all", stock: "all", minPrice: "", maxPrice: "", sortBy: "latest" };
 const defaultDeliverySafetyPolicy = "For everyone's safety, customers and delivery personnel should meet only at the confirmed delivery or meeting location shown in the order. Verify the order and customer/delivery identity before handing over or accepting an item. Avoid changing the meetup location through unofficial messages. Keep communication inside RETELA whenever possible. Do not share OTPs, passwords, or sensitive account information. If the location feels unsafe, contact the other party through RETELA and arrange a safer public meeting point before completing the order.";
 const paymentNumberLabels = {
@@ -190,6 +191,14 @@ function stockBadgeClass(stock) {
   if (quantity <= 0) return "border-rose-200 bg-rose-50 text-rose-700";
   if (quantity <= 3) return "border-amber-200 bg-amber-50 text-amber-700";
   return "border-emerald-200 bg-emerald-50 text-emerald-700";
+}
+
+function isRecentlyAddedProduct(product, now = Date.now()) {
+  const rawDate = product?.created_at ?? product?.createdAt ?? product?.date_created ?? product?.dateCreated;
+  if (!rawDate) return false;
+  const createdAt = new Date(rawDate).getTime();
+  if (!Number.isFinite(createdAt) || createdAt > now) return false;
+  return now - createdAt <= 7 * 24 * 60 * 60 * 1000;
 }
 
 function productIdentity(product) {
@@ -979,7 +988,7 @@ export default function CustomerDashboard({ active, onChange }) {
           />
           <FloatingNotificationsWidget rows={notifications} onViewAll={() => onChange("Notifications")} />
         </div>
-        <Shop products={filteredProducts.slice(0, 6)} addToCart={addToCart} buyNow={buyNow} filters={filters} setFilters={updateFilters} filterOptions={filterOptions} focusProductId={chatTargetProductId} onFocusProductHandled={() => setChatTargetProductId(null)} />
+        <Shop products={filteredProducts.slice(0, 6)} paginate={false} addToCart={addToCart} buyNow={buyNow} filters={filters} setFilters={updateFilters} filterOptions={filterOptions} clearFilters={clearFilters} focusProductId={chatTargetProductId} onFocusProductHandled={() => setChatTargetProductId(null)} />
       </div>
     );
   }
@@ -1649,12 +1658,33 @@ function FeaturedApparelDetailsModal({ item, onClose, onAddToCart }) {
   );
 }
 
-function Shop({ products, addToCart, buyNow, filters, setFilters, filterOptions, clearFilters, focusProductId, onFocusProductHandled }) {
+function Shop({ products, paginate = true, addToCart, buyNow, filters, setFilters, filterOptions, clearFilters, focusProductId, onFocusProductHandled }) {
   const [selectedApparel, setSelectedApparel] = useState(null);
   const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
   const [isPhotoModalOpen, setIsPhotoModalOpen] = useState(false);
   const [quickViewProduct, setQuickViewProduct] = useState(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const productGridRef = useRef(null);
   const uniqueProducts = useMemo(() => uniqueProductRows(products), [products]);
+  const totalPages = paginate ? Math.max(1, Math.ceil(uniqueProducts.length / customerShopPageSize)) : 1;
+  const safePage = Math.min(currentPage, totalPages);
+  const pagedProducts = paginate
+    ? uniqueProducts.slice((safePage - 1) * customerShopPageSize, safePage * customerShopPageSize)
+    : uniqueProducts;
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [paginate, uniqueProducts, filters.search, filters.brand, filters.category, filters.size, filters.stock, filters.minPrice, filters.maxPrice, filters.sortBy]);
+
+  function goToPage(nextPage) {
+    const next = Math.max(1, Math.min(Number(nextPage) || 1, totalPages));
+    setCurrentPage(next);
+    if (next !== safePage) {
+      window.requestAnimationFrame(() => {
+        productGridRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    }
+  }
 
   function openDetails(item) {
     setSelectedApparel(item);
@@ -1727,8 +1757,8 @@ function Shop({ products, addToCart, buyNow, filters, setFilters, filterOptions,
           <CustomerFilters filters={filters} setFilters={setFilters} filterOptions={filterOptions} />
           <p className="text-sm text-white/55">{uniqueProducts.length} apparel items found</p>
         </div>
-        <div className="retela-shop-product-grid">
-          {uniqueProducts.map((p) => {
+        <div ref={productGridRef} className="retela-shop-product-grid scroll-mt-6">
+          {pagedProducts.map((p) => {
             const stock = Number(p.stock || 0);
             const outOfStock = stock <= 0;
             const status = stockStatus(p.stock);
@@ -1736,6 +1766,7 @@ function Shop({ products, addToCart, buyNow, filters, setFilters, filterOptions,
               <article key={p.id || p.sku || p.barcode} className="retela-product-card flex h-full min-w-0 flex-col overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg">
                 <div className="retela-product-card-image-wrap relative overflow-hidden bg-slate-100">
                   <ProductImage product={p} className="retela-shop-product-image h-full w-full object-cover" alt={p.name} />
+                  {isRecentlyAddedProduct(p) ? <span className="retela-product-new-badge absolute left-2 top-2 rounded-full border font-black">New</span> : null}
                   <span className={`retela-product-stock-badge absolute right-2 top-2 rounded-full border font-black ${stockBadgeClass(p.stock)}`}>{status}</span>
                   <button type="button" className="retela-product-eye-button" onClick={() => setQuickViewProduct(p)} aria-label={`Preview ${p.name}`}>
                     <Eye size={15} />
@@ -1769,6 +1800,26 @@ function Shop({ products, addToCart, buyNow, filters, setFilters, filterOptions,
             );
           })}
         </div>
+        {paginate ? (
+          <nav className="retela-shop-pagination" aria-label="Shop apparel pagination">
+            <p className="retela-shop-pagination-summary" aria-live="polite">
+              {uniqueProducts.length ? `Showing ${(safePage - 1) * customerShopPageSize + 1}–${Math.min(safePage * customerShopPageSize, uniqueProducts.length)} of ${uniqueProducts.length} items` : "Showing 0 of 0 items"}
+            </p>
+            <div className="retela-shop-pagination-controls">
+              <button type="button" onClick={() => goToPage(safePage - 1)} disabled={safePage === 1} aria-label="Previous page" className="retela-shop-pagination-button retela-shop-pagination-arrow">
+                <ChevronLeft size={17} />
+              </button>
+              {Array.from({ length: totalPages }, (_, index) => index + 1).map((page) => (
+                <button key={page} type="button" onClick={() => goToPage(page)} aria-label={`Page ${page}`} aria-current={page === safePage ? "page" : undefined} className={`retela-shop-pagination-button ${page === safePage ? "is-active" : ""}`}>
+                  {page}
+                </button>
+              ))}
+              <button type="button" onClick={() => goToPage(safePage + 1)} disabled={safePage === totalPages} aria-label="Next page" className="retela-shop-pagination-button retela-shop-pagination-arrow">
+                <ChevronRight size={17} />
+              </button>
+            </div>
+          </nav>
+        ) : null}
       </Card>
       {selectedApparel && isDetailsModalOpen ? (
         <ApparelDetailsModal
@@ -1813,10 +1864,10 @@ function CustomerFilters({ filters, setFilters, filterOptions }) {
       <input className="retela-customer-filter-control retela-filter-min-price rounded-xl border border-slate-200 bg-white p-3 text-sm" type="number" min="0" placeholder="Min price" value={filters.minPrice} onChange={(e) => setFilters({ ...filters, minPrice: e.target.value })} />
       <input className="retela-customer-filter-control retela-filter-max-price rounded-xl border border-slate-200 bg-white p-3 text-sm" type="number" min="0" placeholder="Max price" value={filters.maxPrice} onChange={(e) => setFilters({ ...filters, maxPrice: e.target.value })} />
       <select className="retela-customer-filter-control retela-filter-sort rounded-xl border border-slate-200 bg-white p-3 text-sm" value={filters.sortBy} onChange={(e) => setFilters({ ...filters, sortBy: e.target.value })}>
-        <option value="latest">Latest</option>
+        <option value="latest">Newest</option>
+        <option value="oldest">Oldest</option>
         <option value="lowest_price">Price: Low to High</option>
         <option value="highest_price">Price: High to Low</option>
-        <option value="name_asc">Name A-Z</option>
       </select>
       <select className="retela-customer-filter-control retela-customer-filter-stock rounded-xl border border-slate-200 bg-white p-3 text-sm" value={filters.stock} onChange={(e) => setFilters({ ...filters, stock: e.target.value })}>
         <option value="all">All</option>

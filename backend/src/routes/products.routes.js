@@ -416,7 +416,7 @@ router.get("/", requireAuth, requireApproved, asyncHandler(async (req, res) => {
     minPrice: z.coerce.number().optional(),
     maxPrice: z.coerce.number().optional(),
     view: z.enum(["product", "inventory"]).optional().default("product"),
-    sortBy: z.enum(["latest", "lowest_price", "highest_price", "name_asc"]).optional().default("latest"),
+    sortBy: z.enum(["latest", "oldest", "lowest_price", "highest_price", "name_asc"]).optional().default("latest"),
     stock: z.enum(["available", "in_stock", "low_stock", "out_of_stock", "all"]).optional().default("all")
   });
   const filters = schema.parse(req.query);
@@ -457,13 +457,15 @@ router.get("/", requireAuth, requireApproved, asyncHandler(async (req, res) => {
     params.maxPrice = Number(filters.maxPrice);
   }
 
-  const orderBy = filters.sortBy === "lowest_price"
-    ? "ORDER BY price ASC, created_at DESC"
-    : filters.sortBy === "highest_price"
-      ? "ORDER BY price DESC, created_at DESC"
-      : filters.sortBy === "name_asc"
-        ? "ORDER BY name ASC, created_at DESC"
-      : "ORDER BY created_at DESC";
+  const orderBy = filters.sortBy === "oldest"
+    ? "ORDER BY created_at ASC, id ASC"
+    : filters.sortBy === "lowest_price"
+      ? "ORDER BY price ASC, created_at DESC"
+      : filters.sortBy === "highest_price"
+        ? "ORDER BY price DESC, created_at DESC"
+        : filters.sortBy === "name_asc"
+          ? "ORDER BY name ASC, created_at DESC"
+          : "ORDER BY created_at DESC, id DESC";
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
   const products = await query(`SELECT ${productSelect(table)}, ${inventoryStatusSql("stock", lowStockThreshold)} AS computed_status FROM \`${table}\` ${where} ${orderBy}`, params);
   const mapped = await hydrateAdditionalImages(products.map(productListResponse));
