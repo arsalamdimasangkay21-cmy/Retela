@@ -6,6 +6,7 @@ import { requireApproved, requireAuth, requireRole } from "../middleware/auth.js
 import { ensureProductInventoryColumns } from "../utils/productInventory.js";
 import { productImageExpression } from "../utils/productImages.js";
 import { calculateCheckoutPricing } from "../utils/promotions.js";
+import { calculateShippingQuote } from "../utils/shippingSettings.js";
 import { createAdminNotification } from "../utils/adminNotifications.js";
 import { ensureCartTable } from "./cart.routes.js";
 import { loadSystemSettings } from "../utils/systemSettings.js";
@@ -29,7 +30,7 @@ const allowedAdminStatusTransitions = {
 };
 const transientOrderLockCodes = new Set(["ER_LOCK_WAIT_TIMEOUT", "ER_LOCK_DEADLOCK"]);
 const maxOrderCreateAttempts = 3;
-const codMunicipalityError = "Cash on Delivery is only available for customers within the shop municipality. Please select an online payment method.";
+const codMunicipalityError = "Cash on Delivery is only available for nearby delivery areas. Please select an online payment method.";
 let orderColumnsReady;
 
 function normalizeMunicipality(value) {
@@ -683,9 +684,11 @@ router.post("/", requireAuth, requireApproved, asyncHandler(async (req, res) => 
     throw new HttpError(400, "Please save your delivery location before checkout.");
   }
   if (input.payment_method === "cod") {
-    const { config } = await loadSystemSettings();
-    const customerLocation = savedLocation?.municipality || savedLocation?.formattedAddress || "";
-    if (!addressMatchesMunicipality(customerLocation, config.general.shopMunicipality)) {
+    const explicitDeliveryArea = String(savedLocation?.deliveryAreaOverride || "").trim().toLowerCase();
+    const shippingQuote = input.fulfillment_method === "delivery"
+      ? await calculateShippingQuote(savedLocation || {}, { fulfillmentMethod: "delivery" })
+      : null;
+    if (explicitDeliveryArea === "outside" || (input.fulfillment_method === "delivery" && shippingQuote?.shippingZone !== "nearby")) {
       throw new HttpError(400, codMunicipalityError);
     }
   }

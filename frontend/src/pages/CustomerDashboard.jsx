@@ -129,6 +129,7 @@ function normalizeShippingQuote(value = {}) {
     shippingFee: Number.isFinite(fee) ? Math.max(0, fee) : 0,
     shippingZone: zone,
     shippingRule: String(value.shippingRule ?? value.shipping_rule ?? "").trim(),
+    codEligible: typeof value.codEligible === "boolean" ? value.codEligible : null,
     distanceKm: Number.isFinite(distance) && distance >= 0 ? distance : null,
     reason: String(value.reason || value.shippingReason || value.shipping_reason || (zone === "nearby" ? "Nearby delivery area" : zone === "outside" ? "Outside nearby delivery area" : "")).trim()
   };
@@ -164,16 +165,13 @@ function addressMatchesMunicipality(address, municipality) {
   return new RegExp(`(?:^|\\s)${escaped}(?:$|\\s)`, "i").test(source);
 }
 
-function codRestrictionMessage(shopMunicipality = "") {
-  const location = String(shopMunicipality || "").trim();
-  return location
-    ? `Cash on Delivery is only available within ${location}. Please select an online payment method.`
-    : "Cash on Delivery is only available within the shop municipality. Please select an online payment method.";
+function codRestrictionMessage() {
+  return "Cash on Delivery is only available for nearby delivery areas. Please select an online payment method.";
 }
 
-function codEligibilityMessage(location, shopMunicipality = "") {
+function codEligibilityMessage(location) {
   return location?.formattedAddress
-    ? codRestrictionMessage(shopMunicipality)
+    ? codRestrictionMessage()
     : "Add a delivery address to check Cash on Delivery availability.";
 }
 
@@ -642,11 +640,23 @@ export default function CustomerDashboard({ active, onChange }) {
       || shopInfo?.shop_municipality
       || ""
   ).trim();
-  const codEligibilityResolved = Boolean(shopInfo && profile?.id);
-  const codEligible = codEligibilityResolved && addressMatchesMunicipality(
+  const adminDeliveryAreaOverride = String(profile?.delivery_area_override || "").trim().toLowerCase();
+  const fallbackNearby = addressMatchesMunicipality(
     currentDeliveryLocation.municipality || currentDeliveryLocation.address,
     shopMunicipality
   );
+  const quoteZone = String(shippingQuote?.shippingZone || "").trim().toLowerCase();
+  const quoteRule = String(shippingQuote?.shippingRule || "").trim().toLowerCase();
+  const quoteHasAdminOverride = quoteRule === "admin_override_nearby" || quoteRule === "admin_override_outside";
+  const quoteCodEligible = shippingQuote?.codEligible;
+  const codEligibilityResolved = Boolean(shopInfo && profile?.id && (typeof quoteCodEligible === "boolean" || currentDeliveryLocation.address));
+  let effectiveCodEligible = fallbackNearby;
+  if (typeof quoteCodEligible === "boolean") effectiveCodEligible = quoteCodEligible;
+  else if (quoteHasAdminOverride) effectiveCodEligible = quoteZone === "nearby";
+  else if (adminDeliveryAreaOverride === "nearby") effectiveCodEligible = true;
+  else if (adminDeliveryAreaOverride === "outside") effectiveCodEligible = false;
+  else if (quoteZone) effectiveCodEligible = quoteZone === "nearby";
+  const codEligible = codEligibilityResolved && effectiveCodEligible;
 
   useEffect(() => {
     if (codEligibilityResolved && !codEligible && paymentMethod === "cod") {
@@ -1109,6 +1119,7 @@ export default function CustomerDashboard({ active, onChange }) {
                   </button>
                 ))}
               </div>
+              {!codEligible ? <p className="text-xs font-semibold leading-5 text-amber-200">{codEligibilityMessage(currentDeliveryLocation)}</p> : null}
               {onlinePaymentMethods.includes(paymentMethod) ? (
                 <PaymentDetailsPanel
                   method={paymentMethod}

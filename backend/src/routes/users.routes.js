@@ -13,7 +13,7 @@ const SAFE_USER_SELECT = `
   SELECT id, username, display_name, email, phone_number, location,
     formatted_address, delivery_barangay, delivery_municipality, delivery_province,
     delivery_region, delivery_postal_code, delivery_place_id, delivery_location_source,
-    delivery_latitude, delivery_longitude, delivery_landmark, delivery_notes,
+    delivery_latitude, delivery_longitude, delivery_landmark, delivery_notes, delivery_area_override,
     DATE_FORMAT(birthday, '%Y-%m-%d') AS birthday,
     gender, shop_description, profile_photo_url, gcash_number, debit_account_name, debit_account_number,
     role, status, is_verified, is_verified AS isVerified
@@ -92,7 +92,7 @@ async function ensureUserColumns() {
        FROM INFORMATION_SCHEMA.COLUMNS
        WHERE TABLE_SCHEMA = DATABASE()
          AND TABLE_NAME = 'users'
-         AND COLUMN_NAME IN ('display_name', 'phone_number', 'location', 'formatted_address', 'delivery_barangay', 'delivery_municipality', 'delivery_province', 'delivery_region', 'delivery_postal_code', 'delivery_place_id', 'delivery_location_source', 'delivery_latitude', 'delivery_longitude', 'delivery_landmark', 'delivery_notes', 'birthday', 'gender', 'shop_description', 'profile_photo_url', 'gcash_number', 'debit_account_name', 'debit_account_number', 'preferences', 'last_active_at', 'is_verified')`
+         AND COLUMN_NAME IN ('display_name', 'phone_number', 'location', 'formatted_address', 'delivery_barangay', 'delivery_municipality', 'delivery_province', 'delivery_region', 'delivery_postal_code', 'delivery_place_id', 'delivery_location_source', 'delivery_latitude', 'delivery_longitude', 'delivery_landmark', 'delivery_notes', 'delivery_area_override', 'birthday', 'gender', 'shop_description', 'profile_photo_url', 'gcash_number', 'debit_account_name', 'debit_account_number', 'preferences', 'last_active_at', 'is_verified')`
     );
     const columns = new Set(rows.map((row) => row.COLUMN_NAME));
     if (!columns.has("display_name")) {
@@ -123,6 +123,9 @@ async function ensureUserColumns() {
     }
     if (!columns.has("delivery_notes")) {
       await query("ALTER TABLE users ADD COLUMN delivery_notes TEXT NULL AFTER delivery_landmark");
+    }
+    if (!columns.has("delivery_area_override")) {
+      await query("ALTER TABLE users ADD COLUMN delivery_area_override ENUM('nearby','outside') NULL AFTER delivery_notes");
     }
     if (!columns.has("birthday")) {
       await query("ALTER TABLE users ADD COLUMN birthday DATE NULL AFTER location");

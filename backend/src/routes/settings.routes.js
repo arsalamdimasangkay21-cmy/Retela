@@ -216,7 +216,11 @@ router.post("/shipping/quote", requireAuth, asyncHandler(async (req, res) => {
     fulfillmentMethod: input.fulfillmentMethod,
     couponFreeShipping: Boolean(coupon?.freeShipping)
   });
-  res.json(quote);
+  res.json({
+    ...quote,
+    codEligible: quote.shippingZone === "nearby",
+    deliveryAreaOverride: location?.deliveryAreaOverride || null
+  });
 }));
 
 router.use(requireAuth, requireRole("admin"));
