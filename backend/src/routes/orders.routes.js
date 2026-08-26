@@ -225,8 +225,13 @@ router.get("/", requireAuth, requireApproved, asyncHandler(async (req, res) => {
     o.created_at,
 
     MAX(u.username) AS username,
+    MAX(u.display_name) AS display_name,
+    MAX(COALESCE(u.display_name, u.username)) AS customer_name,
+    MAX(u.email) AS email,
+    MAX(u.email) AS customer_email,
     MAX(u.location) AS location,
     MAX(u.phone_number) AS phone_number,
+    MAX(u.phone_number) AS customer_phone,
 
     COUNT(oi.id) AS item_count,
 
@@ -320,7 +325,7 @@ router.get("/:id/items", requireAuth, requireApproved, asyncHandler(async (req, 
        o.meetup_24h_reminder_sent_at, o.meetup_1h_reminder_sent_at, o.subtotal_amount, o.coupon_discount,
        o.sale_discount, o.shipping_fee, o.shipping_zone, o.shipping_distance_km, o.shipping_rule,
        o.coupon_code, o.total_amount, o.checkout_url, o.created_at,
-       u.username, u.location, u.phone_number
+       u.username, u.display_name, COALESCE(u.display_name, u.username) AS customer_name, u.email, u.email AS customer_email, u.location, u.phone_number, u.phone_number AS customer_phone
      FROM orders o
      LEFT JOIN users u ON u.id = o.user_id
      WHERE o.id = :id

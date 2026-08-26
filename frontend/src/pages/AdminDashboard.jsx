@@ -3766,6 +3766,38 @@ function isOrderInDateRange(dateValue, range) {
   return true;
 }
 
+function orderCompleteDeliveryAddress(order) {
+  const address = String(order?.delivery_address || order?.location || "").trim();
+  const structuredParts = [
+    order?.delivery_municipality,
+    order?.delivery_province,
+    order?.delivery_region,
+    order?.delivery_postal_code
+  ].map((value) => String(value || "").trim()).filter(Boolean);
+  if (!address) return structuredParts.join(", ") || "Not provided";
+  const normalizedAddress = address.toLowerCase();
+  const missingParts = structuredParts.filter((part) => !normalizedAddress.includes(part.toLowerCase()));
+  return [address, ...missingParts].join(", ");
+}
+
+function orderCustomerPhone(order) {
+  return String(order?.delivery_phone || order?.customer_phone || order?.customerPhone || order?.phone_number || order?.phone || "").trim();
+}
+
+function orderPaymentStatusLabel(order) {
+  const method = String(order?.payment_method || "").trim().toLowerCase();
+  const status = String(order?.payment_status || "").trim().toLowerCase();
+  if ((method === "cod" || method === "cash" || method === "cash_on_delivery") && (status === "awaiting_payment" || status === "unpaid" || status === "pending" || !status)) {
+    return "Pending Collection";
+  }
+  return paymentStatusLabel(status);
+}
+
+function orderPaymentMethodLabel(order) {
+  const method = String(order?.payment_method || "").trim().toLowerCase();
+  return method === "cod" || method === "cash" || method === "cash_on_delivery" ? "Cash on Delivery" : paymentLabel(method);
+}
+
 function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTrackingNumber, saveTracking, updateOrder, onStatusChanged, onMeetingPlaceSaved, onMessageCustomer, onClose }) {
   const source = selectedOrder?.order;
   const [meetingPlaceDraft, setMeetingPlaceDraft] = useState("");
@@ -3774,6 +3806,21 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
   const [meetingPlaceSaving, setMeetingPlaceSaving] = useState(false);
   const [meetingPlaceError, setMeetingPlaceError] = useState("");
   const [deliverySafetyPolicy, setDeliverySafetyPolicy] = useState(defaultDeliverySafetyPolicy);
+  const customerPhone = orderCustomerPhone(source);
+  const customerEmail = String(source?.customer_email || source?.customerEmail || source?.email || "").trim();
+  const customerName = String(source?.customer_name || source?.display_name || source?.username || "Walk-in Customer").trim() || "Walk-in Customer";
+  const completeDeliveryAddress = orderCompleteDeliveryAddress(source);
+  const hasMeetupData = Boolean(
+    source?.meeting_place
+      || source?.meetup_date
+      || source?.meetup_time
+      || (source?.meetup_confirmation_status && source.meetup_confirmation_status !== "pending")
+      || source?.meetup_24h_reminder_sent_at
+      || source?.meetup_1h_reminder_sent_at
+  );
+  const showMeetupDetails = Boolean(source?.meetup_eligible || hasMeetupData);
+  const meetupConfirmation = String(source?.meetup_confirmation_status || "pending").toLowerCase();
+  const phoneHref = customerPhone ? customerPhone.replace(/[^\d+]/g, "") : "";
 
   useEffect(() => {
     setMeetingPlaceDraft(source?.meeting_place || "");
@@ -3838,16 +3885,37 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
                 <div>
                   <p className="text-xs font-bold uppercase tracking-[0.18em] text-emerald-700">{source.order_channel === "pos" ? "POS Transaction" : "Customer Order"}</p>
                   <h3 id="admin-order-details-title" className="mt-2 font-display text-2xl font-bold text-[#111827]">Order #{source.id}</h3>
-                  <p className="mt-1 text-sm font-medium text-slate-500">{source.username || "Walk-in Customer"} | {new Date(source.created_at).toLocaleString()}</p>
+                  <p className="mt-1 text-sm font-medium text-slate-500">{customerName} | {new Date(source.created_at).toLocaleString()}</p>
                 </div>
                 <span className={`rounded-full px-3 py-2 text-xs font-bold ${orderBadgeClass(displayFulfillmentStatus(source))}`}>{orderStatusLabel(displayFulfillmentStatus(source))}</span>
               </div>
               <div className="retela-modal-body grid gap-4">
-              <div className="grid gap-3 sm:grid-cols-3">
+              <div className="grid gap-3 sm:grid-cols-4">
                 <OrderSummaryCard label="Total" value={`PHP ${source.total_amount}`} />
                 <OrderSummaryCard label="Items" value={selectedOrder.items.length} />
-                <OrderSummaryCard label="Payment" value={`${paymentLabel(source.payment_method)} · ${paymentStatusLabel(source.payment_status)}`} />
+                <OrderSummaryCard label="Payment Status" value={orderPaymentStatusLabel(source)} />
+                <OrderSummaryCard label="Payment" value={orderPaymentMethodLabel(source)} />
               </div>
+              <section className="admin-customer-details-card" aria-labelledby="admin-customer-details-title">
+                <div className="admin-order-section-heading">
+                  <div>
+                    <p className="text-xs font-bold uppercase tracking-[0.16em] text-emerald-700">Customer Details</p>
+                    <h4 id="admin-customer-details-title">Contact and delivery information</h4>
+                  </div>
+                </div>
+                <div className="admin-customer-details-grid">
+                  <OrderInfoItem label="Name" value={customerName} />
+                  <div className="order-mobile-field">
+                    <span>Phone Number</span>
+                    {customerPhone && phoneHref ? <a href={`tel:${phoneHref}`} className="admin-customer-contact-link">{customerPhone}</a> : <strong>Not provided</strong>}
+                  </div>
+                  <div className="order-mobile-field">
+                    <span>Email</span>
+                    {customerEmail ? <a href={`mailto:${customerEmail}`} className="admin-customer-contact-link break-all">{customerEmail}</a> : <strong>Not provided</strong>}
+                  </div>
+                  <OrderInfoItem label="Delivery Address" value={completeDeliveryAddress} />
+                </div>
+              </section>
               <div className="rounded-2xl border border-[#dfe9e3] bg-[#f8faf9] p-4">
                 <span className="block text-xs font-bold uppercase tracking-[0.16em] text-slate-500">Tracking Number</span>
                 <div className="mt-2 flex flex-col gap-2 sm:flex-row">
@@ -3856,10 +3924,10 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
                 </div>
               </div>
               {source.fulfillment_method === "delivery" ? <OrderDeliveryInfo order={source} title="Delivery Location" mapLabel="View Delivery Route" routeEnabled /> : null}
-              {source.meetup_eligible ? <section className="admin-meeting-place-card">
+              {showMeetupDetails ? <section className="admin-meeting-place-card">
                 <div>
-                  <p className="text-xs font-bold uppercase tracking-[0.16em] text-emerald-700">Meeting Place</p>
-                  <h4 className="mt-1 font-display text-lg font-bold text-[#111827]">Admin-selected meetup location</h4>
+                  <p className="text-xs font-bold uppercase tracking-[0.16em] text-emerald-700">Meetup Details</p>
+                  <h4 className="mt-1 font-display text-lg font-bold text-[#111827]">Admin-selected meeting place and schedule</h4>
                 </div>
                 <label className="grid gap-1 text-sm font-bold text-slate-700">
                   <span>Meeting Place</span>
@@ -3889,15 +3957,15 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
                   </button>
                   {source.meeting_place || source.meetup_date || source.meetup_time ? <span className="break-words text-xs font-semibold text-slate-500">Saved: {source.meeting_place || "No meeting place"}{source.meetup_date ? ` · ${formatMeetupDate(source.meetup_date)}` : ""}{source.meetup_time ? ` · ${formatMeetupTime(source.meetup_time)}` : ""}</span> : <span className="text-xs font-semibold text-slate-500">Meeting place and meetup schedule will be provided by the shop.</span>}
                 </div>
-                {source.meeting_place || source.meetup_date || source.meetup_time ? <div className="retela-admin-meetup-response">
+                <div className="retela-admin-meetup-response">
                   <p className="text-xs font-bold uppercase tracking-[0.16em] text-emerald-700">Customer Confirmation</p>
-                  <p className="mt-1 text-sm font-bold text-slate-700">{source.meetup_confirmation_status === "agreed" ? "✓ Customer agreed" : source.meetup_confirmation_status === "disagreed" ? "Customer disagreed" : "Waiting for customer response"}</p>
+                  <p className="mt-1 text-sm font-bold text-slate-700">{meetupConfirmation === "agreed" ? "✓ Agreed" : meetupConfirmation === "disagreed" ? "Disagreed" : "Waiting for customer response"}</p>
                   {source.meetup_customer_note ? <p className="mt-1 break-words text-sm text-slate-600">Customer note: {source.meetup_customer_note}</p> : null}
-                  {source.meetup_confirmation_status === "agreed" ? <div className="mt-2 grid gap-1 text-xs font-semibold text-slate-600 sm:grid-cols-2">
+                  {meetupConfirmation === "agreed" ? <div className="mt-2 grid gap-1 text-xs font-semibold text-slate-600 sm:grid-cols-2">
                     <span>24-hour reminder: {source.meetup_24h_reminder_sent_at ? `Sent ${new Date(source.meetup_24h_reminder_sent_at).toLocaleString()}` : "Scheduled"}</span>
                     <span>1-hour reminder: {source.meetup_1h_reminder_sent_at ? `Sent ${new Date(source.meetup_1h_reminder_sent_at).toLocaleString()}` : "Scheduled"}</span>
                   </div> : null}
-                </div> : null}
+                </div>
                 {meetingPlaceError ? <p className="text-xs font-bold text-rose-600">{meetingPlaceError}</p> : null}
               </section> : null}
               <section className="admin-delivery-safety-card">
