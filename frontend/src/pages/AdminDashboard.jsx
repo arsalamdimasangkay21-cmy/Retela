@@ -4868,29 +4868,50 @@ function AdminFeedback({ reviews }) {
         )) : <Card className="feedback-empty-card md:col-span-2 xl:col-span-3"><EmptyState title="No customer feedback yet" subtitle="Feedback from completed orders will appear here." /></Card>}
       </div>
       {selectedReview ? createPortal(
-        <div className="fixed inset-0 z-[230] grid place-items-center bg-black/70 p-4 backdrop-blur-md" role="dialog" aria-modal="true" aria-label="Feedback details" onMouseDown={(event) => { if (event.target === event.currentTarget) setSelectedReview(null); }}>
-          <Card className="max-h-[min(760px,calc(100vh-2rem))] w-full max-w-2xl overflow-y-auto border-white/15 bg-[#101d17] p-5 shadow-2xl sm:p-7">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <p className="text-xs font-bold uppercase tracking-[0.18em] text-neonbrand">Feedback Details</p>
-                <h2 className="mt-2 font-display text-2xl font-bold text-white">{selectedReview.username || "Customer feedback"}</h2>
+        <div className="admin-feedback-details-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setSelectedReview(null); }}>
+          <section className="admin-feedback-details-modal" role="dialog" aria-modal="true" aria-labelledby="admin-feedback-details-title">
+            <header className="admin-feedback-details-header">
+              <div className="min-w-0">
+                <p className="admin-feedback-details-eyebrow">Feedback Details</p>
+                <h2 id="admin-feedback-details-title">{selectedReview.username || selectedReview.customer_name || "Customer feedback"}</h2>
+                <p className="admin-feedback-details-subtitle">
+                  {selectedReview.order_number || (selectedReview.order_id ? `Order #${selectedReview.order_id}` : "Order reference not provided")}
+                  {selectedReview.created_at ? ` · ${new Date(selectedReview.created_at).toLocaleString()}` : ""}
+                </p>
               </div>
-              <button type="button" onClick={() => setSelectedReview(null)} className="grid h-11 w-11 shrink-0 place-items-center rounded-xl border border-white/15 bg-white/[0.06] text-white/80 transition hover:border-neonbrand/40 hover:text-neonbrand" aria-label="Close feedback details"><X size={19} /></button>
+              <button type="button" onClick={() => setSelectedReview(null)} className="admin-feedback-details-close" aria-label="Close feedback details"><X size={19} /></button>
+            </header>
+            <div className="admin-feedback-details-body">
+              {Object.keys(selectedReview || {}).length ? (
+                <>
+                  <div className="admin-feedback-summary-grid">
+                    <FeedbackDetail label="Order Reference" value={selectedReview.order_number || (selectedReview.order_id ? `#${selectedReview.order_id}` : "Not provided")} />
+                    <FeedbackDetail label="Rating" value={<span className="admin-feedback-rating-value"><Star size={16} fill="currentColor" /> {selectedReview.rating || 0}/5</span>} />
+                    <FeedbackDetail label="Category" value={selectedReview.category || "Not provided"} />
+                    <FeedbackDetail label="Experience Type" value={selectedReview.experience_type || selectedReview.feedback_type || selectedReview.delivery_type || selectedReview.fulfillment_method || "Not provided"} />
+                    <FeedbackDetail label="Submitted" value={selectedReview.created_at ? new Date(selectedReview.created_at).toLocaleString() : "Not provided"} />
+                    <FeedbackDetail label="Apparel" value={selectedReview.order_products || selectedReview.product_name || "Not provided"} />
+                    <FeedbackDetail label="Amount" value={selectedReview.amount_paid != null ? `PHP ${Number(selectedReview.amount_paid).toLocaleString()}` : "Not provided"} />
+                  </div>
+                  <section className="admin-feedback-comment-section" aria-labelledby="admin-feedback-comment-title">
+                    <h3 id="admin-feedback-comment-title">Comment</h3>
+                    <p>{selectedReview.comment || "No comment provided."}</p>
+                  </section>
+                  <section className="admin-feedback-image-section" aria-labelledby="admin-feedback-image-title">
+                    <h3 id="admin-feedback-image-title">Uploaded Image</h3>
+                    {selectedReview.image_url ? (
+                      <a href={assetUrl(selectedReview.image_url)} target="_blank" rel="noreferrer" className="admin-feedback-image-link">
+                        <img src={assetUrl(selectedReview.image_url)} alt="Customer feedback attachment" />
+                      </a>
+                    ) : <p className="admin-feedback-no-image">No image uploaded</p>}
+                  </section>
+                </>
+              ) : <p className="admin-feedback-details-empty">No feedback details available.</p>}
             </div>
-            <div className="mt-5 grid gap-3 sm:grid-cols-2">
-              <FeedbackDetail label="Order" value={selectedReview.order_number || (selectedReview.order_id ? `#${selectedReview.order_id}` : "N/A")} />
-              <FeedbackDetail label="Rating" value={`${selectedReview.rating || 0}/5`} />
-              <FeedbackDetail label="Category" value={selectedReview.category || "Overall Experience"} />
-              <FeedbackDetail label="Submitted" value={selectedReview.created_at ? new Date(selectedReview.created_at).toLocaleString() : "Unknown"} />
-              <FeedbackDetail label="Experience" value={selectedReview.order_products || selectedReview.product_name || "Order feedback"} />
-              <FeedbackDetail label="Amount" value={selectedReview.amount_paid != null ? `PHP ${Number(selectedReview.amount_paid).toLocaleString()}` : "Not provided"} />
-            </div>
-            <div className="mt-5 rounded-2xl border border-white/10 bg-white/[0.05] p-4">
-              <p className="text-xs font-bold uppercase tracking-[0.16em] text-neonbrand/80">Comment</p>
-              <p className="mt-2 whitespace-pre-wrap text-sm leading-7 text-white/80">{selectedReview.comment || "No comment provided."}</p>
-            </div>
-            {selectedReview.image_url ? <img src={assetUrl(selectedReview.image_url)} className="mt-5 max-h-[360px] w-full rounded-2xl object-contain" alt="Customer feedback attachment" /> : null}
-          </Card>
+            <footer className="admin-feedback-details-footer">
+              <button type="button" onClick={() => setSelectedReview(null)} className="admin-feedback-details-footer-button">Close</button>
+            </footer>
+          </section>
         </div>,
         document.body
       ) : null}
@@ -4899,7 +4920,7 @@ function AdminFeedback({ reviews }) {
 }
 
 function FeedbackDetail({ label, value }) {
-  return <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-3"><p className="text-[11px] font-bold uppercase tracking-[0.15em] text-white/45">{label}</p><p className="mt-1 break-words text-sm font-semibold text-white">{value}</p></div>;
+  return <div className="admin-feedback-detail"><p>{label}</p><strong>{value || "Not provided"}</strong></div>;
 }
 
 function AdminReturns({ rows, decideReturn }) {
