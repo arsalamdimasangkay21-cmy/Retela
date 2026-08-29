@@ -5,7 +5,7 @@ import { Bar, Doughnut, Line, Pie } from "react-chartjs-2";
 import { Chart as ChartJS, ArcElement, BarElement, CategoryScale, Filler, LinearScale, LineElement, PointElement, Tooltip, Legend } from "chart.js";
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip as RechartsTooltip, XAxis, YAxis } from "recharts";
 import { Activity, Archive, Barcode, Bot, Camera, Check, CheckCircle2, ChevronLeft, ChevronRight, Clock3, Download, Edit3, Eye, FileSpreadsheet, Loader2, MapPin, Megaphone, MessageSquare, PackageCheck, PackagePlus, Plus, Printer, ReceiptText, RotateCcw, Save, Search, Send, Shirt, ShoppingBag, SlidersHorizontal, Sparkles, Star, Tags, Trash2, TrendingUp, Upload, UserRound, WalletCards, X, Zap } from "lucide-react";
-import { api, API_URL, cachedGet, clearGetCache, getApiErrorMessage } from "../api/client";
+import { api, API_URL, cachedGet, clearGetCache, getApiErrorMessage, getStoredAuthToken } from "../api/client";
 import JsBarcode from "jsbarcode";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -631,15 +631,16 @@ export default function AdminDashboard({ active, onChange }) {
     if (busyAction === actionKey || orderRequestGuardsRef.current.has(actionKey)) return;
     orderRequestGuardsRef.current.add(actionKey);
     setBusyAction(actionKey);
-    const requestPath = status === "rejected"
-      ? `/orders/${orderId}/reject`
-      : `/orders/${orderId}/status`;
-    const requestBody = status === "rejected"
-      ? { reason: options.reason || paymentFailedRejectionReason }
-      : { status, ...(options.reason ? { reason: options.reason } : {}) };
+    const requestPath = `/orders/${orderId}/status`;
+    const requestBody = { status, ...(options.reason ? { reason: options.reason } : {}) };
     const controller = new AbortController();
     const timeoutId = window.setTimeout(() => controller.abort(), orderStatusRequestTimeoutMs);
     try {
+      if (!getStoredAuthToken()) {
+        const authError = new Error("Authentication required. Please sign in again.");
+        authError.code = "AUTH_TOKEN_MISSING";
+        throw authError;
+      }
       const response = await api.patch(
         requestPath,
         requestBody,
@@ -690,6 +691,10 @@ export default function AdminDashboard({ active, onChange }) {
           responseStatus: error?.response?.status || null,
           responseBody: error?.response?.data || null,
           requestUrl: `${API_URL}${requestPath}`,
+          errorConfigUrl: error?.config?.url || null,
+          errorResponseStatus: error?.response?.status || null,
+          errorResponseData: error?.response?.data || null,
+          errorMessage: error?.message || null,
           message: error?.message
         });
       }

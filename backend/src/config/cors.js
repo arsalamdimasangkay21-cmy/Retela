@@ -1,6 +1,7 @@
 const productionOrigins = [
   "https://www.retela.shop",
-  "https://retela.shop"
+  "https://retela.shop",
+  "https://retela.vercel.app"
 ];
 
 const developmentOrigins = [
@@ -27,11 +28,14 @@ function configuredOrigins() {
   const frontendOrigins = splitOrigins(process.env.FRONTEND_URL);
   const clientOrigins = splitOrigins(process.env.CLIENT_URL);
   const corsOrigins = splitOrigins(process.env.CORS_ORIGIN);
+  const vercelOrigins = splitOrigins(process.env.VERCEL_FRONTEND_URL || process.env.VERCEL_PRODUCTION_URL || process.env.VERCEL_URL)
+    .map((origin) => /^https?:\/\//i.test(origin.trim()) ? origin : `https://${origin}`);
 
   const envOrigins = [
     ...frontendOrigins,
     ...clientOrigins,
-    ...corsOrigins
+    ...corsOrigins,
+    ...vercelOrigins
   ];
 
   const allOrigins = [
@@ -58,6 +62,10 @@ function isLocalhostOrigin(origin) {
   );
 }
 
+function isVercelOrigin(origin) {
+  return /^https:\/\/[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.vercel\.app$/i.test(origin);
+}
+
 export function isAllowedOrigin(origin) {
   // Allow health checks, Postman, curl, and server-to-server requests.
   if (!origin) {
@@ -77,7 +85,7 @@ export function isAllowedOrigin(origin) {
     process.env.NODE_ENV !== "production" &&
     isLocalhostOrigin(normalized);
 
-  return isConfigured || isDevelopmentLocalhost;
+  return isConfigured || isDevelopmentLocalhost || isVercelOrigin(normalized);
 }
 
 export function corsOrigin(origin, callback) {
@@ -105,6 +113,7 @@ export const corsOptions = {
   allowedHeaders: [
     "Content-Type",
     "Authorization",
+    "Accept",
     "X-Requested-With"
   ],
   exposedHeaders: [],

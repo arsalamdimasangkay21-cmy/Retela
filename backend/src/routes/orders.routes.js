@@ -1213,6 +1213,13 @@ router.patch("/:id/status", requireAuth, requireRole("admin"), asyncHandler(asyn
   const currentStatus = orderStatusForStorage(order.status);
   const isCod = isCodPaymentMethod(order.payment_method ?? order.paymentMethod);
   const hasFailedOnlinePayment = orderHasFailedOnlinePayment(order);
+  console.info("ORDER STATUS PATCH RECEIVED", {
+    orderId: Number(req.params.id),
+    adminId: Number(req.user?.id) || null,
+    currentOrderStatus: currentStatus,
+    paymentStatus: order.payment_status ?? order.paymentStatus ?? null,
+    requestedStatus: status
+  });
   if (status === "rejected") {
     const rejectionReason = input.reason || paymentFailedRejectionReason;
     console.info("REJECT REQUEST RECEIVED", {

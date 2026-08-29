@@ -8,9 +8,34 @@ function socketUrlFromApiUrl(apiUrl) {
   return stripTrailingSlash(apiUrl).replace(/\/api$/, "");
 }
 
+const productionBackendUrl = "https://api.retela.shop";
+
+export function getStoredAuthToken() {
+  const token = String(localStorage.getItem("retela_token") || "").trim();
+  if (!token || ["undefined", "null"].includes(token.toLowerCase())) return "";
+  const parts = token.split(".");
+  if (parts.length !== 3) return "";
+  try {
+    const encodedPayload = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    const payload = JSON.parse(atob(encodedPayload.padEnd(Math.ceil(encodedPayload.length / 4) * 4, "=")));
+    if (payload.exp && Number(payload.exp) * 1000 <= Date.now()) return "";
+  } catch {
+    return "";
+  }
+  return token;
+}
+
 function normalizeApiUrl(value) {
-  const fallbackApiUrl = import.meta.env.PROD ? "https://api.retela.shop" : "http://localhost:5000";
-  const raw = stripTrailingSlash(value || fallbackApiUrl);
+  const fallbackApiUrl = import.meta.env.PROD ? productionBackendUrl : "http://localhost:5000";
+  const configuredUrl = String(value || "").trim();
+  let raw = stripTrailingSlash(configuredUrl || fallbackApiUrl);
+  try {
+    const parsed = new URL(raw);
+    if (import.meta.env.PROD && /^(localhost|127\.0\.0\.1)$/i.test(parsed.hostname)) raw = fallbackApiUrl;
+    if (import.meta.env.PROD && /(?:^|\.)onrender\.com$/i.test(parsed.hostname)) raw = productionBackendUrl;
+  } catch {
+    raw = fallbackApiUrl;
+  }
   return `${raw.replace(/(\/api)+$/, "")}/api`;
 }
 
@@ -22,7 +47,8 @@ export const api = axios.create({
   timeout: 20000,
   withCredentials: true,
   headers: {
-    "Content-Type": "application/json"
+    "Content-Type": "application/json",
+    Accept: "application/json"
   }
 });
 
@@ -112,6 +138,7 @@ export function cachedGet(url, config = {}, options = {}) {
 
 export function getApiErrorMessage(error, fallback = "Something went wrong. Please try again.") {
   if (error?.response?.data?.message) return error.response.data.message;
+  if (error?.code === "AUTH_TOKEN_MISSING") return error.message;
   if (error?.response?.status === 400) return "Invalid details. Please check your input and try again.";
   if (error?.response?.status === 401) return "Invalid username or password.";
   if (error?.response?.status === 404) return "Record not found.";
@@ -122,8 +149,17 @@ export function getApiErrorMessage(error, fallback = "Something went wrong. Plea
 }
 
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem("retela_token");
-  if (token) config.headers.Authorization = `Bearer ${token}`;
+  const token = getStoredAuthToken();
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  if (config.method?.toLowerCase() === "patch" && /^\/orders\/\d+\/status$/.test(config.url || "")) {
+    console.info("[api] order status request", {
+      method: config.method.toUpperCase(),
+      url: api.getUri(config),
+      hasAuthorization: Boolean(config.headers.Authorization)
+    });
+  }
   if (typeof FormData !== "undefined" && config.data instanceof FormData) {
     if (typeof config.headers?.delete === "function") {
       config.headers.delete("Content-Type");
