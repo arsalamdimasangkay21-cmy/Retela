@@ -13,15 +13,29 @@ const socketOptions = {
   reconnectionDelay: 1500,
   reconnectionDelayMax: 8000,
   randomizationFactor: 0.5,
-  timeout: 12000,
+  // Socket connectivity is optional; REST actions must remain usable while it reconnects.
+  timeout: 5000,
   autoConnect: false
 };
 
 function handleConnectError(error) {
-  console.error("[socket] connect_error", {
+  console.warn("[socket] connect_error (REST actions remain available)", {
     message: error?.message || "Socket connection failed",
     description: error?.description || null
   });
+}
+
+function connectSocketNonBlocking(instance) {
+  globalThis.setTimeout(() => {
+    if (!consumers || instance !== socket || instance.connected || instance.active) return;
+    try {
+      instance.connect();
+    } catch (error) {
+      console.warn("[socket] connect failed (REST actions remain available)", {
+        message: error?.message || "Socket connection failed"
+      });
+    }
+  }, 0);
 }
 
 function handleConnect() {
@@ -75,7 +89,7 @@ export function acquireSocket(token) {
 
   consumers += 1;
   if (!socket.connected && !socket.active) {
-    socket.connect();
+    connectSocketNonBlocking(socket);
   }
   return socket;
 }

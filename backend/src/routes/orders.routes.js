@@ -32,7 +32,7 @@ const allowedAdminStatusTransitions = {
   completed: new Set([]),
   rejected: new Set([])
 };
-const failedOnlinePaymentStatuses = new Set(["failed", "paymentfailed", "unpaid", "cancelled", "canceled", "expired"]);
+const failedOnlinePaymentStatuses = new Set(["failed", "payment_failed", "paymentfailed", "unpaid", "cancelled", "canceled", "expired"]);
 const failedOnlinePaymentStatusSql = "'failed','paymentfailed','unpaid','cancelled','canceled','expired'";
 const codPaymentMethodSql = "'cod','cash','cashondelivery','cashupondelivery','payondelivery','paymentondelivery'";
 const paymentFailedRejectionReason = "Payment failed or could not be verified.";
@@ -75,23 +75,22 @@ function isCodPaymentMethod(value) {
     || (normalized.includes("cash") && normalized.includes("delivery"));
 }
 
-function compactPaymentStatus(value) {
-  return String(value || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
-}
-
 function isFailedOnlinePaymentStatus(value) {
-  return failedOnlinePaymentStatuses.has(compactPaymentStatus(value));
+  return failedOnlinePaymentStatuses.has(normalizeOrderStatus(value));
 }
 
 function orderHasFailedOnlinePayment(order) {
-  return Boolean(order && !isCodPaymentMethod(order.payment_method ?? order.paymentMethod) && isFailedOnlinePaymentStatus(order.payment_status ?? order.paymentStatus));
+  const paymentStatus = normalizeOrderStatus(order?.payment_status ?? order?.paymentStatus);
+  return Boolean(order && !isCodPaymentMethod(order.payment_method ?? order.paymentMethod) && isFailedOnlinePaymentStatus(paymentStatus));
 }
 
 function isPaymentFailedOrder(order) {
-  return Boolean(order && !isCodPaymentMethod(order.payment_method ?? order.paymentMethod) && (
-    isFailedOnlinePaymentStatus(order.payment_status ?? order.paymentStatus)
-    || normalizeOrderStatus(order.status) === "payment_failed"
-  ));
+  if (!order || isCodPaymentMethod(order.payment_method ?? order.paymentMethod)) return false;
+  const currentStatus = normalizeOrderStatus(order.status);
+  const paymentStatus = normalizeOrderStatus(order.payment_status ?? order.paymentStatus);
+  const paymentFailure = failedOnlinePaymentStatuses.has(paymentStatus);
+  const cancelledPaymentFailure = currentStatus === "cancelled" && paymentFailure;
+  return currentStatus === "payment_failed" || cancelledPaymentFailure;
 }
 
 function compactSql(columnSql) {
@@ -1008,7 +1007,7 @@ async function rejectPaymentFailedOrder(orderId, reason = paymentFailedRejection
        SET status = 'rejected',
            payment_status = 'failed',
            rejection_reason = ?,
-           rejected_at = COALESCE(rejected_at, NOW()),
+           rejected_at = NOW(),
            inventory_deducted_at = NULL,
            checkout_url = NULL,
            checkout_session_id = NULL,
@@ -1202,37 +1201,42 @@ router.patch("/:id/reject", requireAuth, requireRole("admin"), asyncHandler(asyn
 
 router.patch("/:id/status", requireAuth, requireRole("admin"), asyncHandler(async (req, res) => {
   await ensureOrderColumns();
+  await ensureProductInventoryColumns();
   const input = z.object({
     status: z.string().trim().min(1),
     reason: z.string().trim().max(255).optional()
   }).parse(req.body);
+  const orderId = Number(req.params.id);
+  if (!Number.isInteger(orderId) || orderId <= 0) throw new HttpError(400, "A valid order ID is required");
   const status = orderStatusForStorage(input.status);
   if (!statuses.includes(status)) throw new HttpError(400, "Invalid order status.");
-  const order = await loadDecoratedOrder(req.params.id, { role: "admin" });
+  const order = await loadDecoratedOrder(orderId, { role: "admin" });
   if (!order) throw new HttpError(404, "Order not found");
   const currentStatus = orderStatusForStorage(order.status);
   const isCod = isCodPaymentMethod(order.payment_method ?? order.paymentMethod);
+  const paymentStatus = normalizeOrderStatus(order.payment_status ?? order.paymentStatus);
   const hasFailedOnlinePayment = orderHasFailedOnlinePayment(order);
   console.info("ORDER STATUS PATCH RECEIVED", {
-    orderId: Number(req.params.id),
+    orderId,
     adminId: Number(req.user?.id) || null,
     currentOrderStatus: currentStatus,
-    paymentStatus: order.payment_status ?? order.paymentStatus ?? null,
+    paymentMethod: order.payment_method ?? order.paymentMethod ?? null,
+    paymentStatus,
     requestedStatus: status
   });
   if (status === "rejected") {
     const rejectionReason = input.reason || paymentFailedRejectionReason;
     console.info("REJECT REQUEST RECEIVED", {
-      orderId: Number(req.params.id),
+      orderId,
       currentStatus,
       paymentMethod: order.payment_method ?? order.paymentMethod ?? null,
-      paymentStatus: order.payment_status ?? order.paymentStatus ?? null,
+      paymentStatus,
       requestedStatus: status
     });
-    const result = await rejectPaymentFailedOrder(req.params.id, rejectionReason);
-    const updatedOrder = await loadDecoratedOrder(req.params.id, { role: "admin" });
+    const result = await rejectPaymentFailedOrder(orderId, rejectionReason);
+    const updatedOrder = await loadDecoratedOrder(orderId, { role: "admin" });
     const updatePayload = updatedOrder || {
-      id: Number(req.params.id),
+      id: orderId,
       status: "rejected",
       payment_status: "failed",
       rejection_reason: rejectionReason,
@@ -1249,8 +1253,8 @@ router.patch("/:id/status", requireAuth, requireRole("admin"), asyncHandler(asyn
       req.app.get("io")?.to(`user:${result.userId}`).emit("notification:new", {
         type: "order",
         title: "Order rejected",
-        body: paymentFailedCustomerNotice(req.params.id),
-        order_id: Number(req.params.id),
+        body: paymentFailedCustomerNotice(orderId),
+        order_id: orderId,
         created_at: new Date().toISOString()
       });
     }
@@ -1265,7 +1269,7 @@ router.patch("/:id/status", requireAuth, requireRole("admin"), asyncHandler(asyn
   if (currentStatus !== status && !allowedAdminStatusTransitions[currentStatus]?.has(status)) {
     throw new HttpError(409, "This order status cannot be changed that way.");
   }
-  if (status === "approved" && !isCod && order.payment_status !== "paid") {
+  if (status === "approved" && !isCod && paymentStatus !== "paid") {
     throw new HttpError(409, "This online order must be paid before it can be accepted.");
   }
   if (status === "ready") {
@@ -1280,12 +1284,12 @@ router.patch("/:id/status", requireAuth, requireRole("admin"), asyncHandler(asyn
     }
   }
   const inventoryResult = status === "completed" && currentStatus !== "completed"
-    ? await markOrderCompletedAndDeductInventory(req.params.id)
+    ? await markOrderCompletedAndDeductInventory(orderId)
     : { inventoryUpdates: [], outOfStockProducts: [] };
   if (status !== "completed" || currentStatus === "completed") {
-    await query("UPDATE orders SET status = :status WHERE id = :id", { id: req.params.id, status });
+    await query("UPDATE orders SET status = :status WHERE id = :id", { id: orderId, status });
   }
-  const updatedOrder = await loadDecoratedOrder(req.params.id, { role: "admin" });
+  const updatedOrder = await loadDecoratedOrder(orderId, { role: "admin" });
   const title = status === "ready" ? "Out for Delivery" : status === "completed" ? "Order received" : "Order update";
   const body = status === "ready"
     ? "Your order is out for delivery."
@@ -1299,7 +1303,7 @@ router.patch("/:id/status", requireAuth, requireRole("admin"), asyncHandler(asyn
   if (status === "completed" && currentStatus !== "completed") {
     await query(
       "INSERT INTO notifications (type, title, body) VALUES ('order', 'Sale completed', :body)",
-      { body: `Order #${req.params.id} was received by the customer. Feedback can now be collected.` }
+      { body: `Order #${orderId} was received by the customer. Feedback can now be collected.` }
     );
   }
   for (const product of inventoryResult.outOfStockProducts) {
@@ -1308,7 +1312,7 @@ router.patch("/:id/status", requireAuth, requireRole("admin"), asyncHandler(asyn
       { id: product.id, body: `${product.name || "An apparel item"} is now sold out.` }
     );
   }
-  const updatePayload = updatedOrder || { id: Number(req.params.id), status };
+  const updatePayload = updatedOrder || { id: orderId, status };
   if (order.user_id) req.app.get("io")?.to(`user:${order.user_id}`).emit("order:update", updatePayload);
   req.app.get("io")?.to("admin").emit("order:update", updatePayload);
   inventoryResult.inventoryUpdates.forEach((update) => {
