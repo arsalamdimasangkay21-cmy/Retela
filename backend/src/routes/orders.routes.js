@@ -88,7 +88,10 @@ function orderHasFailedOnlinePayment(order) {
 }
 
 function isPaymentFailedOrder(order) {
-  return orderHasFailedOnlinePayment(order);
+  return Boolean(order && !isCodPaymentMethod(order.payment_method ?? order.paymentMethod) && (
+    isFailedOnlinePaymentStatus(order.payment_status ?? order.paymentStatus)
+    || normalizeOrderStatus(order.status) === "payment_failed"
+  ));
 }
 
 function compactSql(columnSql) {
@@ -986,12 +989,6 @@ async function rejectPaymentFailedOrder(orderId, reason = paymentFailedRejection
     const currentStatus = orderStatusForStorage(order.status);
     const isCod = isCodPaymentMethod(order.payment_method);
     if (currentStatus === "rejected") {
-      const samePaymentFailureReason = !isCod && (
-        String(order.rejection_reason || "").trim() === rejectionReason
-      );
-      if (!samePaymentFailureReason) {
-        throw new HttpError(409, "This order is already rejected.");
-      }
       await conn.commit();
       return { updated: false, userId: order.user_id, inventoryUpdates: [] };
     }
@@ -1038,7 +1035,14 @@ async function rejectPaymentFailedOrder(orderId, reason = paymentFailedRejection
     return { updated: true, userId: order.user_id, inventoryUpdates };
   } catch (error) {
     await rollbackQuietly(conn, "order-payment-failed-reject");
-    throw error;
+    if (error instanceof HttpError) throw error;
+    console.error("[order-payment-failed-reject] transaction failed", {
+      orderId,
+      message: error?.message,
+      code: error?.code,
+      errno: error?.errno
+    });
+    throw new HttpError(500, "Reject order transaction failed. Please try again.");
   } finally {
     conn.release();
   }
@@ -1161,6 +1165,13 @@ router.patch("/:id/status", requireAuth, requireRole("admin"), asyncHandler(asyn
   const hasFailedOnlinePayment = orderHasFailedOnlinePayment(order);
   if (status === "rejected") {
     const rejectionReason = input.reason || paymentFailedRejectionReason;
+    console.info("REJECT REQUEST RECEIVED", {
+      orderId: Number(req.params.id),
+      currentStatus,
+      paymentMethod: order.payment_method ?? order.paymentMethod ?? null,
+      paymentStatus: order.payment_status ?? order.paymentStatus ?? null,
+      requestedStatus: status
+    });
     const result = await rejectPaymentFailedOrder(req.params.id, rejectionReason);
     const updatedOrder = await loadDecoratedOrder(req.params.id, { role: "admin" });
     const updatePayload = updatedOrder || {

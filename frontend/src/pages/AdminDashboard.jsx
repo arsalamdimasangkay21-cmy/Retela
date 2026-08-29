@@ -56,6 +56,9 @@ const chartGlowPlugin = {
   }
 };
 
+const paymentFailedRejectionReason = "Payment failed or could not be verified.";
+const orderStatusRequestTimeoutMs = 15000;
+
 const defaultDeliverySafetyPolicy = "For everyone's safety, customers and delivery personnel should meet only at the confirmed delivery or meeting location shown in the order. Verify the order and customer/delivery identity before handing over or accepting an item. Avoid changing the meetup location through unofficial messages. Keep communication inside RETELA whenever possible. Do not share OTPs, passwords, or sensitive account information. If the location feels unsafe, contact the other party through RETELA and arrange a safer public meeting point before completing the order.";
 
 ChartJS.register(ArcElement, BarElement, CategoryScale, Filler, LinearScale, LineElement, PointElement, Tooltip, Legend, chartGlowPlugin);
@@ -619,22 +622,32 @@ export default function AdminDashboard({ active, onChange }) {
   }
 
   async function updateOrder(id, status, options = {}) {
-    const actionKey = `order-${id}-${status}`;
+    const orderId = Number(id);
+    if (!Number.isInteger(orderId) || orderId <= 0) {
+      showProductToast("Could not reject order because the selected order ID is invalid.", "error", "top-right");
+      return null;
+    }
+    const actionKey = `order-${orderId}-${status}`;
     if (busyAction === actionKey || orderRequestGuardsRef.current.has(actionKey)) return;
     orderRequestGuardsRef.current.add(actionKey);
     setBusyAction(actionKey);
     const requestBody = { status, ...(options.reason ? { reason: options.reason } : {}) };
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), orderStatusRequestTimeoutMs);
     try {
       const response = await api.patch(
-        `/orders/${id}/status`,
+        `/orders/${orderId}/status`,
         requestBody,
-        { headers: { "Idempotency-Key": actionKey } }
+        {
+          headers: { "Idempotency-Key": actionKey },
+          signal: controller.signal
+        }
       );
       const { data } = response;
-      const updatedOrder = data?.order || (data?.id ? data : { id: Number(id), status });
-      if (import.meta.env.DEV) {
+      const updatedOrder = data?.order || (data?.id ? data : { id: orderId, status });
+      if (status === "rejected" || import.meta.env.DEV) {
         console.info("[orders] status update result", {
-          orderId: Number(id),
+          orderId,
           currentStatus: options.currentStatus || null,
           paymentStatus: options.paymentStatus || null,
           requestedStatus: status,
@@ -653,16 +666,19 @@ export default function AdminDashboard({ active, onChange }) {
       });
       showProductToast(
         status === "rejected"
-          ? `Order #${updatedOrder?.id || id} was rejected because payment could not be verified.`
+          ? `Order #${updatedOrder?.id || orderId} was rejected because payment could not be verified.`
           : "Order updated successfully.",
         "success",
         "top-right"
       );
       return { ...data, order: updatedOrder };
     } catch (error) {
-      if (import.meta.env.DEV) {
+      const errorMessage = controller.signal.aborted
+        ? "Reject order request timed out after 15 seconds. Please try again."
+        : getApiErrorMessage(error, "Could not update order.");
+      if (status === "rejected" || import.meta.env.DEV) {
         console.error("[orders] status update failed", {
-          orderId: Number(id),
+          orderId,
           currentStatus: options.currentStatus || null,
           paymentStatus: options.paymentStatus || null,
           requestedStatus: status,
@@ -672,9 +688,10 @@ export default function AdminDashboard({ active, onChange }) {
           message: error?.message
         });
       }
-      showProductToast(getApiErrorMessage(error, "Could not update order."), "error", "top-right");
+      showProductToast(errorMessage, "error", "top-right");
       throw error;
     } finally {
+      window.clearTimeout(timeoutId);
       orderRequestGuardsRef.current.delete(actionKey);
       setBusyAction("");
     }
@@ -4808,22 +4825,23 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
   }, [meetupScrollToken, showMeetupDetails, source?.id]);
 
   async function updateStatus(status, options = {}) {
-    const actionKey = source?.id ? `order-${source.id}-${status}` : "";
-    if (!source?.id || actionStatus || modalActionGuardsRef.current.has(actionKey)) return;
+    const orderId = Number(source?.id);
+    const actionKey = Number.isInteger(orderId) && orderId > 0 ? `order-${orderId}-${status}` : "";
+    if (!actionKey || actionStatus || modalActionGuardsRef.current.has(actionKey)) return;
     if (status === "rejected" && canonicalOrderStatus(source) === "rejected") return;
     modalActionGuardsRef.current.add(actionKey);
     setActionStatus(status);
     try {
-      const data = await updateOrder(source.id, status, {
+      const data = await updateOrder(orderId, status, {
         reason: options.reason,
         currentStatus: source.status,
         paymentStatus: source.payment_status ?? source.paymentStatus ?? null
       });
       if (!data) return;
-      const orderPatch = data?.order || data || { id: source.id, status };
+      const orderPatch = data?.order || data || { id: orderId, status };
       const shouldScrollToMeetup = statusIsAccepted(status);
-      onStatusChanged?.({ id: source.id, status, ...orderPatch }, { scrollToMeetup: shouldScrollToMeetup, skipReload: true });
-      api.get(`/orders/${source.id}/items`)
+      onStatusChanged?.({ id: orderId, status, ...orderPatch }, { scrollToMeetup: shouldScrollToMeetup, skipReload: true });
+      api.get(`/orders/${orderId}/items`)
         .then(({ data: latestOrderDetails }) => {
           onStatusChanged?.(latestOrderDetails, { scrollToMeetup: shouldScrollToMeetup, skipReload: true });
         })
@@ -4850,7 +4868,7 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
   async function confirmPaymentFailedReject(event) {
     event?.preventDefault?.();
     if (!paymentFailed || actionStatus || rejected) return;
-    const result = await updateStatus("rejected", { reason: "Payment failed or could not be verified." });
+    const result = await updateStatus("rejected", { reason: paymentFailedRejectionReason });
     if (result) setRejectConfirmOpen(false);
   }
 
