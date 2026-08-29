@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { Bot, CheckCircle2, ChevronLeft, Loader2, MessageCircle, MoreHorizontal, Search, Send, ToggleLeft, ToggleRight, Trash2, UserRound } from "lucide-react";
 import { api } from "../api/client";
@@ -463,8 +464,7 @@ export default function AdminConversationsPage() {
       <ConfirmDialog
         open={Boolean(removeConfirmConversation)}
         title="Remove this conversation?"
-        message="This will remove the conversation from your list. This action cannot be undone."
-        detail={removeConfirmConversation?.username || removeConfirmConversation?.display_name || (removeConfirmConversation?.customer_id ? `Customer #${removeConfirmConversation.customer_id}` : "")}
+        message="This will remove the selected conversation from your list. The customer account and order records will not be affected."
         confirmLabel="Remove"
         busy={busyAction === "trash"}
         onClose={() => {
@@ -537,20 +537,75 @@ function ConversationListCard({ conversation, active, onClick }) {
 
 function ChatHeader({ selectedConversation, autoReplyEnabled, setAutoReplyEnabled, onBack, onTakeover, onTrash, takeoverBusy, trashBusy }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [menuPosition, setMenuPosition] = useState(null);
   const menuRef = useRef(null);
+  const triggerRef = useRef(null);
+
+  const updateMenuPosition = useCallback(() => {
+    const trigger = triggerRef.current;
+    if (!trigger) return;
+
+    const rect = trigger.getBoundingClientRect();
+    const menu = menuRef.current;
+    const gap = 8;
+    const margin = 8;
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    const menuWidth = menu?.offsetWidth || 150;
+    const menuHeight = menu?.offsetHeight || 48;
+    const spaceBelow = viewportHeight - rect.bottom;
+    const spaceAbove = rect.top;
+    const placement = spaceBelow < menuHeight + gap + margin && spaceAbove >= menuHeight + gap ? "above" : "below";
+    const desiredTop = placement === "above" ? rect.top - menuHeight - gap : rect.bottom + gap;
+    const maxTop = Math.max(margin, viewportHeight - menuHeight - margin);
+    const maxLeft = Math.max(margin, viewportWidth - menuWidth - margin);
+    const nextPosition = {
+      left: Math.round(Math.min(Math.max(margin, rect.right - menuWidth), maxLeft)),
+      top: Math.round(Math.min(Math.max(margin, desiredTop), maxTop)),
+      placement
+    };
+
+    setMenuPosition((current) => {
+      if (current?.left === nextPosition.left && current?.top === nextPosition.top && current?.placement === nextPosition.placement) return current;
+      return nextPosition;
+    });
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!menuOpen) return undefined;
+    updateMenuPosition();
+    const frame = window.requestAnimationFrame(updateMenuPosition);
+    return () => window.cancelAnimationFrame(frame);
+  }, [menuOpen, selectedConversation?.id, updateMenuPosition]);
+
+  useEffect(() => {
+    if (!menuOpen) return undefined;
+    const handleViewportChange = () => updateMenuPosition();
+    window.addEventListener("resize", handleViewportChange);
+    window.addEventListener("scroll", handleViewportChange, true);
+    window.visualViewport?.addEventListener("resize", handleViewportChange);
+    window.visualViewport?.addEventListener("scroll", handleViewportChange);
+    return () => {
+      window.removeEventListener("resize", handleViewportChange);
+      window.removeEventListener("scroll", handleViewportChange, true);
+      window.visualViewport?.removeEventListener("resize", handleViewportChange);
+      window.visualViewport?.removeEventListener("scroll", handleViewportChange);
+    };
+  }, [menuOpen, updateMenuPosition]);
 
   useEffect(() => {
     if (!menuOpen) return undefined;
     const handlePointerDown = (event) => {
-      if (!menuRef.current?.contains(event.target)) setMenuOpen(false);
+      if (menuRef.current?.contains(event.target) || triggerRef.current?.contains(event.target)) return;
+      setMenuOpen(false);
     };
     const handleKeyDown = (event) => {
       if (event.key === "Escape") setMenuOpen(false);
     };
-    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("pointerdown", handlePointerDown);
     window.addEventListener("keydown", handleKeyDown);
     return () => {
-      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("pointerdown", handlePointerDown);
       window.removeEventListener("keydown", handleKeyDown);
     };
   }, [menuOpen]);
@@ -588,31 +643,41 @@ function ChatHeader({ selectedConversation, autoReplyEnabled, setAutoReplyEnable
               {takeoverBusy ? <Loader2 size={17} className="animate-spin" /> : <Bot size={16} />}
               {selectedConversation.admin_takeover ? "Release to AI" : "Take Over Chat"}
             </button>
-            <div className="conversation-actions-menu-wrap" ref={menuRef}>
-              <button type="button" onClick={() => setMenuOpen((value) => !value)} className="conversation-actions-trigger" aria-label="Conversation actions" aria-haspopup="menu" aria-expanded={menuOpen}>
+            <div className="conversation-actions-menu-wrap">
+              <button ref={triggerRef} type="button" onClick={() => setMenuOpen((value) => !value)} className="conversation-actions-trigger" aria-label="Conversation actions" aria-haspopup="menu" aria-expanded={menuOpen}>
                 <MoreHorizontal size={18} />
               </button>
-              <AnimatePresence>
-                {menuOpen ? (
-                  <motion.div
-                    className="conversation-actions-dropdown"
-                    initial={{ opacity: 0, y: -6, scale: 0.96 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    exit={{ opacity: 0, y: -4, scale: 0.96 }}
-                    transition={{ duration: 0.16, ease: "easeOut" }}
-                    role="menu"
-                  >
-                    <button type="button" disabled={trashBusy} onClick={() => { setMenuOpen(false); onTrash?.(); }} className="conversation-actions-remove" role="menuitem">
-                      {trashBusy ? <Loader2 size={15} className="animate-spin" /> : <Trash2 size={15} />}
-                      Remove
-                    </button>
-                  </motion.div>
-                ) : null}
-              </AnimatePresence>
             </div>
           </div>
         ) : null}
       </div>
+      {typeof document !== "undefined" ? createPortal(
+        <AnimatePresence>
+          {menuOpen ? (
+            <motion.div
+              ref={menuRef}
+              className="conversation-actions-dropdown"
+              style={{
+                left: menuPosition?.left ?? 0,
+                top: menuPosition?.top ?? 0,
+                transformOrigin: menuPosition?.placement === "above" ? "bottom right" : "top right",
+                visibility: menuPosition ? "visible" : "hidden"
+              }}
+              initial={{ opacity: 0, y: menuPosition?.placement === "above" ? 6 : -6, scale: 0.96 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: menuPosition?.placement === "above" ? 6 : -6, scale: 0.96 }}
+              transition={{ duration: 0.16, ease: "easeOut" }}
+              role="menu"
+            >
+              <button type="button" disabled={trashBusy} onClick={() => { setMenuOpen(false); onTrash?.(); }} className="conversation-actions-remove" role="menuitem">
+                {trashBusy ? <Loader2 size={15} className="animate-spin" /> : <Trash2 size={15} />}
+                Remove
+              </button>
+            </motion.div>
+          ) : null}
+        </AnimatePresence>,
+        document.body
+      ) : null}
     </div>
   );
 }
