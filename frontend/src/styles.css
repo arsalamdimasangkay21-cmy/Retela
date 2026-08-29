@@ -7776,6 +7776,93 @@ button {
   padding: 12px;
 }
 
+.retela-payment-order-policy-card {
+  display: grid;
+  min-width: 0;
+  gap: 12px;
+  margin-top: 14px;
+  border: 1px solid #bfe7ce;
+  border-radius: 18px;
+  background: #f2fbf5;
+  padding: 14px;
+  color: #17211b;
+}
+
+.retela-payment-order-policy-card.is-compact {
+  padding: 12px;
+}
+
+.retela-payment-policy-icon {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  place-items: center;
+  border: 1px solid #86d8a2;
+  border-radius: 12px;
+  background: #dcfce7;
+  color: #166534;
+}
+
+.retela-payment-policy-eyebrow {
+  color: #166534;
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  line-height: 1.35;
+}
+
+.retela-payment-policy-copy {
+  margin-top: 6px;
+  color: #3f5047;
+  font-size: 0.8rem;
+  font-weight: 600;
+  line-height: 1.55;
+}
+
+.retela-payment-policy-agreement {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  gap: 9px;
+  color: #24362c;
+  font-size: 0.78rem;
+  font-weight: 800;
+  line-height: 1.45;
+}
+
+.retela-payment-policy-agreement input {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  margin-top: 1px;
+  accent-color: #16a34a;
+}
+
+.retela-payment-order-policy-card.is-dark {
+  border-color: rgba(52, 211, 153, 0.28);
+  background: rgba(22, 163, 106, 0.13);
+  color: #f5fff8;
+}
+
+.retela-payment-order-policy-card.is-dark .retela-payment-policy-eyebrow {
+  color: #a7f3c0;
+}
+
+.retela-payment-order-policy-card.is-dark .retela-payment-policy-copy {
+  color: rgba(240, 255, 246, 0.82);
+}
+
+.retela-payment-order-policy-card.is-dark .retela-payment-policy-agreement {
+  color: #f5fff8;
+}
+
+.retela-payment-order-policy-card.is-dark .retela-payment-policy-icon {
+  border-color: rgba(134, 239, 172, 0.46);
+  background: rgba(22, 101, 52, 0.45);
+  color: #bbf7d0;
+}
+
 .retela-delivery-safety-icon {
   display: grid;
   width: 36px;

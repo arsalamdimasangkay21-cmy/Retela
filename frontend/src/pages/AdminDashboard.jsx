@@ -3991,10 +3991,10 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
                 </div>
                 {meetingPlaceError ? <p className="text-xs font-bold text-rose-600">{meetingPlaceError}</p> : null}
               </section> : null}
-              <section className="admin-delivery-safety-card">
-                <p className="text-xs font-bold uppercase tracking-[0.16em] text-emerald-700">Delivery & Meetup Safety</p>
+              {source.meetup_area_eligible ? <section className="admin-delivery-safety-card">
+                <p className="text-xs font-bold uppercase tracking-[0.16em] text-emerald-700">Delivery &amp; Meetup Safety</p>
                 <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-slate-600">{deliverySafetyPolicy}</p>
-              </section>
+              </section> : null}
               <div className="grid gap-3">
                 {selectedOrder.items.map((item) => (
                   <div key={`${item.product_id}-${item.quantity}`} className="flex items-center gap-3 rounded-2xl border border-[#dfe9e3] bg-white p-3 shadow-sm transition hover:border-emerald-200">

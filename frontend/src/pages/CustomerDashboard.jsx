@@ -48,6 +48,8 @@ const defaultReturnShippingFee = 50;
 const customerShopPageSize = 8;
 const defaultCustomerFilters = { search: "", brand: "all", category: "all", size: "all", stock: "all", minPrice: "", maxPrice: "", sortBy: "latest" };
 const defaultDeliverySafetyPolicy = "For everyone's safety, customers and delivery personnel should meet only at the confirmed delivery or meeting location shown in the order. Verify the order and customer/delivery identity before handing over or accepting an item. Avoid changing the meetup location through unofficial messages. Keep communication inside RETELA whenever possible. Do not share OTPs, passwords, or sensitive account information. If the location feels unsafe, contact the other party through RETELA and arrange a safer public meeting point before completing the order.";
+const onlinePaymentOrderPolicy = "To protect both the customer and RETELA, orders using online payment will be reviewed only after successful payment has been verified. Please confirm your selected items, delivery address, contact details, and total amount before completing your payment. Order acceptance is subject to payment verification and product availability. If payment cannot be verified or an item becomes unavailable, RETELA will contact you and provide the appropriate assistance or refund option. Please keep your official payment receipt for reference.";
+const codOrderPolicy = "Cash on Delivery orders are subject to product availability and delivery-area verification. Please prepare the exact payment amount and ensure that someone is available at the confirmed delivery address to receive and pay for the order. RETELA may contact you to verify your order before acceptance. Repeated refusal, failure to receive an order, or providing incorrect delivery information may affect future COD availability.";
 const paymentNumberLabels = {
   gcash: "GCash mobile number",
   debit: "Billing mobile number",
@@ -258,6 +260,7 @@ export default function CustomerDashboard({ active, onChange }) {
   const [paymentMethod, setPaymentMethod] = useState("cod");
   const [paymentDetails, setPaymentDetails] = useState({ gcashNumber: "", debitNumber: "", creditNumber: "", mayaNumber: "" });
   const [paymentError, setPaymentError] = useState("");
+  const [policyAccepted, setPolicyAccepted] = useState(false);
   const [redirectingPayment, setRedirectingPayment] = useState(null);
   const [qrPayment, setQrPayment] = useState(null);
   const [fulfillmentMethod, setFulfillmentMethod] = useState("delivery");
@@ -529,6 +532,7 @@ export default function CustomerDashboard({ active, onChange }) {
       notifyCart("This apparel item is out of stock.", "warning");
       return;
     }
+    setPolicyAccepted(false);
     try {
       const { data } = await api.post("/cart/items", { product_id: product.id, quantity: 1, selected: true });
       clearGetCache("/cart");
@@ -545,6 +549,7 @@ export default function CustomerDashboard({ active, onChange }) {
       notifyCart("This apparel item is out of stock.", "warning");
       return;
     }
+    setPolicyAccepted(false);
     try {
       await api.post("/cart/items", { product_id: product.id, quantity: 1, selected: true });
       await api.patch("/cart/selection", { selected: false });
@@ -560,6 +565,7 @@ export default function CustomerDashboard({ active, onChange }) {
   async function updateCartQuantity(productId, delta) {
     const current = cart.find((item) => Number(item.product_id) === Number(productId));
     if (!current) return;
+    setPolicyAccepted(false);
     const quantity = Math.max(1, Math.min(Number(current.stock || 1), Number(current.quantity || 1) + delta));
     try {
       const { data } = await api.patch(`/cart/items/${productId}`, { quantity });
@@ -572,6 +578,7 @@ export default function CustomerDashboard({ active, onChange }) {
   }
 
   async function removeCartItem(productId) {
+    setPolicyAccepted(false);
     try {
       const { data } = await api.delete(`/cart/items/${productId}`);
       clearGetCache("/cart");
@@ -613,6 +620,7 @@ export default function CustomerDashboard({ active, onChange }) {
   async function toggleCartSelection(productId) {
     const id = Number(productId);
     const selected = !selectedCartIds.includes(id);
+    setPolicyAccepted(false);
     setSelectedCartIds((ids) => selected ? [...ids, id] : ids.filter((value) => value !== id));
     setCouponError("");
     try {
@@ -625,6 +633,7 @@ export default function CustomerDashboard({ active, onChange }) {
   }
 
   async function setAllCartSelected(selected) {
+    setPolicyAccepted(false);
     setSelectedCartIds(selected ? cart.map((item) => Number(item.product_id)) : []);
     setCouponError("");
     try {
@@ -668,6 +677,23 @@ export default function CustomerDashboard({ active, onChange }) {
   else if (quoteZone) effectiveCodEligible = quoteZone === "nearby";
   const codEligible = codEligibilityResolved && effectiveCodEligible;
 
+  // The meetup safety note is only relevant when the saved location is
+  // verified inside the shop municipality and the configured meetup radius.
+  // Keep this separate from COD eligibility because admin delivery overrides
+  // may allow COD without making a location eligible for meetup guidance.
+  const configuredMeetupRadiusKm = Number(shopInfo?.payment?.freeDeliveryRadiusKm);
+  const deliveryDistanceKm = Number(shippingQuote?.distanceKm);
+  const deliverySafetyEligible = Boolean(
+    fulfillmentMethod === "delivery"
+      && shippingQuote?.shippingZone === "nearby"
+      && shopMunicipality
+      && addressMatchesMunicipality(currentDeliveryLocation.municipality || currentDeliveryLocation.address, shopMunicipality)
+      && Number.isFinite(configuredMeetupRadiusKm)
+      && configuredMeetupRadiusKm >= 0
+      && Number.isFinite(deliveryDistanceKm)
+      && deliveryDistanceKm <= configuredMeetupRadiusKm
+  );
+
   useEffect(() => {
     if (codEligibilityResolved && !codEligible && paymentMethod === "cod") {
       setPaymentMethod("qrph");
@@ -675,8 +701,15 @@ export default function CustomerDashboard({ active, onChange }) {
     }
   }, [codEligibilityResolved, codEligible, paymentMethod]);
 
+  useEffect(() => {
+    // Changing the payment method changes the policy text, so require the
+    // customer to acknowledge the newly selected policy again.
+    setPolicyAccepted(false);
+  }, [paymentMethod]);
+
   async function applyCoupon() {
     const code = couponCode.trim();
+    setPolicyAccepted(false);
     setCouponError("");
     setAppliedCoupon(null);
     if (!code) return;
@@ -768,6 +801,10 @@ export default function CustomerDashboard({ active, onChange }) {
 
   async function checkout() {
     if (checkoutInFlightRef.current || checkoutLoading) return;
+    if (!policyAccepted) {
+      notifyCart("Please read and agree to the Payment and Order Confirmation Policy.", "warning");
+      return;
+    }
     const selectedDeliveryLocation = normalizeDeliveryLocation(deliveryLocation);
     if (fulfillmentMethod === "delivery" && !hasDeliveryLocation(selectedDeliveryLocation)) {
       notifyCart("Please set your delivery location before checkout.", "warning");
@@ -829,6 +866,7 @@ export default function CustomerDashboard({ active, onChange }) {
       setCheckoutSummaryOpen(false);
       setAppliedCoupon(null);
       setCouponCode("");
+      setPolicyAccepted(false);
       if (paymentMethod !== "cod") {
         if (paymentMethod === "qrph") {
           const qrResponse = await api.post("/payments/paymongo/qrph/create", { orderId: data.id });
@@ -872,6 +910,10 @@ export default function CustomerDashboard({ active, onChange }) {
     if (!selectedCartItems.length) {
       setCouponError("Please select at least one item.");
       notifyCart("Please select at least one item.", "warning");
+      return;
+    }
+    if (!policyAccepted) {
+      notifyCart("Please read and agree to the Payment and Order Confirmation Policy.", "warning");
       return;
     }
     if (paymentMethod === "cod" && !codEligible) {
@@ -919,6 +961,7 @@ export default function CustomerDashboard({ active, onChange }) {
       setProfileInitial(data);
       setDeliveryLocation(deliveryLocationFromProfile(data));
       setLocationSelectorOpen(false);
+      setPolicyAccepted(false);
       await loadShippingQuote({ method: fulfillmentMethod, coupon: appliedCoupon?.code || "" });
       notifyCart("Delivery location saved.");
       return true;
@@ -1022,6 +1065,9 @@ export default function CustomerDashboard({ active, onChange }) {
           shippingQuoteError={shippingQuoteError}
           retryShippingQuote={() => loadShippingQuote({ method: fulfillmentMethod, coupon: appliedCoupon?.code || "" })}
           deliverySafetyPolicy={deliverySafetyPolicyFromShop(shopInfo)}
+          deliverySafetyEligible={deliverySafetyEligible}
+          policyAccepted={policyAccepted}
+          onPolicyAcceptedChange={setPolicyAccepted}
           onOpenLocationSelector={() => setLocationSelectorOpen(true)}
           codEligible={codEligible}
           shopMunicipality={shopMunicipality}
@@ -1051,6 +1097,9 @@ export default function CustomerDashboard({ active, onChange }) {
             shippingQuoteLoading={shippingQuoteLoading}
             fulfillmentMethod={fulfillmentMethod}
             deliverySafetyPolicy={deliverySafetyPolicyFromShop(shopInfo)}
+            deliverySafetyEligible={deliverySafetyEligible}
+            policyAccepted={policyAccepted}
+            onPolicyAcceptedChange={setPolicyAccepted}
             checkout={checkout}
             checkoutLoading={checkoutLoading}
             onClose={() => setCheckoutSummaryOpen(false)}
@@ -1229,6 +1278,9 @@ function CartPage({
   shippingQuoteError,
   retryShippingQuote,
   deliverySafetyPolicy,
+  deliverySafetyEligible,
+  policyAccepted,
+  onPolicyAcceptedChange,
   onOpenLocationSelector,
   codEligible,
   shopMunicipality,
@@ -1387,9 +1439,14 @@ function CartPage({
             <button type="button" className="rounded-xl border border-amber-300 bg-white px-3 py-1.5 text-xs" onClick={retryShippingQuote}>Retry</button>
           </div>
         ) : null}
-        <DeliverySafetyPolicyCard policy={deliverySafetyPolicy} compact />
+        {deliverySafetyEligible ? <DeliverySafetyPolicyCard policy={deliverySafetyPolicy} compact /> : null}
+        <PaymentOrderConfirmationPolicy
+          paymentMethod={paymentMethod}
+          accepted={policyAccepted}
+          onAcceptedChange={onPolicyAcceptedChange}
+        />
         {!selectedCount ? <p className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm font-bold text-amber-700">Please select at least one item.</p> : null}
-        <Button className="retela-checkout-button mt-4 w-full" disabled={!selectedCount || checkoutLoading} onClick={openCheckoutSummary}>
+        <Button className="retela-checkout-button mt-4 w-full" disabled={!selectedCount || !policyAccepted || checkoutLoading} onClick={openCheckoutSummary}>
           <ShoppingCart size={17} /> {checkoutLoading && paymentMethod !== "cod" ? `Redirecting to ${paymentLabel(paymentMethod)}...` : checkoutLoading ? "Processing..." : paymentMethod === "cod" ? "Checkout" : `Checkout with ${paymentLabel(paymentMethod)}`}
         </Button>
       </Card>
@@ -1407,6 +1464,32 @@ function DeliverySafetyPolicyCard({ policy, compact = false }) {
           <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6">{policy || defaultDeliverySafetyPolicy}</p>
         </div>
       </div>
+    </section>
+  );
+}
+
+function PaymentOrderConfirmationPolicy({ paymentMethod, accepted, onAcceptedChange, compact = false, dark = false }) {
+  const cod = paymentMethod === "cod";
+  const title = cod ? "CASH ON DELIVERY POLICY" : "PAYMENT AND ORDER CONFIRMATION POLICY";
+  const body = cod ? codOrderPolicy : onlinePaymentOrderPolicy;
+  return (
+    <section className={`retela-payment-order-policy-card ${compact ? "is-compact" : ""} ${dark ? "is-dark" : ""}`}>
+      <div className="flex items-start gap-3">
+        <span className="retela-payment-policy-icon"><ShieldCheck size={17} /></span>
+        <div className="min-w-0">
+          <p className="retela-payment-policy-eyebrow">{title}</p>
+          <p className="retela-payment-policy-copy">{body}</p>
+        </div>
+      </div>
+      <label className="retela-payment-policy-agreement">
+        <input
+          type="checkbox"
+          required
+          checked={Boolean(accepted)}
+          onChange={(event) => onAcceptedChange?.(event.target.checked)}
+        />
+        <span>I have read and agree to the Payment and Order Confirmation Policy.</span>
+      </label>
     </section>
   );
 }
@@ -2113,7 +2196,7 @@ function PaymentDetailsPanel({ method, value, error, onChange }) {
   );
 }
 
-function CheckoutSummaryModal({ items, pricing, paymentMethod, paymentDetails, paymentError, updatePaymentNumber, deliveryLocation, shippingQuote, shippingQuoteLoading, fulfillmentMethod, deliverySafetyPolicy, checkout, checkoutLoading, onClose }) {
+function CheckoutSummaryModal({ items, pricing, paymentMethod, paymentDetails, paymentError, updatePaymentNumber, deliveryLocation, shippingQuote, shippingQuoteLoading, fulfillmentMethod, deliverySafetyPolicy, deliverySafetyEligible, policyAccepted, onPolicyAcceptedChange, checkout, checkoutLoading, onClose }) {
   const normalizedDeliveryLocation = normalizeDeliveryLocation(deliveryLocation);
   const distanceLabel = formatDistanceKm(shippingQuote?.distanceKm);
   const shippingUnavailable = fulfillmentMethod === "delivery" && (shippingQuoteLoading || !shippingQuote);
@@ -2171,7 +2254,7 @@ function CheckoutSummaryModal({ items, pricing, paymentMethod, paymentDetails, p
           {deliveryAreaText(shippingQuote) ? <p className="mt-1 text-xs font-bold text-neonbrand">Delivery Area: {deliveryAreaText(shippingQuote)}</p> : null}
           {shippingQuote?.reason ? <p className="mt-1 text-xs font-semibold text-white/70">Reason: {shippingQuote.reason}</p> : null}
         </div>
-        <DeliverySafetyPolicyCard policy={deliverySafetyPolicy} compact />
+        {deliverySafetyEligible ? <DeliverySafetyPolicyCard policy={deliverySafetyPolicy} compact /> : null}
 
         <div className="mt-5 rounded-2xl border border-neonbrand/15 bg-neonbrand/5 p-4">
           <p className="text-xs font-bold uppercase tracking-[0.16em] text-neonbrand/75">Selected Payment Method</p>
@@ -2188,9 +2271,17 @@ function CheckoutSummaryModal({ items, pricing, paymentMethod, paymentDetails, p
           ) : null}
         </div>
 
+        <PaymentOrderConfirmationPolicy
+          paymentMethod={paymentMethod}
+          accepted={policyAccepted}
+          onAcceptedChange={onPolicyAcceptedChange}
+          dark
+          compact
+        />
+
         <div className="retela-checkout-modal-actions mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           <button type="button" onClick={onClose} disabled={checkoutLoading} className="rounded-2xl border border-white/10 bg-white/[0.06] px-5 py-3 text-sm font-bold text-white transition hover:text-neonbrand disabled:opacity-60">Cancel</button>
-          <Button type="button" onClick={checkout} disabled={checkoutLoading || shippingUnavailable}>
+          <Button type="button" onClick={checkout} disabled={checkoutLoading || shippingUnavailable || !policyAccepted}>
             {checkoutLoading || shippingUnavailable ? <Loader2 size={17} className="animate-spin" /> : <ShoppingCart size={17} />}
             {shippingUnavailable ? "Updating shipping..." : checkoutLoading && paymentMethod !== "cod" ? `Redirecting to ${paymentLabel(paymentMethod)}...` : checkoutLoading ? "Processing..." : "Confirm Checkout"}
           </Button>
@@ -2963,7 +3054,7 @@ function CustomerOrderModal({ loading, selectedOrder, displayNumber, deliverySaf
                     </div>
                   ) : null}
                 </section> : null}
-                <DeliverySafetyPolicyCard policy={deliverySafetyPolicy} />
+                {order.meetup_area_eligible ? <DeliverySafetyPolicyCard policy={deliverySafetyPolicy} /> : null}
                 <div className="grid gap-2">
                   <p className="retela-modal-eyebrow">Items</p>
                   {selectedOrder.items.map((item) => (
