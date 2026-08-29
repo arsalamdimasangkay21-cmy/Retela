@@ -120,6 +120,7 @@ CALL retela_add_column_if_missing('orders', 'payment_method_id', 'payment_method
 CALL retela_add_column_if_missing('orders', 'qr_code_url', 'qr_code_url LONGTEXT NULL');
 CALL retela_add_column_if_missing('orders', 'payment_expires_at', 'payment_expires_at DATETIME NULL');
 CALL retela_add_column_if_missing('orders', 'rejection_reason', 'rejection_reason VARCHAR(255) NULL');
+CALL retela_add_column_if_missing('orders', 'rejected_at', 'rejected_at DATETIME NULL');
 CALL retela_add_column_if_missing('orders', 'payment_review_required_at', 'payment_review_required_at DATETIME NULL');
 CALL retela_add_column_if_missing('orders', 'payment_review_note', 'payment_review_note VARCHAR(255) NULL');
 CALL retela_add_column_if_missing('orders', 'tracking_number', 'tracking_number VARCHAR(120) NULL');

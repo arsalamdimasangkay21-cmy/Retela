@@ -20,7 +20,15 @@ import ProductImage from "../components/ProductImage";
 import ProductQuickView from "../components/ProductQuickView";
 import { Button, Card, Field, StatCard } from "../components/ui";
 import { useAuth } from "../context/AuthContext";
-import { orderStatusLabel as sharedOrderStatusLabel } from "../utils/orderStatus";
+import {
+  canonicalOrderStatus,
+  hasFailedOnlinePayment,
+  isCodPaymentMethod,
+  normalizeOrderStatusKey,
+  normalizePaymentMethodKey,
+  orderStatusLabel as sharedOrderStatusLabel,
+  paymentStatusLabel
+} from "../utils/orderStatus";
 import { feedbackImageList } from "../utils/feedback";
 import { getProductImageValue, normalizeProductImageFields, resolveProductImageUrl } from "../utils/productImage";
 import AutomationsPage from "./AutomationsPage";
@@ -4596,10 +4604,6 @@ function orderPaymentMethodLabel(order) {
   return isCodPaymentMethod(method) ? "Cash on Delivery" : paymentLabel(method);
 }
 
-function normalizeOrderStatusKey(status) {
-  return String(status || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
-}
-
 function statusIsAccepted(status) {
   const normalized = normalizeOrderStatusKey(status);
   return normalized === "accepted" || normalized === "approved";
@@ -4607,38 +4611,6 @@ function statusIsAccepted(status) {
 
 function normalizedMeetupStatus(status) {
   return statusIsAccepted(status) ? "accepted" : normalizeOrderStatusKey(status);
-}
-
-function normalizePaymentMethodKey(value) {
-  return String(value || "")
-    .trim()
-    .toLowerCase()
-    .replace(/[_-]+/g, " ")
-    .replace(/\s+/g, " ");
-}
-
-function isCodPaymentMethod(orderOrMethod) {
-  const rawMethod = orderOrMethod && typeof orderOrMethod === "object"
-    ? orderOrMethod.payment_method
-      ?? orderOrMethod.paymentMethod
-      ?? orderOrMethod.payment_label
-      ?? orderOrMethod.paymentLabel
-      ?? orderOrMethod.payment
-      ?? ""
-    : orderOrMethod;
-  const normalized = normalizePaymentMethodKey(rawMethod);
-  const compact = normalized.replace(/[^a-z0-9]/g, "");
-  return ["cod", "cash", "cashondelivery", "cashupondelivery", "payondelivery", "paymentondelivery"].includes(compact)
-    || (normalized.includes("cash") && normalized.includes("delivery"));
-}
-
-function compactPaymentStatusKey(value) {
-  return String(value || "").trim().toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ");
-}
-
-function hasFailedOnlinePayment(order) {
-  if (!order || isCodPaymentMethod(order)) return false;
-  return ["failed", "payment failed", "unpaid", "cancelled", "canceled", "expired"].includes(compactPaymentStatusKey(order.payment_status ?? order.paymentStatus));
 }
 
 function finiteNonNegativeNumber(value) {
@@ -4744,10 +4716,9 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
   const isDeliveryOrder = meetupEligibility.deliveryOrder;
   const showMeetupDetails = meetupEligibility.eligible;
   const showMeetupEditor = showMeetupDetails;
-  const fulfillmentStatus = displayStoredFulfillmentStatus(source);
+  const fulfillmentStatus = canonicalOrderStatus(source);
   const paymentFailed = hasFailedOnlinePayment(source);
   const rejected = fulfillmentStatus === "rejected";
-  const showStatusBadge = !(paymentFailed && fulfillmentStatus === "payment_failed");
   const terminalPaymentBlock = paymentFailed || rejected;
   const localMeetupGateActive = Boolean(meetupAreaEligible && ["approved", "processing"].includes(fulfillmentStatus));
   const meetupNeedsSchedule = Boolean(localMeetupGateActive && !meetupScheduleSaved);
@@ -4812,8 +4783,9 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
   }, [meetupScrollToken, showMeetupDetails, source?.id]);
 
   async function updateStatus(status) {
-    const actionKey = source?.id ? `${source.id}-${status}` : "";
+    const actionKey = source?.id ? `order-${source.id}-${status}` : "";
     if (!source?.id || actionStatus || modalActionGuardsRef.current.has(actionKey)) return;
+    if (status === "rejected" && canonicalOrderStatus(source) === "rejected") return;
     modalActionGuardsRef.current.add(actionKey);
     setActionStatus(status);
     try {
@@ -4902,8 +4874,7 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
                   <p className="mt-1 text-sm font-medium text-slate-500">{customerName} | {new Date(source.created_at).toLocaleString()}</p>
                 </div>
                 <div className="admin-order-status-stack">
-                  {paymentFailed ? <span className="admin-payment-failed-badge">Payment Failed</span> : null}
-                  {showStatusBadge ? <span className={`rounded-full px-3 py-2 text-xs font-bold ${orderBadgeClass(fulfillmentStatus)}`}>{orderStatusLabel(fulfillmentStatus)}</span> : null}
+                  <span className={`rounded-full px-3 py-2 text-xs font-bold ${orderBadgeClass(fulfillmentStatus)}`}>{orderStatusLabel(fulfillmentStatus)}</span>
                 </div>
               </div>
               <div className="retela-modal-body grid gap-4">
@@ -5338,22 +5309,7 @@ function formatCell(key, value) {
 }
 
 function displayFulfillmentStatus(order) {
-  const status = normalizeOrderStatusKey(order?.status);
-  if (status !== "rejected" && hasFailedOnlinePayment(order)) return "payment_failed";
-  // Older PayMongo orders stored `paid` in the fulfillment status. They are
-  // still pending fulfillment once payment is confirmed.
-  if (status === "paid" && order?.payment_status === "paid") return "pending";
-  if (status === "accepted") return "approved";
-  if (status === "out_for_delivery") return "ready";
-  return status || "pending";
-}
-
-function displayStoredFulfillmentStatus(order) {
-  const status = normalizeOrderStatusKey(order?.status);
-  if (status === "paid" && order?.payment_status === "paid") return "pending";
-  if (status === "accepted") return "approved";
-  if (status === "out_for_delivery") return "ready";
-  return status || "pending";
+  return canonicalOrderStatus(order);
 }
 
 function canAcceptOrder(order) {
@@ -5362,22 +5318,6 @@ function canAcceptOrder(order) {
   const fulfillmentStatus = displayFulfillmentStatus(order);
   if (fulfillmentStatus !== "pending") return false;
   return isCodPaymentMethod(order) || order.payment_status === "paid" || normalizeOrderStatusKey(order.status) === "paid";
-}
-
-function paymentStatusLabel(status) {
-  const normalized = normalizeOrderStatusKey(status);
-  const labels = {
-    paid: "Paid",
-    awaiting_payment: "Awaiting Payment",
-    failed: "Payment Failed",
-    payment_failed: "Payment Failed",
-    expired: "Payment Failed",
-    cancelled: "Cancelled",
-    canceled: "Cancelled",
-    refunded: "Refunded",
-    unpaid: "Unpaid"
-  };
-  return labels[normalized] || "Unpaid";
 }
 
 function orderButtonClass(status) {

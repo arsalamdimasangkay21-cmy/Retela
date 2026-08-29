@@ -752,6 +752,7 @@ async function ensureCoreTables() {
       qr_code_url LONGTEXT NULL,
       payment_expires_at DATETIME NULL,
       rejection_reason VARCHAR(255) NULL,
+      rejected_at DATETIME NULL,
       payment_review_required_at DATETIME NULL,
       payment_review_note VARCHAR(255) NULL,
       tracking_number VARCHAR(120) NULL,
@@ -813,7 +814,8 @@ async function ensureCoreTables() {
   await ensureColumn("orders", "qr_code_url", "qr_code_url LONGTEXT NULL AFTER checkout_url");
   await ensureColumn("orders", "payment_expires_at", "payment_expires_at DATETIME NULL AFTER qr_code_url");
   await ensureColumn("orders", "rejection_reason", "rejection_reason VARCHAR(255) NULL AFTER payment_expires_at");
-  await ensureColumn("orders", "payment_review_required_at", "payment_review_required_at DATETIME NULL AFTER rejection_reason");
+  await ensureColumn("orders", "rejected_at", "rejected_at DATETIME NULL AFTER rejection_reason");
+  await ensureColumn("orders", "payment_review_required_at", "payment_review_required_at DATETIME NULL AFTER rejected_at");
   await ensureColumn("orders", "payment_review_note", "payment_review_note VARCHAR(255) NULL AFTER payment_review_required_at");
   await ensureColumn("orders", "tracking_number", "tracking_number VARCHAR(120) NULL AFTER checkout_url");
   await ensureColumn("orders", "fulfillment_method", "fulfillment_method ENUM('delivery','pickup') NOT NULL DEFAULT 'delivery' AFTER tracking_number");

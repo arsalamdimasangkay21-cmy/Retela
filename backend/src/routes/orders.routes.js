@@ -307,7 +307,7 @@ async function ensureOrderColumns() {
        FROM INFORMATION_SCHEMA.COLUMNS
        WHERE TABLE_SCHEMA = DATABASE()
          AND TABLE_NAME = 'orders'
-         AND COLUMN_NAME IN ('tracking_number', 'fulfillment_method', 'delivery_address', 'delivery_latitude', 'delivery_longitude', 'delivery_municipality', 'delivery_province', 'delivery_region', 'delivery_postal_code', 'delivery_place_id', 'delivery_landmark', 'delivery_notes', 'meeting_place', 'meeting_latitude', 'meeting_longitude', 'meetup_date', 'meetup_time', 'meetup_confirmation_status', 'meetup_confirmed_at', 'meetup_customer_note', 'meetup_admin_note', 'meetup_24h_reminder_sent_at', 'meetup_1h_reminder_sent_at', 'subtotal_amount', 'coupon_discount', 'sale_discount', 'shipping_fee', 'shipping_zone', 'shipping_distance_km', 'shipping_rule', 'coupon_code', 'payment_status', 'payment_reference', 'transaction_id', 'paid_at', 'inventory_deducted_at', 'payment_provider', 'checkout_session_id', 'checkout_url', 'payment_intent_id', 'payment_method_id', 'qr_code_url', 'payment_expires_at', 'rejection_reason', 'payment_review_required_at', 'payment_review_note', 'order_channel', 'cash_received', 'change_amount', 'pos_cashier_id')`
+         AND COLUMN_NAME IN ('tracking_number', 'fulfillment_method', 'delivery_address', 'delivery_latitude', 'delivery_longitude', 'delivery_municipality', 'delivery_province', 'delivery_region', 'delivery_postal_code', 'delivery_place_id', 'delivery_landmark', 'delivery_notes', 'meeting_place', 'meeting_latitude', 'meeting_longitude', 'meetup_date', 'meetup_time', 'meetup_confirmation_status', 'meetup_confirmed_at', 'meetup_customer_note', 'meetup_admin_note', 'meetup_24h_reminder_sent_at', 'meetup_1h_reminder_sent_at', 'subtotal_amount', 'coupon_discount', 'sale_discount', 'shipping_fee', 'shipping_zone', 'shipping_distance_km', 'shipping_rule', 'coupon_code', 'payment_status', 'payment_reference', 'transaction_id', 'paid_at', 'inventory_deducted_at', 'payment_provider', 'checkout_session_id', 'checkout_url', 'payment_intent_id', 'payment_method_id', 'qr_code_url', 'payment_expires_at', 'rejection_reason', 'rejected_at', 'payment_review_required_at', 'payment_review_note', 'order_channel', 'cash_received', 'change_amount', 'pos_cashier_id')`
     );
     const columns = new Set(rows.map((row) => row.COLUMN_NAME));
     await safeModifyColumn("orders", "status", "status enum update", `ALTER TABLE orders MODIFY status ${orderStatusEnumSql} NOT NULL DEFAULT 'pending'`);
@@ -371,7 +371,8 @@ async function ensureOrderColumns() {
     if (!columns.has("qr_code_url")) await query("ALTER TABLE orders ADD COLUMN qr_code_url LONGTEXT NULL AFTER checkout_url");
     if (!columns.has("payment_expires_at")) await query("ALTER TABLE orders ADD COLUMN payment_expires_at DATETIME NULL AFTER qr_code_url");
     if (!columns.has("rejection_reason")) await query("ALTER TABLE orders ADD COLUMN rejection_reason VARCHAR(255) NULL AFTER payment_expires_at");
-    if (!columns.has("payment_review_required_at")) await query("ALTER TABLE orders ADD COLUMN payment_review_required_at DATETIME NULL AFTER rejection_reason");
+    if (!columns.has("rejected_at")) await query("ALTER TABLE orders ADD COLUMN rejected_at DATETIME NULL AFTER rejection_reason");
+    if (!columns.has("payment_review_required_at")) await query("ALTER TABLE orders ADD COLUMN payment_review_required_at DATETIME NULL AFTER rejected_at");
     if (!columns.has("payment_review_note")) await query("ALTER TABLE orders ADD COLUMN payment_review_note VARCHAR(255) NULL AFTER payment_review_required_at");
     if (!columns.has("cash_received")) await query("ALTER TABLE orders ADD COLUMN cash_received DECIMAL(10,2) NULL AFTER total_amount");
     if (!columns.has("change_amount")) await query("ALTER TABLE orders ADD COLUMN change_amount DECIMAL(10,2) NULL AFTER cash_received");
@@ -391,7 +392,7 @@ async function loadDecoratedOrder(orderId, userContext = {}) {
     `SELECT o.id, o.user_id, o.order_channel, o.status, o.payment_method, o.payment_status, o.payment_reference,
        o.transaction_id, o.paid_at, o.inventory_deducted_at, o.payment_provider,
        o.checkout_session_id, o.payment_intent_id, o.qr_code_url, o.payment_expires_at,
-       o.rejection_reason, o.payment_review_required_at, o.payment_review_note,
+       o.rejection_reason, o.rejected_at, o.payment_review_required_at, o.payment_review_note,
        o.cash_received, o.change_amount,
        o.tracking_number, o.fulfillment_method, o.delivery_address, o.delivery_latitude,
        o.delivery_longitude, o.delivery_municipality, o.delivery_province, o.delivery_region,
@@ -435,6 +436,7 @@ router.get("/", requireAuth, requireApproved, asyncHandler(async (req, res) => {
     o.qr_code_url,
     o.payment_expires_at,
     o.rejection_reason,
+    o.rejected_at,
     o.payment_review_required_at,
     o.payment_review_note,
     o.cash_received,
@@ -524,6 +526,7 @@ GROUP BY
     o.qr_code_url,
     o.payment_expires_at,
     o.rejection_reason,
+    o.rejected_at,
     o.payment_review_required_at,
     o.payment_review_note,
     o.cash_received,
@@ -980,11 +983,19 @@ async function rejectPaymentFailedOrder(orderId) {
     if (!orders.length) throw new HttpError(404, "Order not found");
     const order = orders[0];
     const currentStatus = orderStatusForStorage(order.status);
+    const isCod = isCodPaymentMethod(order.payment_method);
     if (currentStatus === "rejected") {
+      const samePaymentFailureReason = !isCod && (
+        String(order.rejection_reason || "").trim() === paymentFailedRejectionReason
+        || isPaymentFailedOrder(order)
+      );
+      if (!samePaymentFailureReason) {
+        throw new HttpError(409, "This order is already rejected.");
+      }
       await conn.commit();
       return { updated: false, userId: order.user_id, inventoryUpdates: [] };
     }
-    if (isCodPaymentMethod(order.payment_method)) {
+    if (isCod) {
       throw new HttpError(409, "COD orders cannot be rejected through failed-payment handling.");
     }
     if (!isPaymentFailedOrder(order)) {
@@ -1000,6 +1011,7 @@ async function rejectPaymentFailedOrder(orderId) {
        SET status = 'rejected',
            payment_status = 'failed',
            rejection_reason = ?,
+           rejected_at = COALESCE(rejected_at, NOW()),
            inventory_deducted_at = NULL,
            checkout_url = NULL,
            checkout_session_id = NULL,

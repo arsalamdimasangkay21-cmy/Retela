@@ -31,7 +31,7 @@ async function ensurePaymentColumns() {
        FROM INFORMATION_SCHEMA.COLUMNS
        WHERE TABLE_SCHEMA = DATABASE()
          AND TABLE_NAME = 'orders'
-         AND COLUMN_NAME IN ('payment_status', 'payment_reference', 'transaction_id', 'paid_at', 'inventory_deducted_at', 'payment_provider', 'checkout_session_id', 'checkout_url', 'payment_intent_id', 'payment_method_id', 'qr_code_url', 'payment_expires_at', 'rejection_reason', 'payment_review_required_at', 'payment_review_note')`
+         AND COLUMN_NAME IN ('payment_status', 'payment_reference', 'transaction_id', 'paid_at', 'inventory_deducted_at', 'payment_provider', 'checkout_session_id', 'checkout_url', 'payment_intent_id', 'payment_method_id', 'qr_code_url', 'payment_expires_at', 'rejection_reason', 'rejected_at', 'payment_review_required_at', 'payment_review_note')`
     );
     const columns = new Set(rows.map((row) => row.COLUMN_NAME));
     await safeModifyColumn("orders", "status", "status enum update", `ALTER TABLE orders MODIFY status ${orderStatusEnumSql} NOT NULL DEFAULT 'pending'`);
@@ -58,7 +58,8 @@ async function ensurePaymentColumns() {
     if (!columns.has("qr_code_url")) await query("ALTER TABLE orders ADD COLUMN qr_code_url LONGTEXT NULL AFTER checkout_url");
     if (!columns.has("payment_expires_at")) await query("ALTER TABLE orders ADD COLUMN payment_expires_at DATETIME NULL AFTER qr_code_url");
     if (!columns.has("rejection_reason")) await query("ALTER TABLE orders ADD COLUMN rejection_reason VARCHAR(255) NULL AFTER payment_expires_at");
-    if (!columns.has("payment_review_required_at")) await query("ALTER TABLE orders ADD COLUMN payment_review_required_at DATETIME NULL AFTER rejection_reason");
+    if (!columns.has("rejected_at")) await query("ALTER TABLE orders ADD COLUMN rejected_at DATETIME NULL AFTER rejection_reason");
+    if (!columns.has("payment_review_required_at")) await query("ALTER TABLE orders ADD COLUMN payment_review_required_at DATETIME NULL AFTER rejected_at");
     if (!columns.has("payment_review_note")) await query("ALTER TABLE orders ADD COLUMN payment_review_note VARCHAR(255) NULL AFTER payment_review_required_at");
   })().catch((error) => {
     paymentColumnsReady = undefined;
@@ -594,6 +595,7 @@ function paymentStatusResponse(order, extras = {}) {
       qr_image: order.qr_code_url || null,
       payment_expires_at: order.payment_expires_at || null,
       rejection_reason: order.rejection_reason || null,
+      rejected_at: order.rejected_at || null,
       payment_review_required_at: order.payment_review_required_at || null,
       payment_review_note: order.payment_review_note || null
     } : {})
@@ -630,7 +632,7 @@ async function findOrderForPaymongo({ orderId, checkoutSessionId, paymentIntentI
   const ownership = isAdmin ? "" : "AND user_id = :userId";
   if (orderId) {
     const rows = await query(
-      `SELECT id, user_id, status, payment_status, payment_method, payment_reference, transaction_id, paid_at, payment_provider, checkout_session_id, payment_intent_id, payment_method_id, qr_code_url, payment_expires_at, rejection_reason, payment_review_required_at, payment_review_note, total_amount
+      `SELECT id, user_id, status, payment_status, payment_method, payment_reference, transaction_id, paid_at, payment_provider, checkout_session_id, payment_intent_id, payment_method_id, qr_code_url, payment_expires_at, rejection_reason, rejected_at, payment_review_required_at, payment_review_note, total_amount
        FROM orders
        WHERE id = :orderId ${ownership}
        LIMIT 1`,
@@ -640,7 +642,7 @@ async function findOrderForPaymongo({ orderId, checkoutSessionId, paymentIntentI
   }
   if (checkoutSessionId) {
     const rows = await query(
-      `SELECT id, user_id, status, payment_status, payment_method, payment_reference, transaction_id, paid_at, payment_provider, checkout_session_id, payment_intent_id, payment_method_id, qr_code_url, payment_expires_at, rejection_reason, payment_review_required_at, payment_review_note, total_amount
+      `SELECT id, user_id, status, payment_status, payment_method, payment_reference, transaction_id, paid_at, payment_provider, checkout_session_id, payment_intent_id, payment_method_id, qr_code_url, payment_expires_at, rejection_reason, rejected_at, payment_review_required_at, payment_review_note, total_amount
        FROM orders
        WHERE checkout_session_id = :checkoutSessionId ${ownership}
        LIMIT 1`,
@@ -650,7 +652,7 @@ async function findOrderForPaymongo({ orderId, checkoutSessionId, paymentIntentI
   }
   if (paymentIntentId) {
     const rows = await query(
-      `SELECT id, user_id, status, payment_status, payment_method, payment_reference, transaction_id, paid_at, payment_provider, checkout_session_id, payment_intent_id, payment_method_id, qr_code_url, payment_expires_at, rejection_reason, payment_review_required_at, payment_review_note, total_amount
+      `SELECT id, user_id, status, payment_status, payment_method, payment_reference, transaction_id, paid_at, payment_provider, checkout_session_id, payment_intent_id, payment_method_id, qr_code_url, payment_expires_at, rejection_reason, rejected_at, payment_review_required_at, payment_review_note, total_amount
        FROM orders
        WHERE payment_intent_id = :paymentIntentId ${ownership}
        LIMIT 1`,
@@ -660,7 +662,7 @@ async function findOrderForPaymongo({ orderId, checkoutSessionId, paymentIntentI
   }
   if (reference) {
     const rows = await query(
-      `SELECT id, user_id, status, payment_status, payment_method, payment_reference, transaction_id, paid_at, payment_provider, checkout_session_id, payment_intent_id, payment_method_id, qr_code_url, payment_expires_at, rejection_reason, payment_review_required_at, payment_review_note, total_amount
+      `SELECT id, user_id, status, payment_status, payment_method, payment_reference, transaction_id, paid_at, payment_provider, checkout_session_id, payment_intent_id, payment_method_id, qr_code_url, payment_expires_at, rejection_reason, rejected_at, payment_review_required_at, payment_review_note, total_amount
        FROM orders
        WHERE payment_reference = :reference ${ownership}
        LIMIT 1`,
@@ -691,7 +693,7 @@ function emitPaymentOrderUpdate(io, order) {
 
 async function getOrderPaymentStatus(orderId) {
   const rows = await query(
-    `SELECT id, user_id, status, payment_status, payment_method, payment_reference, transaction_id, paid_at, payment_provider, checkout_session_id, payment_intent_id, payment_method_id, qr_code_url, payment_expires_at, rejection_reason, payment_review_required_at, payment_review_note, total_amount
+    `SELECT id, user_id, status, payment_status, payment_method, payment_reference, transaction_id, paid_at, payment_provider, checkout_session_id, payment_intent_id, payment_method_id, qr_code_url, payment_expires_at, rejection_reason, rejected_at, payment_review_required_at, payment_review_note, total_amount
      FROM orders
      WHERE id = :orderId
      LIMIT 1`,
@@ -1229,7 +1231,7 @@ router.get("/orders/:orderId/status", requireAuth, requireApproved, asyncHandler
 router.get("/status/:id", requireAuth, requireApproved, asyncHandler(async (req, res) => {
   await ensurePaymentColumns();
   const rows = await query(
-    `SELECT id, status, payment_status, payment_method, payment_reference, transaction_id, paid_at, payment_provider, payment_intent_id, payment_method_id, qr_code_url, payment_expires_at, rejection_reason, payment_review_required_at, payment_review_note, total_amount
+    `SELECT id, status, payment_status, payment_method, payment_reference, transaction_id, paid_at, payment_provider, payment_intent_id, payment_method_id, qr_code_url, payment_expires_at, rejection_reason, rejected_at, payment_review_required_at, payment_review_note, total_amount
      FROM orders
      WHERE id = :id AND (:isAdmin = true OR user_id = :userId)`,
     { id: req.params.id, userId: req.user.id, isAdmin: req.user.role === "admin" }
