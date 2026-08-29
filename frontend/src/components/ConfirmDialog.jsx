@@ -9,6 +9,7 @@ export default function ConfirmDialog({
   message,
   detail,
   confirmLabel = "Delete",
+  busyLabel = "Working...",
   cancelLabel = "Cancel",
   destructive = true,
   busy = false,
@@ -73,11 +74,14 @@ export default function ConfirmDialog({
               </button>
               <button
                 type="button"
-                onClick={onConfirm}
+                onClick={(event) => {
+                  event.preventDefault();
+                  onConfirm?.(event);
+                }}
                 disabled={busy}
                 className={`min-h-11 rounded-2xl border px-4 text-sm font-bold transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-60 ${destructive ? "border-rose-300 bg-rose-50 text-rose-700 hover:border-rose-400 hover:bg-rose-100 focus-visible:outline-rose-500" : "border-emerald-300 bg-emerald-50 text-emerald-700 hover:border-emerald-400 hover:bg-emerald-100 focus-visible:outline-emerald-500"}`}
               >
-                {busy ? "Working..." : confirmLabel}
+                {busy ? busyLabel : confirmLabel}
               </button>
             </div>
           </motion.div>

@@ -618,18 +618,31 @@ export default function AdminDashboard({ active, onChange }) {
     }
   }
 
-  async function updateOrder(id, status) {
+  async function updateOrder(id, status, options = {}) {
     const actionKey = `order-${id}-${status}`;
     if (busyAction === actionKey || orderRequestGuardsRef.current.has(actionKey)) return;
     orderRequestGuardsRef.current.add(actionKey);
     setBusyAction(actionKey);
+    const requestBody = { status, ...(options.reason ? { reason: options.reason } : {}) };
     try {
-      const { data } = await api.patch(
+      const response = await api.patch(
         `/orders/${id}/status`,
-        { status },
+        requestBody,
         { headers: { "Idempotency-Key": actionKey } }
       );
+      const { data } = response;
       const updatedOrder = data?.order || (data?.id ? data : { id: Number(id), status });
+      if (import.meta.env.DEV) {
+        console.info("[orders] status update result", {
+          orderId: Number(id),
+          currentStatus: options.currentStatus || null,
+          paymentStatus: options.paymentStatus || null,
+          requestedStatus: status,
+          responseStatus: response.status,
+          responseBody: data,
+          apiUrl: API_URL
+        });
+      }
       if (updatedOrder?.id) {
         setOrders((current) => current.map((order) => Number(order.id) === Number(updatedOrder.id) ? { ...order, ...updatedOrder } : order));
       }
@@ -647,6 +660,18 @@ export default function AdminDashboard({ active, onChange }) {
       );
       return { ...data, order: updatedOrder };
     } catch (error) {
+      if (import.meta.env.DEV) {
+        console.error("[orders] status update failed", {
+          orderId: Number(id),
+          currentStatus: options.currentStatus || null,
+          paymentStatus: options.paymentStatus || null,
+          requestedStatus: status,
+          responseStatus: error?.response?.status || null,
+          responseBody: error?.response?.data || null,
+          apiUrl: API_URL,
+          message: error?.message
+        });
+      }
       showProductToast(getApiErrorMessage(error, "Could not update order."), "error", "top-right");
       throw error;
     } finally {
@@ -4782,22 +4807,31 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
     return () => window.cancelAnimationFrame(frame);
   }, [meetupScrollToken, showMeetupDetails, source?.id]);
 
-  async function updateStatus(status) {
+  async function updateStatus(status, options = {}) {
     const actionKey = source?.id ? `order-${source.id}-${status}` : "";
     if (!source?.id || actionStatus || modalActionGuardsRef.current.has(actionKey)) return;
     if (status === "rejected" && canonicalOrderStatus(source) === "rejected") return;
     modalActionGuardsRef.current.add(actionKey);
     setActionStatus(status);
     try {
-      const data = await updateOrder(source.id, status);
+      const data = await updateOrder(source.id, status, {
+        reason: options.reason,
+        currentStatus: source.status,
+        paymentStatus: source.payment_status ?? source.paymentStatus ?? null
+      });
       if (!data) return;
       const orderPatch = data?.order || data || { id: source.id, status };
       const shouldScrollToMeetup = statusIsAccepted(status);
       onStatusChanged?.({ id: source.id, status, ...orderPatch }, { scrollToMeetup: shouldScrollToMeetup, skipReload: true });
-      const { data: latestOrderDetails } = await api.get(`/orders/${source.id}/items`);
-      onStatusChanged?.(latestOrderDetails, { scrollToMeetup: shouldScrollToMeetup, skipReload: true });
+      api.get(`/orders/${source.id}/items`)
+        .then(({ data: latestOrderDetails }) => {
+          onStatusChanged?.(latestOrderDetails, { scrollToMeetup: shouldScrollToMeetup, skipReload: true });
+        })
+        .catch((error) => console.error("[orders] background selected order refresh after status update failed", error));
+      return data;
     } catch (error) {
       console.error("[orders] status update failed", error);
+      return null;
     } finally {
       modalActionGuardsRef.current.delete(actionKey);
       setActionStatus("");
@@ -4813,10 +4847,11 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
     void updateStatus("cancelled");
   }
 
-  async function confirmPaymentFailedReject() {
+  async function confirmPaymentFailedReject(event) {
+    event?.preventDefault?.();
     if (!paymentFailed || actionStatus || rejected) return;
-    setRejectConfirmOpen(false);
-    await updateStatus("rejected");
+    const result = await updateStatus("rejected", { reason: "Payment failed or could not be verified." });
+    if (result) setRejectConfirmOpen(false);
   }
 
   async function saveMeetingPlace() {
@@ -5024,6 +5059,7 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
       message="The payment for this order was unsuccessful or could not be verified. Rejecting the order will release the reserved items and notify the customer."
       cancelLabel="Cancel"
       confirmLabel="Reject Order"
+      busyLabel="Rejecting..."
       busy={actionStatus === "rejected"}
       onClose={() => {
         if (actionStatus !== "rejected") setRejectConfirmOpen(false);

@@ -967,7 +967,8 @@ async function restoreDeductedOrderInventoryForConnection(conn, orderId, lowStoc
   return updates;
 }
 
-async function rejectPaymentFailedOrder(orderId) {
+async function rejectPaymentFailedOrder(orderId, reason = paymentFailedRejectionReason) {
+  const rejectionReason = String(reason || paymentFailedRejectionReason).trim() || paymentFailedRejectionReason;
   const { config } = await loadSystemSettings();
   const lowStockThreshold = Number(config?.inventory?.lowStockThreshold ?? 3);
   const conn = await pool.getConnection();
@@ -986,8 +987,7 @@ async function rejectPaymentFailedOrder(orderId) {
     const isCod = isCodPaymentMethod(order.payment_method);
     if (currentStatus === "rejected") {
       const samePaymentFailureReason = !isCod && (
-        String(order.rejection_reason || "").trim() === paymentFailedRejectionReason
-        || isPaymentFailedOrder(order)
+        String(order.rejection_reason || "").trim() === rejectionReason
       );
       if (!samePaymentFailureReason) {
         throw new HttpError(409, "This order is already rejected.");
@@ -1020,7 +1020,7 @@ async function rejectPaymentFailedOrder(orderId) {
            qr_code_url = NULL,
            payment_expires_at = NULL
        WHERE id = ?`,
-      [paymentFailedRejectionReason, orderId]
+      [rejectionReason, orderId]
     );
     if (order.user_id) {
       const [existingNotifications] = await conn.execute(
@@ -1148,7 +1148,10 @@ router.post("/", requireAuth, requireApproved, asyncHandler(async (req, res) => 
 
 router.patch("/:id/status", requireAuth, requireRole("admin"), asyncHandler(async (req, res) => {
   await ensureOrderColumns();
-  const input = z.object({ status: z.string().trim().min(1) }).parse(req.body);
+  const input = z.object({
+    status: z.string().trim().min(1),
+    reason: z.string().trim().max(255).optional()
+  }).parse(req.body);
   const status = orderStatusForStorage(input.status);
   if (!statuses.includes(status)) throw new HttpError(400, "Invalid order status.");
   const order = await loadDecoratedOrder(req.params.id, { role: "admin" });
@@ -1157,13 +1160,15 @@ router.patch("/:id/status", requireAuth, requireRole("admin"), asyncHandler(asyn
   const isCod = isCodPaymentMethod(order.payment_method ?? order.paymentMethod);
   const hasFailedOnlinePayment = orderHasFailedOnlinePayment(order);
   if (status === "rejected") {
-    const result = await rejectPaymentFailedOrder(req.params.id);
+    const rejectionReason = input.reason || paymentFailedRejectionReason;
+    const result = await rejectPaymentFailedOrder(req.params.id, rejectionReason);
     const updatedOrder = await loadDecoratedOrder(req.params.id, { role: "admin" });
     const updatePayload = updatedOrder || {
       id: Number(req.params.id),
       status: "rejected",
       payment_status: "failed",
-      rejection_reason: paymentFailedRejectionReason
+      rejection_reason: rejectionReason,
+      rejected_at: new Date().toISOString()
     };
     if (order.user_id) {
       req.app.get("io")?.to(`user:${order.user_id}`).emit("order:update", updatePayload);
