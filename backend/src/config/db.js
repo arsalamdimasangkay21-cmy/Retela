@@ -738,9 +738,9 @@ async function ensureCoreTables() {
       id INT AUTO_INCREMENT PRIMARY KEY,
       user_id INT NULL,
       order_channel ENUM('online','pos') NOT NULL DEFAULT 'online',
-      status ENUM('pending','awaiting_payment','paid','approved','processing','ready','completed','cancelled','payment_failed') NOT NULL DEFAULT 'pending',
+      status ENUM('pending','awaiting_payment','paid','approved','processing','ready','completed','cancelled','payment_failed','rejected') NOT NULL DEFAULT 'pending',
       payment_method ENUM('cod','cash','gcash','qrph','debit','credit','maya') NOT NULL DEFAULT 'cod',
-      payment_status ENUM('unpaid','awaiting_payment','paid','failed','cancelled','refunded') NOT NULL DEFAULT 'unpaid',
+      payment_status ENUM('unpaid','awaiting_payment','paid','failed','expired','cancelled','refunded') NOT NULL DEFAULT 'unpaid',
       payment_reference VARCHAR(160) NULL,
       transaction_id VARCHAR(160) NULL,
       paid_at DATETIME NULL,
@@ -751,6 +751,9 @@ async function ensureCoreTables() {
       payment_method_id VARCHAR(160) NULL,
       qr_code_url LONGTEXT NULL,
       payment_expires_at DATETIME NULL,
+      rejection_reason VARCHAR(255) NULL,
+      payment_review_required_at DATETIME NULL,
+      payment_review_note VARCHAR(255) NULL,
       tracking_number VARCHAR(120) NULL,
       fulfillment_method ENUM('delivery','pickup') NOT NULL DEFAULT 'delivery',
       delivery_address VARCHAR(500) NULL,
@@ -794,10 +797,11 @@ async function ensureCoreTables() {
     )
   `);
   await ensureAutoIncrementId("orders");
-  await safeModifyColumn("orders", "status", "status enum update", "ALTER TABLE orders MODIFY status ENUM('pending','awaiting_payment','paid','approved','processing','ready','completed','cancelled','payment_failed') NOT NULL DEFAULT 'pending'");
+  await safeModifyColumn("orders", "status", "status enum update", "ALTER TABLE orders MODIFY status ENUM('pending','awaiting_payment','paid','approved','processing','ready','completed','cancelled','payment_failed','rejected') NOT NULL DEFAULT 'pending'");
   await safeModifyColumn("orders", "payment_method", "payment_method enum update", "ALTER TABLE orders MODIFY payment_method ENUM('cod','cash','gcash','qrph','debit','credit','maya') NOT NULL DEFAULT 'cod'");
+  await safeModifyColumn("orders", "payment_status", "payment_status enum update", "ALTER TABLE orders MODIFY payment_status ENUM('unpaid','awaiting_payment','paid','failed','expired','cancelled','refunded') NOT NULL DEFAULT 'unpaid'");
   await ensureColumn("orders", "order_channel", "order_channel ENUM('online','pos') NOT NULL DEFAULT 'online' AFTER user_id");
-  await ensureColumn("orders", "payment_status", "payment_status ENUM('unpaid','awaiting_payment','paid','failed','cancelled','refunded') NOT NULL DEFAULT 'unpaid' AFTER payment_method");
+  await ensureColumn("orders", "payment_status", "payment_status ENUM('unpaid','awaiting_payment','paid','failed','expired','cancelled','refunded') NOT NULL DEFAULT 'unpaid' AFTER payment_method");
   await ensureColumn("orders", "payment_reference", "payment_reference VARCHAR(160) NULL AFTER payment_status");
   await ensureColumn("orders", "transaction_id", "transaction_id VARCHAR(160) NULL AFTER payment_reference");
   await ensureColumn("orders", "paid_at", "paid_at DATETIME NULL AFTER transaction_id");
@@ -808,6 +812,9 @@ async function ensureCoreTables() {
   await ensureColumn("orders", "payment_method_id", "payment_method_id VARCHAR(160) NULL AFTER payment_intent_id");
   await ensureColumn("orders", "qr_code_url", "qr_code_url LONGTEXT NULL AFTER checkout_url");
   await ensureColumn("orders", "payment_expires_at", "payment_expires_at DATETIME NULL AFTER qr_code_url");
+  await ensureColumn("orders", "rejection_reason", "rejection_reason VARCHAR(255) NULL AFTER payment_expires_at");
+  await ensureColumn("orders", "payment_review_required_at", "payment_review_required_at DATETIME NULL AFTER rejection_reason");
+  await ensureColumn("orders", "payment_review_note", "payment_review_note VARCHAR(255) NULL AFTER payment_review_required_at");
   await ensureColumn("orders", "tracking_number", "tracking_number VARCHAR(120) NULL AFTER checkout_url");
   await ensureColumn("orders", "fulfillment_method", "fulfillment_method ENUM('delivery','pickup') NOT NULL DEFAULT 'delivery' AFTER tracking_number");
   await ensureColumn("orders", "delivery_address", "delivery_address VARCHAR(500) NULL AFTER fulfillment_method");
@@ -843,6 +850,15 @@ async function ensureCoreTables() {
   await ensureColumn("orders", "cash_received", "cash_received DECIMAL(10,2) NULL AFTER total_amount");
   await ensureColumn("orders", "change_amount", "change_amount DECIMAL(10,2) NULL AFTER cash_received");
   await ensureColumn("orders", "pos_cashier_id", "pos_cashier_id INT NULL AFTER change_amount");
+  await safeDataMigration(
+    "orders",
+    "online failed payment status repair",
+    `UPDATE orders
+     SET status = 'payment_failed'
+     WHERE status NOT IN ('payment_failed', 'rejected', 'cancelled')
+       AND LOWER(REPLACE(REPLACE(REPLACE(TRIM(COALESCE(payment_method, '')), ' ', ''), '_', ''), '-', '')) NOT IN ('cod','cash','cashondelivery','cashupondelivery','payondelivery','paymentondelivery')
+       AND LOWER(REPLACE(REPLACE(REPLACE(TRIM(COALESCE(payment_status, '')), ' ', ''), '_', ''), '-', '')) IN ('failed','paymentfailed','unpaid','cancelled','canceled','expired')`
+  );
 
   await ensureTable("cart_items", `
     CREATE TABLE IF NOT EXISTS cart_items (

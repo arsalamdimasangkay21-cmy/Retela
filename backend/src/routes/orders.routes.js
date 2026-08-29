@@ -14,7 +14,9 @@ import { loadCustomerDeliveryLocation } from "../utils/customerLocation.js";
 import { haversineDistanceKm, normalizeMunicipality, validCoordinates } from "../utils/shippingCalculator.js";
 
 const router = Router();
-const statuses = ["pending", "awaiting_payment", "paid", "approved", "processing", "ready", "completed", "cancelled", "payment_failed"];
+const orderStatusEnumSql = "ENUM('pending','awaiting_payment','paid','approved','processing','ready','completed','cancelled','payment_failed','rejected')";
+const paymentStatusEnumSql = "ENUM('unpaid','awaiting_payment','paid','failed','expired','cancelled','refunded')";
+const statuses = ["pending", "awaiting_payment", "paid", "approved", "processing", "ready", "completed", "cancelled", "payment_failed", "rejected"];
 const customerCancellableStatuses = new Set(["pending", "awaiting_payment"]);
 const allowedAdminStatusTransitions = {
   pending: new Set(["approved", "cancelled"]),
@@ -25,10 +27,15 @@ const allowedAdminStatusTransitions = {
   approved: new Set(["processing", "ready", "cancelled"]),
   processing: new Set(["ready", "cancelled"]),
   ready: new Set(["completed", "cancelled"]),
-  payment_failed: new Set(["cancelled"]),
+  payment_failed: new Set(["rejected"]),
   cancelled: new Set([]),
-  completed: new Set([])
+  completed: new Set([]),
+  rejected: new Set([])
 };
+const failedOnlinePaymentStatuses = new Set(["failed", "paymentfailed", "unpaid", "cancelled", "canceled", "expired"]);
+const failedOnlinePaymentStatusSql = "'failed','paymentfailed','unpaid','cancelled','canceled','expired'";
+const codPaymentMethodSql = "'cod','cash','cashondelivery','cashupondelivery','payondelivery','paymentondelivery'";
+const paymentFailedRejectionReason = "Payment failed or could not be verified.";
 const transientOrderLockCodes = new Set(["ER_LOCK_WAIT_TIMEOUT", "ER_LOCK_DEADLOCK"]);
 const maxOrderCreateAttempts = 3;
 const codMunicipalityError = "Cash on Delivery is only available for nearby delivery areas. Please select an online payment method.";
@@ -65,6 +72,45 @@ function isCodPaymentMethod(value) {
   const compact = normalized.replace(/[^a-z0-9]/g, "");
   return ["cod", "cash", "cashondelivery", "cashupondelivery", "payondelivery", "paymentondelivery"].includes(compact)
     || (normalized.includes("cash") && normalized.includes("delivery"));
+}
+
+function compactPaymentStatus(value) {
+  return String(value || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function isFailedOnlinePaymentStatus(value) {
+  return failedOnlinePaymentStatuses.has(compactPaymentStatus(value));
+}
+
+function orderHasFailedOnlinePayment(order) {
+  return Boolean(order && !isCodPaymentMethod(order.payment_method ?? order.paymentMethod) && isFailedOnlinePaymentStatus(order.payment_status ?? order.paymentStatus));
+}
+
+function isPaymentFailedOrder(order) {
+  if (!order) return false;
+  const status = orderStatusForStorage(order.status);
+  return status === "payment_failed" || orderHasFailedOnlinePayment(order);
+}
+
+function compactSql(columnSql) {
+  return `LOWER(REPLACE(REPLACE(REPLACE(TRIM(COALESCE(${columnSql}, '')), ' ', ''), '_', ''), '-', ''))`;
+}
+
+async function markExistingOnlinePaymentFailures(orderId = null) {
+  const idFilter = orderId ? "AND id = :orderId" : "";
+  await query(
+    `UPDATE orders
+     SET status = 'payment_failed'
+     WHERE status NOT IN ('payment_failed', 'rejected', 'cancelled')
+       ${idFilter}
+       AND ${compactSql("payment_method")} NOT IN (${codPaymentMethodSql})
+       AND ${compactSql("payment_status")} IN (${failedOnlinePaymentStatusSql})`,
+    orderId ? { orderId } : {}
+  );
+}
+
+function paymentFailedCustomerNotice(orderId) {
+  return `Your RETELA order #${orderId} was rejected because the payment could not be completed or verified. No item will be released for delivery. If you believe this was an error, please contact RETELA support.`;
 }
 
 function finiteNonNegativeNumber(value) {
@@ -262,12 +308,13 @@ async function ensureOrderColumns() {
        FROM INFORMATION_SCHEMA.COLUMNS
        WHERE TABLE_SCHEMA = DATABASE()
          AND TABLE_NAME = 'orders'
-         AND COLUMN_NAME IN ('tracking_number', 'fulfillment_method', 'delivery_address', 'delivery_latitude', 'delivery_longitude', 'delivery_municipality', 'delivery_province', 'delivery_region', 'delivery_postal_code', 'delivery_place_id', 'delivery_landmark', 'delivery_notes', 'meeting_place', 'meeting_latitude', 'meeting_longitude', 'meetup_date', 'meetup_time', 'meetup_confirmation_status', 'meetup_confirmed_at', 'meetup_customer_note', 'meetup_admin_note', 'meetup_24h_reminder_sent_at', 'meetup_1h_reminder_sent_at', 'subtotal_amount', 'coupon_discount', 'sale_discount', 'shipping_fee', 'shipping_zone', 'shipping_distance_km', 'shipping_rule', 'coupon_code', 'payment_status', 'payment_reference', 'transaction_id', 'paid_at', 'inventory_deducted_at', 'payment_provider', 'checkout_session_id', 'checkout_url', 'order_channel', 'cash_received', 'change_amount', 'pos_cashier_id')`
+         AND COLUMN_NAME IN ('tracking_number', 'fulfillment_method', 'delivery_address', 'delivery_latitude', 'delivery_longitude', 'delivery_municipality', 'delivery_province', 'delivery_region', 'delivery_postal_code', 'delivery_place_id', 'delivery_landmark', 'delivery_notes', 'meeting_place', 'meeting_latitude', 'meeting_longitude', 'meetup_date', 'meetup_time', 'meetup_confirmation_status', 'meetup_confirmed_at', 'meetup_customer_note', 'meetup_admin_note', 'meetup_24h_reminder_sent_at', 'meetup_1h_reminder_sent_at', 'subtotal_amount', 'coupon_discount', 'sale_discount', 'shipping_fee', 'shipping_zone', 'shipping_distance_km', 'shipping_rule', 'coupon_code', 'payment_status', 'payment_reference', 'transaction_id', 'paid_at', 'inventory_deducted_at', 'payment_provider', 'checkout_session_id', 'checkout_url', 'payment_intent_id', 'payment_method_id', 'qr_code_url', 'payment_expires_at', 'rejection_reason', 'payment_review_required_at', 'payment_review_note', 'order_channel', 'cash_received', 'change_amount', 'pos_cashier_id')`
     );
     const columns = new Set(rows.map((row) => row.COLUMN_NAME));
-    await safeModifyColumn("orders", "status", "status enum update", "ALTER TABLE orders MODIFY status ENUM('pending','awaiting_payment','paid','approved','processing','ready','completed','cancelled','payment_failed') NOT NULL DEFAULT 'pending'");
+    await safeModifyColumn("orders", "status", "status enum update", `ALTER TABLE orders MODIFY status ${orderStatusEnumSql} NOT NULL DEFAULT 'pending'`);
     await safeModifyColumn("orders", "user_id", "user_id nullable update", "ALTER TABLE orders MODIFY user_id INT NULL");
     await safeModifyColumn("orders", "payment_method", "payment_method enum update", "ALTER TABLE orders MODIFY payment_method ENUM('cod','cash','gcash','qrph','debit','credit','maya') NOT NULL DEFAULT 'cod'");
+    await safeModifyColumn("orders", "payment_status", "payment_status enum update", `ALTER TABLE orders MODIFY payment_status ${paymentStatusEnumSql} NOT NULL DEFAULT 'unpaid'`);
     if (!columns.has("order_channel")) await query("ALTER TABLE orders ADD COLUMN order_channel ENUM('online','pos') NOT NULL DEFAULT 'online' AFTER user_id");
     if (!columns.has("tracking_number")) {
       await query("ALTER TABLE orders ADD COLUMN tracking_number VARCHAR(120) NULL AFTER payment_method");
@@ -304,7 +351,7 @@ async function ensureOrderColumns() {
     if (!columns.has("shipping_distance_km")) await query("ALTER TABLE orders ADD COLUMN shipping_distance_km DECIMAL(10,2) NULL AFTER shipping_zone");
     if (!columns.has("shipping_rule")) await query("ALTER TABLE orders ADD COLUMN shipping_rule VARCHAR(40) NULL AFTER shipping_distance_km");
     if (!columns.has("coupon_code")) await query("ALTER TABLE orders ADD COLUMN coupon_code VARCHAR(40) NULL AFTER shipping_fee");
-    if (!columns.has("payment_status")) await query("ALTER TABLE orders ADD COLUMN payment_status ENUM('unpaid','awaiting_payment','paid','failed','cancelled','refunded') NOT NULL DEFAULT 'unpaid' AFTER payment_method");
+    if (!columns.has("payment_status")) await query(`ALTER TABLE orders ADD COLUMN payment_status ${paymentStatusEnumSql} NOT NULL DEFAULT 'unpaid' AFTER payment_method`);
     if (!columns.has("payment_reference")) await query("ALTER TABLE orders ADD COLUMN payment_reference VARCHAR(160) NULL AFTER payment_status");
     if (!columns.has("transaction_id")) await query("ALTER TABLE orders ADD COLUMN transaction_id VARCHAR(160) NULL AFTER payment_reference");
     if (!columns.has("paid_at")) await query("ALTER TABLE orders ADD COLUMN paid_at DATETIME NULL AFTER transaction_id");
@@ -320,9 +367,17 @@ async function ensureOrderColumns() {
     if (!columns.has("payment_provider")) await query("ALTER TABLE orders ADD COLUMN payment_provider VARCHAR(40) NULL AFTER paid_at");
     if (!columns.has("checkout_session_id")) await query("ALTER TABLE orders ADD COLUMN checkout_session_id VARCHAR(160) NULL AFTER payment_provider");
     if (!columns.has("checkout_url")) await query("ALTER TABLE orders ADD COLUMN checkout_url TEXT NULL AFTER checkout_session_id");
+    if (!columns.has("payment_intent_id")) await query("ALTER TABLE orders ADD COLUMN payment_intent_id VARCHAR(160) NULL AFTER checkout_session_id");
+    if (!columns.has("payment_method_id")) await query("ALTER TABLE orders ADD COLUMN payment_method_id VARCHAR(160) NULL AFTER payment_intent_id");
+    if (!columns.has("qr_code_url")) await query("ALTER TABLE orders ADD COLUMN qr_code_url LONGTEXT NULL AFTER checkout_url");
+    if (!columns.has("payment_expires_at")) await query("ALTER TABLE orders ADD COLUMN payment_expires_at DATETIME NULL AFTER qr_code_url");
+    if (!columns.has("rejection_reason")) await query("ALTER TABLE orders ADD COLUMN rejection_reason VARCHAR(255) NULL AFTER payment_expires_at");
+    if (!columns.has("payment_review_required_at")) await query("ALTER TABLE orders ADD COLUMN payment_review_required_at DATETIME NULL AFTER rejection_reason");
+    if (!columns.has("payment_review_note")) await query("ALTER TABLE orders ADD COLUMN payment_review_note VARCHAR(255) NULL AFTER payment_review_required_at");
     if (!columns.has("cash_received")) await query("ALTER TABLE orders ADD COLUMN cash_received DECIMAL(10,2) NULL AFTER total_amount");
     if (!columns.has("change_amount")) await query("ALTER TABLE orders ADD COLUMN change_amount DECIMAL(10,2) NULL AFTER cash_received");
     if (!columns.has("pos_cashier_id")) await query("ALTER TABLE orders ADD COLUMN pos_cashier_id INT NULL AFTER change_amount");
+    await markExistingOnlinePaymentFailures();
   })().catch((error) => {
     orderColumnsReady = undefined;
     throw error;
@@ -331,10 +386,14 @@ async function ensureOrderColumns() {
 }
 
 async function loadDecoratedOrder(orderId, userContext = {}) {
+  await markExistingOnlinePaymentFailures(orderId);
   const ownershipFilter = userContext.role === "admin" ? "" : "AND o.user_id = :userId";
   const orders = await query(
     `SELECT o.id, o.user_id, o.order_channel, o.status, o.payment_method, o.payment_status, o.payment_reference,
-       o.transaction_id, o.paid_at, o.inventory_deducted_at, o.cash_received, o.change_amount,
+       o.transaction_id, o.paid_at, o.inventory_deducted_at, o.payment_provider,
+       o.checkout_session_id, o.payment_intent_id, o.qr_code_url, o.payment_expires_at,
+       o.rejection_reason, o.payment_review_required_at, o.payment_review_note,
+       o.cash_received, o.change_amount,
        o.tracking_number, o.fulfillment_method, o.delivery_address, o.delivery_latitude,
        o.delivery_longitude, o.delivery_municipality, o.delivery_province, o.delivery_region,
        o.delivery_postal_code, o.delivery_place_id, o.delivery_landmark, o.delivery_notes,
@@ -358,6 +417,7 @@ async function loadDecoratedOrder(orderId, userContext = {}) {
 
 router.get("/", requireAuth, requireApproved, asyncHandler(async (req, res) => {
   await ensureOrderColumns();
+  await markExistingOnlinePaymentFailures();
   const where = req.user.role === "admin" ? "" : "WHERE o.user_id = :userId";
   const orders = await query(
 `SELECT
@@ -370,6 +430,14 @@ router.get("/", requireAuth, requireApproved, asyncHandler(async (req, res) => {
     o.payment_reference,
     o.transaction_id,
     o.paid_at,
+    o.payment_provider,
+    o.checkout_session_id,
+    o.payment_intent_id,
+    o.qr_code_url,
+    o.payment_expires_at,
+    o.rejection_reason,
+    o.payment_review_required_at,
+    o.payment_review_note,
     o.cash_received,
     o.change_amount,
     o.tracking_number,
@@ -451,6 +519,14 @@ GROUP BY
     o.payment_reference,
     o.transaction_id,
     o.paid_at,
+    o.payment_provider,
+    o.checkout_session_id,
+    o.payment_intent_id,
+    o.qr_code_url,
+    o.payment_expires_at,
+    o.rejection_reason,
+    o.payment_review_required_at,
+    o.payment_review_note,
     o.cash_received,
     o.change_amount,
     o.tracking_number,
@@ -854,6 +930,100 @@ async function markOrderCompletedAndDeductInventory(orderId) {
   }
 }
 
+async function restoreDeductedOrderInventoryForConnection(conn, orderId, lowStockThreshold) {
+  const [items] = await conn.execute(
+    "SELECT product_id, SUM(quantity) AS quantity FROM order_items WHERE order_id = ? GROUP BY product_id ORDER BY product_id ASC",
+    [orderId]
+  );
+  const updates = [];
+  for (const item of items) {
+    const productId = Number(item.product_id);
+    const quantity = Number(item.quantity || 0);
+    if (!Number.isInteger(productId) || productId <= 0 || quantity <= 0) continue;
+    await conn.execute(
+      `UPDATE products
+       SET stock = stock + ?,
+           status = CASE
+             WHEN stock + ? <= 0 THEN 'Sold'
+             WHEN stock + ? <= ${lowStockThreshold} THEN 'Low Stock'
+             ELSE 'In Stock'
+           END
+       WHERE id = ?
+         AND is_deleted = FALSE`,
+      [quantity, quantity, quantity, productId]
+    );
+    const [updatedProducts] = await conn.execute("SELECT id, name, stock, status FROM products WHERE id = ? LIMIT 1", [productId]);
+    if (updatedProducts[0]) {
+      updates.push({
+        id: Number(updatedProducts[0].id),
+        name: updatedProducts[0].name,
+        stock: Number(updatedProducts[0].stock || 0),
+        status: updatedProducts[0].status
+      });
+    }
+  }
+  return updates;
+}
+
+async function rejectPaymentFailedOrder(orderId) {
+  const { config } = await loadSystemSettings();
+  const lowStockThreshold = Number(config?.inventory?.lowStockThreshold ?? 3);
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const [orders] = await conn.execute(
+      `SELECT id, user_id, status, payment_status, payment_method, inventory_deducted_at
+       FROM orders
+       WHERE id = ?
+       FOR UPDATE`,
+      [orderId]
+    );
+    if (!orders.length) throw new HttpError(404, "Order not found");
+    const order = orders[0];
+    const currentStatus = orderStatusForStorage(order.status);
+    if (currentStatus === "rejected") {
+      await conn.commit();
+      return { updated: false, userId: order.user_id, inventoryUpdates: [] };
+    }
+    if (isCodPaymentMethod(order.payment_method)) {
+      throw new HttpError(409, "COD orders cannot be rejected through failed-payment handling.");
+    }
+    if (!isPaymentFailedOrder(order)) {
+      throw new HttpError(409, "Only payment-failed online orders can be rejected this way.");
+    }
+
+    const inventoryUpdates = order.inventory_deducted_at
+      ? await restoreDeductedOrderInventoryForConnection(conn, orderId, lowStockThreshold)
+      : [];
+    await conn.execute(
+      `UPDATE orders
+       SET status = 'rejected',
+           payment_status = 'failed',
+           rejection_reason = ?,
+           inventory_deducted_at = NULL,
+           checkout_url = NULL,
+           checkout_session_id = NULL,
+           payment_intent_id = NULL,
+           payment_method_id = NULL,
+           qr_code_url = NULL,
+           payment_expires_at = NULL
+       WHERE id = ?`,
+      [paymentFailedRejectionReason, orderId]
+    );
+    await conn.execute(
+      "INSERT INTO notifications (user_id, type, title, body) VALUES (?, 'order', 'Order rejected', ?)",
+      [order.user_id, paymentFailedCustomerNotice(orderId)]
+    );
+    await conn.commit();
+    return { updated: true, userId: order.user_id, inventoryUpdates };
+  } catch (error) {
+    await rollbackQuietly(conn, "order-payment-failed-reject");
+    throw error;
+  } finally {
+    conn.release();
+  }
+}
+
 async function runOrderCreatedSideEffects(req, result) {
   const io = req.app.get("io");
   const orderBody = `Order #${result.orderId} was placed by ${req.user.username || "a customer"}.`;
@@ -970,6 +1140,36 @@ router.patch("/:id/status", requireAuth, requireRole("admin"), asyncHandler(asyn
   const isCod = isCodPaymentMethod(order.payment_method ?? order.paymentMethod);
   if (status === "approved" && !isCod && order.payment_status !== "paid") {
     throw new HttpError(409, "This online order must be paid before it can be accepted.");
+  }
+  if (status === "rejected") {
+    const result = await rejectPaymentFailedOrder(req.params.id);
+    const updatedOrder = await loadDecoratedOrder(req.params.id, { role: "admin" });
+    const updatePayload = updatedOrder || {
+      id: Number(req.params.id),
+      status: "rejected",
+      payment_status: "failed",
+      rejection_reason: paymentFailedRejectionReason
+    };
+    if (order.user_id) {
+      req.app.get("io")?.to(`user:${order.user_id}`).emit("order:update", updatePayload);
+    }
+    req.app.get("io")?.to("admin").emit("order:update", updatePayload);
+    result.inventoryUpdates.forEach((update) => {
+      req.app.get("io")?.emit("inventory:update", { type: "inventory", action: "payment-failed-rejected-restock", ...update });
+    });
+    if (result.updated && result.userId) {
+      req.app.get("io")?.to(`user:${result.userId}`).emit("notification:new", {
+        type: "order",
+        title: "Order rejected",
+        body: paymentFailedCustomerNotice(req.params.id),
+        order_id: Number(req.params.id),
+        created_at: new Date().toISOString()
+      });
+    }
+    return res.json({
+      message: result.updated ? "Order rejected" : "Order was already rejected",
+      order: updatePayload
+    });
   }
   if (status === "ready") {
     if (order.meetup_area_eligible) {

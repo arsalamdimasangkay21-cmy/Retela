@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS cart_items (
 
 DROP PROCEDURE IF EXISTS retela_add_column_if_missing;
 DROP PROCEDURE IF EXISTS retela_add_index_if_missing;
+DROP PROCEDURE IF EXISTS retela_modify_column_if_exists;
 
 DELIMITER //
 
@@ -66,6 +67,26 @@ BEGIN
   END IF;
 END //
 
+CREATE PROCEDURE retela_modify_column_if_exists(
+  IN table_name_value VARCHAR(64),
+  IN column_name_value VARCHAR(64),
+  IN column_definition_value TEXT
+)
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = table_name_value
+      AND COLUMN_NAME = column_name_value
+  ) THEN
+    SET @retela_sql = CONCAT('ALTER TABLE `', table_name_value, '` MODIFY ', column_name_value, ' ', column_definition_value);
+    PREPARE retela_stmt FROM @retela_sql;
+    EXECUTE retela_stmt;
+    DEALLOCATE PREPARE retela_stmt;
+  END IF;
+END //
+
 DELIMITER ;
 
 CALL retela_add_column_if_missing('products', 'is_active', 'is_active BOOLEAN NOT NULL DEFAULT TRUE');
@@ -85,14 +106,29 @@ CALL retela_add_column_if_missing('orders', 'coupon_discount', 'coupon_discount 
 CALL retela_add_column_if_missing('orders', 'sale_discount', 'sale_discount DECIMAL(10,2) NOT NULL DEFAULT 0');
 CALL retela_add_column_if_missing('orders', 'shipping_fee', 'shipping_fee DECIMAL(10,2) NOT NULL DEFAULT 0');
 CALL retela_add_column_if_missing('orders', 'coupon_code', 'coupon_code VARCHAR(40) NULL');
-CALL retela_add_column_if_missing('orders', 'payment_status', 'payment_status ENUM(''unpaid'',''awaiting_payment'',''paid'',''failed'',''cancelled'',''refunded'') NOT NULL DEFAULT ''unpaid''');
+CALL retela_modify_column_if_exists('orders', 'status', 'ENUM(''pending'',''awaiting_payment'',''paid'',''approved'',''processing'',''ready'',''completed'',''cancelled'',''payment_failed'',''rejected'') NOT NULL DEFAULT ''pending''');
+CALL retela_modify_column_if_exists('orders', 'payment_status', 'ENUM(''unpaid'',''awaiting_payment'',''paid'',''failed'',''expired'',''cancelled'',''refunded'') NOT NULL DEFAULT ''unpaid''');
+CALL retela_add_column_if_missing('orders', 'payment_status', 'payment_status ENUM(''unpaid'',''awaiting_payment'',''paid'',''failed'',''expired'',''cancelled'',''refunded'') NOT NULL DEFAULT ''unpaid''');
 CALL retela_add_column_if_missing('orders', 'payment_reference', 'payment_reference VARCHAR(160) NULL');
 CALL retela_add_column_if_missing('orders', 'transaction_id', 'transaction_id VARCHAR(160) NULL');
 CALL retela_add_column_if_missing('orders', 'paid_at', 'paid_at DATETIME NULL');
 CALL retela_add_column_if_missing('orders', 'payment_provider', 'payment_provider VARCHAR(40) NULL');
 CALL retela_add_column_if_missing('orders', 'checkout_session_id', 'checkout_session_id VARCHAR(160) NULL');
 CALL retela_add_column_if_missing('orders', 'checkout_url', 'checkout_url TEXT NULL');
+CALL retela_add_column_if_missing('orders', 'payment_intent_id', 'payment_intent_id VARCHAR(160) NULL');
+CALL retela_add_column_if_missing('orders', 'payment_method_id', 'payment_method_id VARCHAR(160) NULL');
+CALL retela_add_column_if_missing('orders', 'qr_code_url', 'qr_code_url LONGTEXT NULL');
+CALL retela_add_column_if_missing('orders', 'payment_expires_at', 'payment_expires_at DATETIME NULL');
+CALL retela_add_column_if_missing('orders', 'rejection_reason', 'rejection_reason VARCHAR(255) NULL');
+CALL retela_add_column_if_missing('orders', 'payment_review_required_at', 'payment_review_required_at DATETIME NULL');
+CALL retela_add_column_if_missing('orders', 'payment_review_note', 'payment_review_note VARCHAR(255) NULL');
 CALL retela_add_column_if_missing('orders', 'tracking_number', 'tracking_number VARCHAR(120) NULL');
+
+UPDATE orders
+SET status = 'payment_failed'
+WHERE status NOT IN ('payment_failed', 'rejected', 'cancelled')
+  AND LOWER(REPLACE(REPLACE(REPLACE(TRIM(COALESCE(payment_method, '')), ' ', ''), '_', ''), '-', '')) NOT IN ('cod','cash','cashondelivery','cashupondelivery','payondelivery','paymentondelivery')
+  AND LOWER(REPLACE(REPLACE(REPLACE(TRIM(COALESCE(payment_status, '')), ' ', ''), '_', ''), '-', '')) IN ('failed','paymentfailed','unpaid','cancelled','canceled','expired');
 
 CALL retela_add_column_if_missing('reviews', 'customer_id', 'customer_id INT NULL');
 CALL retela_add_column_if_missing('reviews', 'order_id', 'order_id INT NULL');

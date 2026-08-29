@@ -610,7 +610,7 @@ export default function AdminDashboard({ active, onChange }) {
   }
 
   async function updateOrder(id, status) {
-    const actionKey = `order-${id}`;
+    const actionKey = `order-${id}-${status}`;
     if (busyAction === actionKey) return;
     setBusyAction(actionKey);
     try {
@@ -621,13 +621,13 @@ export default function AdminDashboard({ active, onChange }) {
       }
       clearGetCache("/orders");
       clearGetCache("/reports/summary");
-      Promise.all([loadOrdersData({ force: true }), loadSummaryData({ force: true })]).catch((refreshError) => {
-        console.error("[orders] refresh after status update failed", refreshError);
+      loadSummaryData({ force: true }).catch((refreshError) => {
+        console.error("[orders] summary refresh after status update failed", refreshError);
       });
-      showProductToast("Order updated successfully.");
+      showProductToast(status === "rejected" ? "Order rejected." : "Order updated successfully.", "success", "top-right");
       return { ...data, order: updatedOrder };
     } catch (error) {
-      showProductToast(getApiErrorMessage(error, "Could not update order."), "error");
+      showProductToast(getApiErrorMessage(error, "Could not update order."), "error", "top-right");
       throw error;
     } finally {
       setBusyAction("");
@@ -4178,7 +4178,11 @@ function OrderManagement({ rows, updateOrder, onNavigate, showToast }) {
     if (!selectedOrderId) return undefined;
     const handleOrderUpdate = (event) => {
       const payload = event.detail?.payload || {};
-      if (Number(payload.id) === Number(selectedOrderId)) setReloadToken((value) => value + 1);
+      if (Number(payload.id) !== Number(selectedOrderId)) return;
+      setSelectedOrder((current) => current?.order ? { ...current, order: { ...current.order, ...payload } } : current);
+      api.get(`/orders/${selectedOrderId}/items`)
+        .then(({ data }) => setSelectedOrder(data))
+        .catch((error) => console.error("[orders] background selected order refresh failed", error));
     };
     window.addEventListener("retela:data-change", handleOrderUpdate);
     return () => window.removeEventListener("retela:data-change", handleOrderUpdate);
@@ -4247,8 +4251,12 @@ function OrderManagement({ rows, updateOrder, onNavigate, showToast }) {
 
   async function saveTracking() {
     if (!selectedOrder?.order?.id) return;
-    await api.patch(`/orders/${selectedOrder.order.id}/tracking`, { tracking_number: trackingNumber });
-    setReloadToken((value) => value + 1);
+    const orderId = selectedOrder.order.id;
+    const { data } = await api.patch(`/orders/${orderId}/tracking`, { tracking_number: trackingNumber });
+    setSelectedOrder((current) => current?.order ? { ...current, order: { ...current.order, tracking_number: data.tracking_number || null } } : current);
+    api.get(`/orders/${orderId}/items`)
+      .then(({ data: latestOrderDetails }) => setSelectedOrder(latestOrderDetails))
+      .catch((error) => console.error("[orders] background tracking refresh failed", error));
   }
 
   return (
@@ -4331,7 +4339,9 @@ function OrderManagement({ rows, updateOrder, onNavigate, showToast }) {
             onMeetingPlaceSaved={(details) => {
               const orderPatch = details?.order || details;
               setSelectedOrder((current) => current?.order ? { ...current, order: { ...current.order, ...orderPatch } } : current);
-              setReloadToken((value) => value + 1);
+              api.get(`/orders/${selectedOrderId}/items`)
+                .then(({ data }) => setSelectedOrder(data))
+                .catch((error) => console.error("[orders] background meetup refresh failed", error));
               showToast?.("Meetup details saved successfully.", "success", "top-right");
             }}
             onMessageCustomer={(order) => {
@@ -4564,6 +4574,7 @@ function orderPaymentStatusLabel(order) {
   if (isCodPaymentMethod(method) && (status === "awaiting_payment" || status === "unpaid" || status === "pending" || !status)) {
     return "Pending Collection";
   }
+  if (hasFailedOnlinePayment(order)) return "Payment Failed";
   return paymentStatusLabel(status);
 }
 
@@ -4606,6 +4617,15 @@ function isCodPaymentMethod(orderOrMethod) {
   const compact = normalized.replace(/[^a-z0-9]/g, "");
   return ["cod", "cash", "cashondelivery", "cashupondelivery", "payondelivery", "paymentondelivery"].includes(compact)
     || (normalized.includes("cash") && normalized.includes("delivery"));
+}
+
+function compactPaymentStatusKey(value) {
+  return String(value || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function hasFailedOnlinePayment(order) {
+  if (!order || isCodPaymentMethod(order)) return false;
+  return ["failed", "paymentfailed", "unpaid", "cancelled", "canceled", "expired"].includes(compactPaymentStatusKey(order.payment_status ?? order.paymentStatus));
 }
 
 function finiteNonNegativeNumber(value) {
@@ -4696,6 +4716,8 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
   const [meetingPlaceError, setMeetingPlaceError] = useState("");
   const [deliverySafetyPolicy, setDeliverySafetyPolicy] = useState(defaultDeliverySafetyPolicy);
   const [displayedRouteDistanceKm, setDisplayedRouteDistanceKm] = useState(null);
+  const [actionStatus, setActionStatus] = useState("");
+  const [rejectConfirmOpen, setRejectConfirmOpen] = useState(false);
   const customerPhone = orderCustomerPhone(source);
   const customerEmail = String(source?.customer_email || source?.customerEmail || source?.email || "").trim();
   const customerName = String(source?.customer_name || source?.display_name || source?.username || "Walk-in Customer").trim() || "Walk-in Customer";
@@ -4708,10 +4730,16 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
   const isDeliveryOrder = meetupEligibility.deliveryOrder;
   const showMeetupDetails = meetupEligibility.eligible;
   const showMeetupEditor = showMeetupDetails;
-  const localMeetupGateActive = Boolean(meetupAreaEligible && ["approved", "processing"].includes(displayFulfillmentStatus(source)));
+  const fulfillmentStatus = displayFulfillmentStatus(source);
+  const paymentFailed = hasFailedOnlinePayment(source) || fulfillmentStatus === "payment_failed";
+  const rejected = fulfillmentStatus === "rejected";
+  const terminalPaymentBlock = paymentFailed || rejected;
+  const localMeetupGateActive = Boolean(meetupAreaEligible && ["approved", "processing"].includes(fulfillmentStatus));
   const meetupNeedsSchedule = Boolean(localMeetupGateActive && !meetupScheduleSaved);
   const meetupNeedsConfirmation = Boolean(localMeetupGateActive && meetupScheduleSaved && source?.meetup_confirmation_status !== "agreed");
-  const canSendOutForDelivery = ["approved", "processing"].includes(displayFulfillmentStatus(source)) && !meetupNeedsSchedule && !meetupNeedsConfirmation;
+  const canSendOutForDelivery = !terminalPaymentBlock && ["approved", "processing"].includes(fulfillmentStatus) && !meetupNeedsSchedule && !meetupNeedsConfirmation;
+  const canCompleteOrder = !terminalPaymentBlock && fulfillmentStatus === "ready";
+  const canRejectOrder = !rejected && (paymentFailed || ["pending", "approved", "processing", "ready"].includes(fulfillmentStatus));
   const meetupConfirmation = String(source?.meetup_confirmation_status || "pending").toLowerCase();
   const phoneHref = customerPhone ? customerPhone.replace(/[^\d+]/g, "") : "";
   const todayManila = manilaDateInputValue();
@@ -4769,19 +4797,35 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
   }, [meetupScrollToken, showMeetupDetails, source?.id]);
 
   async function updateStatus(status) {
-    if (!source?.id) return;
-    const data = await updateOrder(source.id, status);
-    const orderPatch = data?.order || data || { id: source.id, status };
-    const shouldScrollToMeetup = statusIsAccepted(status);
-    onStatusChanged?.({ id: source.id, status, ...orderPatch }, { scrollToMeetup: shouldScrollToMeetup, skipReload: shouldScrollToMeetup });
-    if (!shouldScrollToMeetup) return;
+    if (!source?.id || actionStatus) return;
+    setActionStatus(status);
     try {
+      const data = await updateOrder(source.id, status);
+      const orderPatch = data?.order || data || { id: source.id, status };
+      const shouldScrollToMeetup = statusIsAccepted(status);
+      onStatusChanged?.({ id: source.id, status, ...orderPatch }, { scrollToMeetup: shouldScrollToMeetup, skipReload: true });
       const { data: latestOrderDetails } = await api.get(`/orders/${source.id}/items`);
-      onStatusChanged?.(latestOrderDetails, { scrollToMeetup: true, skipReload: true });
+      onStatusChanged?.(latestOrderDetails, { scrollToMeetup: shouldScrollToMeetup, skipReload: true });
     } catch (error) {
-      console.error("[orders] failed to fetch accepted order details", error);
-      onStatusChanged?.(null, { scrollToMeetup: true });
+      console.error("[orders] status update failed", error);
+    } finally {
+      setActionStatus("");
     }
+  }
+
+  function rejectOrder() {
+    if (!canRejectOrder || actionStatus) return;
+    if (paymentFailed) {
+      setRejectConfirmOpen(true);
+      return;
+    }
+    void updateStatus("cancelled");
+  }
+
+  async function confirmPaymentFailedReject() {
+    if (!paymentFailed || actionStatus) return;
+    setRejectConfirmOpen(false);
+    await updateStatus("rejected");
   }
 
   async function saveMeetingPlace() {
@@ -4821,6 +4865,7 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
   }
 
   return (
+    <>
     <motion.div className="retela-modal-backdrop z-[120] p-3 sm:p-5" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onMouseDown={onClose}>
       <motion.div className="retela-modal-card admin-order-details-modal max-h-[88vh] w-[min(92vw,900px)] max-w-none bg-white text-[#111827]" initial={{ opacity: 0, scale: 0.94, y: 18 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.94, y: 18 }} transition={{ duration: 0.22, ease: "easeOut" }} onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="admin-order-details-title">
           {loading ? (
@@ -4837,7 +4882,10 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
                   <h3 id="admin-order-details-title" className="mt-2 font-display text-2xl font-bold text-[#111827]">Order #{source.id}</h3>
                   <p className="mt-1 text-sm font-medium text-slate-500">{customerName} | {new Date(source.created_at).toLocaleString()}</p>
                 </div>
-                <span className={`rounded-full px-3 py-2 text-xs font-bold ${orderBadgeClass(displayFulfillmentStatus(source))}`}>{orderStatusLabel(displayFulfillmentStatus(source))}</span>
+                <div className="admin-order-status-stack">
+                  {paymentFailed ? <span className="admin-payment-failed-badge">Payment Failed</span> : null}
+                  <span className={`rounded-full px-3 py-2 text-xs font-bold ${orderBadgeClass(fulfillmentStatus)}`}>{orderStatusLabel(fulfillmentStatus)}</span>
+                </div>
               </div>
               <div className="retela-modal-body grid gap-4">
               <div className="grid gap-3 sm:grid-cols-4">
@@ -4846,6 +4894,12 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
                 <OrderSummaryCard label="Payment Status" value={orderPaymentStatusLabel(source)} />
                 <OrderSummaryCard label="Payment" value={orderPaymentMethodLabel(source)} />
               </div>
+              {paymentFailed ? (
+                <section className="admin-payment-failed-note">
+                  <strong>{rejected ? "Rejected" : "Payment Failed"}</strong>
+                  <span>{source.rejection_reason || "The payment for this order was unsuccessful or could not be verified."}</span>
+                </section>
+              ) : null}
               <section className="admin-customer-details-card" aria-labelledby="admin-customer-details-title">
                 <div className="admin-order-section-heading">
                   <div>
@@ -4951,10 +5005,22 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
               <div className="retela-modal-footer">
                 <div className="flex w-full flex-wrap items-center gap-2">
                 {source.user_id ? <button type="button" onClick={() => onMessageCustomer?.(source)} className="inline-flex items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-xs font-bold text-emerald-800 transition hover:bg-emerald-100"><MessageSquare size={15} /> Message Customer</button> : null}
-                <button disabled={!canAcceptOrder(source)} onClick={() => updateStatus("approved")} className={`rounded-xl px-4 py-2 text-xs font-bold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-55 ${canAcceptOrder(source) ? orderButtonClass("approved") : "bg-slate-100 text-slate-500"}`}>Accept</button>
-                <button disabled={!["pending", "approved", "processing", "ready"].includes(displayFulfillmentStatus(source))} onClick={() => updateStatus("cancelled")} className={`rounded-xl px-4 py-2 text-xs font-bold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-55 ${["pending", "approved", "processing", "ready"].includes(displayFulfillmentStatus(source)) ? orderButtonClass("cancelled") : "bg-slate-100 text-slate-500"}`}>Reject</button>
-                <button disabled={!canSendOutForDelivery} onClick={() => updateStatus("ready")} className={`rounded-xl px-4 py-2 text-xs font-bold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-55 ${canSendOutForDelivery ? orderButtonClass("ready") : "bg-slate-100 text-slate-500"}`}>Out for Delivery</button>
-                <button disabled={displayFulfillmentStatus(source) !== "ready"} onClick={() => updateStatus("completed")} className={`rounded-xl px-4 py-2 text-xs font-bold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-55 ${displayFulfillmentStatus(source) === "ready" ? orderButtonClass("completed") : "bg-slate-100 text-slate-500"}`}>Completed</button>
+                <button type="button" disabled={Boolean(actionStatus) || !canAcceptOrder(source)} onClick={() => updateStatus("approved")} className={`inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-xs font-bold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-55 ${canAcceptOrder(source) ? orderButtonClass("approved") : "bg-slate-100 text-slate-500"}`}>
+                  {actionStatus === "approved" ? <Loader2 size={14} className="animate-spin" /> : null}
+                  {actionStatus === "approved" ? "Accepting..." : "Accept"}
+                </button>
+                <button type="button" disabled={Boolean(actionStatus) || !canRejectOrder} onClick={rejectOrder} className={`inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-xs font-bold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-55 ${canRejectOrder ? orderButtonClass(paymentFailed ? "rejected" : "cancelled") : "bg-slate-100 text-slate-500"}`}>
+                  {["cancelled", "rejected"].includes(actionStatus) ? <Loader2 size={14} className="animate-spin" /> : null}
+                  {["cancelled", "rejected"].includes(actionStatus) ? "Rejecting..." : "Reject"}
+                </button>
+                <button type="button" disabled={Boolean(actionStatus) || !canSendOutForDelivery} onClick={() => updateStatus("ready")} className={`inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-xs font-bold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-55 ${canSendOutForDelivery ? orderButtonClass("ready") : "bg-slate-100 text-slate-500"}`}>
+                  {actionStatus === "ready" ? <Loader2 size={14} className="animate-spin" /> : null}
+                  {actionStatus === "ready" ? "Updating..." : "Out for Delivery"}
+                </button>
+                <button type="button" disabled={Boolean(actionStatus) || !canCompleteOrder} onClick={() => updateStatus("completed")} className={`inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-xs font-bold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-55 ${canCompleteOrder ? orderButtonClass("completed") : "bg-slate-100 text-slate-500"}`}>
+                  {actionStatus === "completed" ? <Loader2 size={14} className="animate-spin" /> : null}
+                  {actionStatus === "completed" ? "Completing..." : "Completed"}
+                </button>
                 <button type="button" onClick={onClose} className="ml-auto rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-700 transition hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700">Close</button>
                 </div>
               </div>
@@ -4962,6 +5028,19 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
           ) : <p className="retela-modal-body text-slate-600">Order details are not available.</p>}
       </motion.div>
     </motion.div>
+    <ConfirmDialog
+      open={rejectConfirmOpen}
+      title="Reject this order?"
+      message="The payment for this order was unsuccessful or could not be verified. Rejecting the order will release the reserved items and notify the customer."
+      cancelLabel="Cancel"
+      confirmLabel="Reject Order"
+      busy={actionStatus === "rejected"}
+      onClose={() => {
+        if (actionStatus !== "rejected") setRejectConfirmOpen(false);
+      }}
+      onConfirm={confirmPaymentFailedReject}
+    />
+    </>
   );
 }
 
@@ -5241,6 +5320,7 @@ function formatCell(key, value) {
 
 function displayFulfillmentStatus(order) {
   const status = normalizeOrderStatusKey(order?.status);
+  if (status !== "rejected" && hasFailedOnlinePayment(order)) return "payment_failed";
   // Older PayMongo orders stored `paid` in the fulfillment status. They are
   // still pending fulfillment once payment is confirmed.
   if (status === "paid" && order?.payment_status === "paid") return "pending";
@@ -5251,21 +5331,26 @@ function displayFulfillmentStatus(order) {
 
 function canAcceptOrder(order) {
   if (!order) return false;
+  if (hasFailedOnlinePayment(order)) return false;
   const fulfillmentStatus = displayFulfillmentStatus(order);
   if (fulfillmentStatus !== "pending") return false;
   return isCodPaymentMethod(order) || order.payment_status === "paid" || normalizeOrderStatusKey(order.status) === "paid";
 }
 
 function paymentStatusLabel(status) {
+  const normalized = normalizeOrderStatusKey(status);
   const labels = {
     paid: "Paid",
     awaiting_payment: "Awaiting Payment",
     failed: "Payment Failed",
+    payment_failed: "Payment Failed",
+    expired: "Payment Failed",
     cancelled: "Cancelled",
+    canceled: "Cancelled",
     refunded: "Refunded",
     unpaid: "Unpaid"
   };
-  return labels[status] || "Unpaid";
+  return labels[normalized] || "Unpaid";
 }
 
 function orderButtonClass(status) {
@@ -5274,7 +5359,8 @@ function orderButtonClass(status) {
     processing: "bg-blue-50 text-bluebrand",
     ready: "bg-amber-50 text-amber-700",
     completed: "order-action-completed border border-emerald-200 bg-emerald-50 text-emerald-800 hover:border-emerald-300 hover:bg-emerald-100",
-    cancelled: "bg-rose-50 text-rose-700"
+    cancelled: "bg-rose-50 text-rose-700",
+    rejected: "bg-rose-50 text-rose-700"
   };
   return styles[status] || "bg-white text-bluebrand";
 }
@@ -5289,7 +5375,9 @@ function orderBadgeClass(status) {
     ready: "border border-[#BAE6FD] bg-[#E0F2FE] text-[#0369A1]",
     completed: "border border-[#BBF7D0] bg-[#DCFCE7] text-[#166534]",
     cancelled: "border border-[#FECACA] bg-[#FEE2E2] text-[#B91C1C]",
-    payment_failed: "border border-[#FECACA] bg-[#FEE2E2] text-[#B91C1C]"
+    canceled: "border border-[#FECACA] bg-[#FEE2E2] text-[#B91C1C]",
+    payment_failed: "border border-[#FECACA] bg-[#FEE2E2] text-[#B91C1C]",
+    rejected: "border border-[#FECACA] bg-[#FEE2E2] text-[#B91C1C]"
   };
   return styles[status] || "border border-[#BFDBFE] bg-[#DBEAFE] text-[#1D4ED8]";
 }

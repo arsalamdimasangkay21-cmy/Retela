@@ -20,6 +20,9 @@ const PAYMONGO_CHECKOUT_METHOD_TYPES = Object.freeze({
   credit: Object.freeze(["card"]),
   maya: Object.freeze(["paymaya"])
 });
+const orderStatusEnumSql = "ENUM('pending','awaiting_payment','paid','approved','processing','ready','completed','cancelled','payment_failed','rejected')";
+const paymentStatusEnumSql = "ENUM('unpaid','awaiting_payment','paid','failed','expired','cancelled','refunded')";
+const paymentReviewAfterRejectionNote = "Payment succeeded after the order was rejected. Review manually; the order was not reactivated.";
 
 async function ensurePaymentColumns() {
   paymentColumnsReady ||= (async () => {
@@ -28,13 +31,13 @@ async function ensurePaymentColumns() {
        FROM INFORMATION_SCHEMA.COLUMNS
        WHERE TABLE_SCHEMA = DATABASE()
          AND TABLE_NAME = 'orders'
-         AND COLUMN_NAME IN ('payment_status', 'payment_reference', 'transaction_id', 'paid_at', 'inventory_deducted_at', 'payment_provider', 'checkout_session_id', 'checkout_url', 'payment_intent_id', 'payment_method_id', 'qr_code_url', 'payment_expires_at')`
+         AND COLUMN_NAME IN ('payment_status', 'payment_reference', 'transaction_id', 'paid_at', 'inventory_deducted_at', 'payment_provider', 'checkout_session_id', 'checkout_url', 'payment_intent_id', 'payment_method_id', 'qr_code_url', 'payment_expires_at', 'rejection_reason', 'payment_review_required_at', 'payment_review_note')`
     );
     const columns = new Set(rows.map((row) => row.COLUMN_NAME));
-    await safeModifyColumn("orders", "status", "status enum update", "ALTER TABLE orders MODIFY status ENUM('pending','awaiting_payment','paid','approved','processing','ready','completed','cancelled','payment_failed') NOT NULL DEFAULT 'pending'");
+    await safeModifyColumn("orders", "status", "status enum update", `ALTER TABLE orders MODIFY status ${orderStatusEnumSql} NOT NULL DEFAULT 'pending'`);
     await safeModifyColumn("orders", "payment_method", "payment_method enum update", "ALTER TABLE orders MODIFY payment_method ENUM('cod','cash','gcash','qrph','debit','credit','maya') NOT NULL DEFAULT 'cod'");
-    await safeModifyColumn("orders", "payment_status", "payment_status enum update", "ALTER TABLE orders MODIFY payment_status ENUM('unpaid','awaiting_payment','paid','failed','expired','cancelled','refunded') NOT NULL DEFAULT 'unpaid'");
-    if (!columns.has("payment_status")) await query("ALTER TABLE orders ADD COLUMN payment_status ENUM('unpaid','awaiting_payment','paid','failed','expired','cancelled','refunded') NOT NULL DEFAULT 'unpaid' AFTER payment_method");
+    await safeModifyColumn("orders", "payment_status", "payment_status enum update", `ALTER TABLE orders MODIFY payment_status ${paymentStatusEnumSql} NOT NULL DEFAULT 'unpaid'`);
+    if (!columns.has("payment_status")) await query(`ALTER TABLE orders ADD COLUMN payment_status ${paymentStatusEnumSql} NOT NULL DEFAULT 'unpaid' AFTER payment_method`);
     if (!columns.has("payment_reference")) await query("ALTER TABLE orders ADD COLUMN payment_reference VARCHAR(160) NULL AFTER payment_status");
     if (!columns.has("transaction_id")) await query("ALTER TABLE orders ADD COLUMN transaction_id VARCHAR(160) NULL AFTER payment_reference");
     if (!columns.has("paid_at")) await query("ALTER TABLE orders ADD COLUMN paid_at DATETIME NULL AFTER transaction_id");
@@ -54,6 +57,9 @@ async function ensurePaymentColumns() {
     if (!columns.has("payment_method_id")) await query("ALTER TABLE orders ADD COLUMN payment_method_id VARCHAR(160) NULL AFTER payment_intent_id");
     if (!columns.has("qr_code_url")) await query("ALTER TABLE orders ADD COLUMN qr_code_url LONGTEXT NULL AFTER checkout_url");
     if (!columns.has("payment_expires_at")) await query("ALTER TABLE orders ADD COLUMN payment_expires_at DATETIME NULL AFTER qr_code_url");
+    if (!columns.has("rejection_reason")) await query("ALTER TABLE orders ADD COLUMN rejection_reason VARCHAR(255) NULL AFTER payment_expires_at");
+    if (!columns.has("payment_review_required_at")) await query("ALTER TABLE orders ADD COLUMN payment_review_required_at DATETIME NULL AFTER rejection_reason");
+    if (!columns.has("payment_review_note")) await query("ALTER TABLE orders ADD COLUMN payment_review_note VARCHAR(255) NULL AFTER payment_review_required_at");
   })().catch((error) => {
     paymentColumnsReady = undefined;
     throw error;
@@ -430,7 +436,7 @@ async function markOrderFailed({ orderId, transactionId, reference, io = null })
       "SELECT id, user_id, status, payment_status, inventory_deducted_at FROM orders WHERE id = :orderId FOR UPDATE",
       { orderId }
     );
-    if (!rows.length || ["paid", "failed", "expired"].includes(rows[0].payment_status) || rows[0].status === "cancelled" || rows[0].payment_status === "cancelled") {
+    if (!rows.length || ["paid", "failed", "expired"].includes(rows[0].payment_status) || ["cancelled", "rejected"].includes(rows[0].status) || rows[0].payment_status === "cancelled") {
       return { updated: false, userId: rows[0]?.user_id || null, inventoryUpdates: [] };
     }
     const inventoryUpdates = await restoreDeductedOrderInventory(run, rows[0], lowStockThreshold);
@@ -475,7 +481,7 @@ async function markOrderExpired({ orderId, io = null }) {
       "SELECT id, user_id, status, payment_status, inventory_deducted_at FROM orders WHERE id = :orderId FOR UPDATE",
       { orderId }
     );
-    if (!rows.length || ["paid", "cancelled", "expired"].includes(rows[0].payment_status)) {
+    if (!rows.length || ["paid", "cancelled", "expired"].includes(rows[0].payment_status) || rows[0].status === "rejected") {
       return { updated: false, inventoryUpdates: [] };
     }
     const inventoryUpdates = await restoreDeductedOrderInventory(run, rows[0], lowStockThreshold);
@@ -586,7 +592,10 @@ function paymentStatusResponse(order, extras = {}) {
       payment_intent_id: order.payment_intent_id || null,
       payment_id: order.transaction_id || null,
       qr_image: order.qr_code_url || null,
-      payment_expires_at: order.payment_expires_at || null
+      payment_expires_at: order.payment_expires_at || null,
+      rejection_reason: order.rejection_reason || null,
+      payment_review_required_at: order.payment_review_required_at || null,
+      payment_review_note: order.payment_review_note || null
     } : {})
   };
 }
@@ -621,7 +630,7 @@ async function findOrderForPaymongo({ orderId, checkoutSessionId, paymentIntentI
   const ownership = isAdmin ? "" : "AND user_id = :userId";
   if (orderId) {
     const rows = await query(
-      `SELECT id, user_id, status, payment_status, payment_method, payment_reference, transaction_id, paid_at, payment_provider, checkout_session_id, payment_intent_id, payment_method_id, qr_code_url, payment_expires_at, total_amount
+      `SELECT id, user_id, status, payment_status, payment_method, payment_reference, transaction_id, paid_at, payment_provider, checkout_session_id, payment_intent_id, payment_method_id, qr_code_url, payment_expires_at, rejection_reason, payment_review_required_at, payment_review_note, total_amount
        FROM orders
        WHERE id = :orderId ${ownership}
        LIMIT 1`,
@@ -631,7 +640,7 @@ async function findOrderForPaymongo({ orderId, checkoutSessionId, paymentIntentI
   }
   if (checkoutSessionId) {
     const rows = await query(
-      `SELECT id, user_id, status, payment_status, payment_method, payment_reference, transaction_id, paid_at, payment_provider, checkout_session_id, payment_intent_id, payment_method_id, qr_code_url, payment_expires_at, total_amount
+      `SELECT id, user_id, status, payment_status, payment_method, payment_reference, transaction_id, paid_at, payment_provider, checkout_session_id, payment_intent_id, payment_method_id, qr_code_url, payment_expires_at, rejection_reason, payment_review_required_at, payment_review_note, total_amount
        FROM orders
        WHERE checkout_session_id = :checkoutSessionId ${ownership}
        LIMIT 1`,
@@ -641,7 +650,7 @@ async function findOrderForPaymongo({ orderId, checkoutSessionId, paymentIntentI
   }
   if (paymentIntentId) {
     const rows = await query(
-      `SELECT id, user_id, status, payment_status, payment_method, payment_reference, transaction_id, paid_at, payment_provider, checkout_session_id, payment_intent_id, payment_method_id, qr_code_url, payment_expires_at, total_amount
+      `SELECT id, user_id, status, payment_status, payment_method, payment_reference, transaction_id, paid_at, payment_provider, checkout_session_id, payment_intent_id, payment_method_id, qr_code_url, payment_expires_at, rejection_reason, payment_review_required_at, payment_review_note, total_amount
        FROM orders
        WHERE payment_intent_id = :paymentIntentId ${ownership}
        LIMIT 1`,
@@ -651,7 +660,7 @@ async function findOrderForPaymongo({ orderId, checkoutSessionId, paymentIntentI
   }
   if (reference) {
     const rows = await query(
-      `SELECT id, user_id, status, payment_status, payment_method, payment_reference, transaction_id, paid_at, payment_provider, checkout_session_id, payment_intent_id, payment_method_id, qr_code_url, payment_expires_at, total_amount
+      `SELECT id, user_id, status, payment_status, payment_method, payment_reference, transaction_id, paid_at, payment_provider, checkout_session_id, payment_intent_id, payment_method_id, qr_code_url, payment_expires_at, rejection_reason, payment_review_required_at, payment_review_note, total_amount
        FROM orders
        WHERE payment_reference = :reference ${ownership}
        LIMIT 1`,
@@ -682,7 +691,7 @@ function emitPaymentOrderUpdate(io, order) {
 
 async function getOrderPaymentStatus(orderId) {
   const rows = await query(
-    `SELECT id, user_id, status, payment_status, payment_method, payment_reference, transaction_id, paid_at, payment_provider, checkout_session_id, payment_intent_id, payment_method_id, qr_code_url, payment_expires_at, total_amount
+    `SELECT id, user_id, status, payment_status, payment_method, payment_reference, transaction_id, paid_at, payment_provider, checkout_session_id, payment_intent_id, payment_method_id, qr_code_url, payment_expires_at, rejection_reason, payment_review_required_at, payment_review_note, total_amount
      FROM orders
      WHERE id = :orderId
      LIMIT 1`,
@@ -813,9 +822,31 @@ async function markOrderPaid({ orderId, transactionId, reference, checkoutSessio
       "SELECT id, user_id, status, payment_status FROM orders WHERE id = :orderId FOR UPDATE",
       { orderId }
     );
-    if (!rows.length) return { updated: false, userId: null };
+    if (!rows.length) return { updated: false, userId: null, reviewRequired: false };
+    if (rows[0].status === "rejected") {
+      await run(
+        `UPDATE orders
+         SET transaction_id = COALESCE(:transactionId, transaction_id),
+             payment_reference = COALESCE(:reference, payment_reference),
+             payment_provider = 'paymongo',
+             checkout_session_id = COALESCE(:checkoutSessionId, checkout_session_id),
+             payment_intent_id = COALESCE(:paymentIntentId, payment_intent_id),
+             payment_review_required_at = COALESCE(payment_review_required_at, NOW()),
+             payment_review_note = :paymentReviewNote
+         WHERE id = :orderId`,
+        {
+          orderId,
+          transactionId: transactionId || null,
+          reference: reference || null,
+          checkoutSessionId: checkoutSessionId || null,
+          paymentIntentId: paymentIntentId || null,
+          paymentReviewNote: paymentReviewAfterRejectionNote
+        }
+      );
+      return { updated: false, userId: rows[0].user_id, reviewRequired: true };
+    }
     if (rows[0].payment_status === "paid" || rows[0].status === "cancelled" || rows[0].payment_status === "cancelled") {
-      return { updated: false, userId: rows[0].user_id };
+      return { updated: false, userId: rows[0].user_id, reviewRequired: false };
     }
     await run(
       `UPDATE orders
@@ -837,11 +868,22 @@ async function markOrderPaid({ orderId, transactionId, reference, checkoutSessio
       "INSERT INTO notifications (user_id, type, title, body) VALUES (:userId, 'order', 'Payment received', :body)",
       { userId: rows[0].user_id, body: `Payment for Order #${orderId} was confirmed.` }
     );
-    return { updated: true, userId: rows[0].user_id };
+    return { updated: true, userId: rows[0].user_id, reviewRequired: false };
   });
   if (!result.updated) {
     const order = await getOrderPaymentStatus(orderId);
-    return { order, adminNotification: null, updated: false };
+    let adminNotification = null;
+    if (result.reviewRequired) {
+      adminNotification = await createAdminNotification({
+        type: "payment",
+        title: "Payment needs review",
+        body: `Payment was received for rejected Order #${orderId}. Review manually before taking any action.`,
+        customerId: result.userId,
+        emit: false
+      });
+      emitPaymentOrderUpdate(io, order);
+    }
+    return { order, adminNotification, updated: false, reviewRequired: Boolean(result.reviewRequired) };
   }
   const adminNotification = await createAdminNotification({
     type: "payment",
@@ -953,8 +995,8 @@ router.post("/create-gcash-checkout", requireAuth, requireApproved, asyncHandler
   );
   if (!orders.length) throw new HttpError(404, "Order not found");
   const order = orders[0];
-  if (order.status === "cancelled" || order.payment_status === "cancelled") {
-    throw new HttpError(409, "This order has been cancelled and can no longer be paid.");
+  if (["cancelled", "rejected"].includes(String(order.status || "").toLowerCase()) || order.payment_status === "cancelled") {
+    throw new HttpError(409, "This order can no longer be paid.");
   }
   if (order.payment_status === "paid") throw new HttpError(400, "This order is already paid.");
 
@@ -1187,7 +1229,7 @@ router.get("/orders/:orderId/status", requireAuth, requireApproved, asyncHandler
 router.get("/status/:id", requireAuth, requireApproved, asyncHandler(async (req, res) => {
   await ensurePaymentColumns();
   const rows = await query(
-    `SELECT id, status, payment_status, payment_method, payment_reference, transaction_id, paid_at, payment_provider, payment_intent_id, payment_method_id, qr_code_url, payment_expires_at, total_amount
+    `SELECT id, status, payment_status, payment_method, payment_reference, transaction_id, paid_at, payment_provider, payment_intent_id, payment_method_id, qr_code_url, payment_expires_at, rejection_reason, payment_review_required_at, payment_review_note, total_amount
      FROM orders
      WHERE id = :id AND (:isAdmin = true OR user_id = :userId)`,
     { id: req.params.id, userId: req.user.id, isAdmin: req.user.role === "admin" }

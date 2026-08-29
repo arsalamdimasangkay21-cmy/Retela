@@ -5075,7 +5075,8 @@ button {
 
 .order-status-badge.is-cancelled,
 .order-status-badge.is-canceled,
-.order-status-badge.is-payment_failed {
+.order-status-badge.is-payment_failed,
+.order-status-badge.is-rejected {
   border-color: #fecaca;
   background: #fee2e2;
   color: #b91c1c;
@@ -8547,6 +8548,53 @@ button {
 .admin-customer-contact-link:focus-visible {
   color: #065f46;
   text-decoration-color: #34d399;
+}
+
+.admin-order-status-stack {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.admin-payment-failed-badge {
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #fecaca;
+  border-radius: 999px;
+  background: #fee2e2;
+  padding: 8px 12px;
+  color: #b91c1c;
+  font-size: 0.75rem;
+  font-weight: 900;
+  line-height: 1.1;
+}
+
+.admin-payment-failed-note {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+  border: 1px solid #fecaca;
+  border-radius: 14px;
+  background: #fff7f7;
+  padding: 12px 14px;
+  color: #b91c1c;
+}
+
+.admin-payment-failed-note strong {
+  font-size: 0.9rem;
+  font-weight: 900;
+}
+
+.admin-payment-failed-note span {
+  color: #7f1d1d;
+  font-size: 0.84rem;
+  font-weight: 700;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 
 .retela-meeting-place-card h4,
