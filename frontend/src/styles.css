@@ -674,6 +674,42 @@ button {
   color: var(--retela-ink);
 }
 
+.conversation-action-toast {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  z-index: 1900;
+  display: inline-flex;
+  width: min(340px, calc(100vw - 40px));
+  align-items: center;
+  gap: 10px;
+  border: 1px solid #8fc9a0;
+  border-radius: 16px;
+  background: #effaf2;
+  padding: 12px 14px;
+  color: #14532d;
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.16);
+}
+
+.conversation-action-toast span {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 999px;
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.conversation-action-toast p {
+  min-width: 0;
+  color: inherit;
+  font-size: 0.86rem;
+  font-weight: 850;
+  line-height: 1.35;
+}
+
 .premium-shell.retela-dark-shell .customer-toast,
 .retela-dark .customer-toast {
   border-color: rgba(255, 255, 255, 0.12);
@@ -703,6 +739,20 @@ button {
   color: #ffffff;
 }
 
+.premium-shell.retela-dark-shell .conversation-action-toast,
+.retela-dark .conversation-action-toast {
+  border-color: rgba(52, 211, 153, 0.32);
+  background: rgba(15, 26, 21, 0.96);
+  color: #d9fbe7;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.4);
+}
+
+.premium-shell.retela-dark-shell .conversation-action-toast span,
+.retela-dark .conversation-action-toast span {
+  background: rgba(22, 163, 74, 0.2);
+  color: #86efac;
+}
+
 @media (max-width: 640px) {
   .customer-toast-stack {
     top: calc(env(safe-area-inset-top) + 12px);
@@ -710,6 +760,21 @@ button {
     left: auto;
     width: calc(100vw - 24px);
     max-width: 320px;
+  }
+
+  .conversation-action-toast {
+    top: calc(env(safe-area-inset-top) + 12px);
+    right: 12px;
+    width: calc(100vw - 24px);
+  }
+
+  .retela-continue-shopping-button {
+    width: 100%;
+    min-height: 46px;
+  }
+
+  .retela-meetup-schedule-grid {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -2858,6 +2923,78 @@ button {
 
 .conversation-unread-badge {
   line-height: 1;
+}
+
+.conversation-actions-menu-wrap {
+  position: relative;
+  z-index: 70;
+  display: inline-flex;
+}
+
+.conversation-actions-trigger {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  border: 1px solid #d8eadf;
+  border-radius: 16px;
+  background: #ffffff;
+  color: #102018;
+  transition: background-color 180ms ease, border-color 180ms ease, color 180ms ease, transform 180ms ease;
+}
+
+.conversation-actions-trigger:hover,
+.conversation-actions-trigger:focus-visible {
+  border-color: #86d8a2;
+  background: #ecfdf5;
+  color: #15803d;
+}
+
+.conversation-actions-trigger:active {
+  transform: scale(0.97);
+}
+
+.conversation-actions-dropdown {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 90;
+  display: grid;
+  min-width: 150px;
+  border: 1px solid #f1c1c1;
+  border-radius: 14px;
+  background: #ffffff;
+  padding: 6px;
+  box-shadow: 0 18px 38px rgba(15, 23, 42, 0.18);
+  transform-origin: top right;
+}
+
+.conversation-actions-remove {
+  display: inline-flex;
+  min-height: 40px;
+  width: 100%;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 9px;
+  border-radius: 10px;
+  padding: 9px 10px;
+  color: #b42318;
+  font-size: 0.85rem;
+  font-weight: 850;
+  line-height: 1.1;
+  white-space: nowrap;
+  transition: background-color 160ms ease, color 160ms ease;
+}
+
+.conversation-actions-remove:hover,
+.conversation-actions-remove:focus-visible {
+  background: #fff1f1;
+  color: #991b1b;
+}
+
+.conversation-actions-remove:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
 }
 
 .analytics-stats-grid {
@@ -7516,6 +7653,42 @@ button {
   font-weight: 850;
 }
 
+.retela-continue-shopping-button {
+  display: inline-flex;
+  min-height: 44px;
+  min-width: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  border: 1px solid #0b8f59;
+  border-radius: 14px;
+  background: #08764d;
+  padding: 10px 16px;
+  color: #ffffff;
+  font-size: 0.9rem;
+  font-weight: 850;
+  line-height: 1.1;
+  white-space: nowrap;
+  box-shadow: 0 14px 28px rgba(8, 118, 77, 0.22);
+  transition: background-color 180ms ease, border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
+}
+
+.retela-continue-shopping-button:hover {
+  border-color: #065f46;
+  background: #065f46;
+  box-shadow: 0 18px 34px rgba(8, 118, 77, 0.28);
+  transform: translateY(-1px);
+}
+
+.retela-continue-shopping-button:active {
+  transform: translateY(0) scale(0.98);
+}
+
+.retela-continue-shopping-button:focus-visible {
+  outline: 3px solid rgba(52, 211, 153, 0.34);
+  outline-offset: 3px;
+}
+
 .retela-admin-meetup-response,
 .retela-meetup-confirmation {
   display: grid;
@@ -7565,6 +7738,70 @@ button {
   color: #355449;
 }
 .retela-meetup-cancel-button:hover { background: #effaf3; }
+
+.retela-meetup-schedule-card,
+.retela-meetup-waiting-card {
+  background: #ffffff;
+}
+
+.retela-meetup-schedule-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.retela-meetup-schedule-grid > div,
+.retela-meetup-note,
+.retela-meetup-policy-card,
+.retela-meetup-confirmed-box {
+  min-width: 0;
+  border: 1px solid #d8e8de;
+  border-radius: 14px;
+  background: #f7fff9;
+  padding: 12px;
+}
+
+.retela-meetup-schedule-grid span,
+.retela-meetup-note span {
+  display: block;
+  color: #166534;
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  line-height: 1.35;
+  text-transform: uppercase;
+}
+
+.retela-meetup-schedule-grid strong {
+  display: block;
+  margin-top: 5px;
+  color: #17211b;
+  font-size: 0.9rem;
+  font-weight: 850;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.retela-meetup-note p,
+.retela-meetup-policy-card p:not(.retela-modal-eyebrow),
+.retela-meetup-confirmed-box p:not(.retela-meetup-confirmed) {
+  margin-top: 6px;
+  color: #3f5047;
+  font-size: 0.84rem;
+  font-weight: 650;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.retela-meetup-policy-card {
+  background: #f2fbf5;
+}
+
+.retela-meetup-confirmed-box {
+  border-color: #b7e4cf;
+  background: #effaf3;
+}
 
 .retela-inline-route {
   display: grid;
@@ -10730,6 +10967,42 @@ button {
   border-color: var(--retela-border-dark) !important;
 }
 
+.retela-dark .conversation-actions-trigger,
+.premium-shell.retela-dark-shell .conversation-actions-trigger {
+  border-color: var(--retela-border-dark) !important;
+  background: rgba(15, 26, 21, 0.78) !important;
+  color: var(--retela-text-dark) !important;
+}
+
+.retela-dark .conversation-actions-trigger:hover,
+.retela-dark .conversation-actions-trigger:focus-visible,
+.premium-shell.retela-dark-shell .conversation-actions-trigger:hover,
+.premium-shell.retela-dark-shell .conversation-actions-trigger:focus-visible {
+  border-color: rgba(52, 211, 153, 0.42) !important;
+  background: rgba(22, 163, 106, 0.16) !important;
+  color: #b8ffd0 !important;
+}
+
+.retela-dark .conversation-actions-dropdown,
+.premium-shell.retela-dark-shell .conversation-actions-dropdown {
+  border-color: rgba(248, 113, 113, 0.26) !important;
+  background: #15231d !important;
+  box-shadow: 0 22px 48px rgba(0, 0, 0, 0.48) !important;
+}
+
+.retela-dark .conversation-actions-remove,
+.premium-shell.retela-dark-shell .conversation-actions-remove {
+  color: #fecdd3 !important;
+}
+
+.retela-dark .conversation-actions-remove:hover,
+.retela-dark .conversation-actions-remove:focus-visible,
+.premium-shell.retela-dark-shell .conversation-actions-remove:hover,
+.premium-shell.retela-dark-shell .conversation-actions-remove:focus-visible {
+  background: rgba(190, 18, 60, 0.18) !important;
+  color: #fecaca !important;
+}
+
 .retela-dark .admin-customers-card,
 .retela-dark .admin-customers-filter-card,
 .retela-dark .admin-customer-overview-card,
@@ -11178,6 +11451,53 @@ button {
   border-color: rgba(52, 211, 153, 0.28);
   background: rgba(22, 163, 106, 0.12);
   color: var(--retela-text-dark);
+}
+
+.retela-dark .retela-continue-shopping-button,
+.premium-shell.retela-dark-shell .retela-continue-shopping-button {
+  border-color: rgba(134, 239, 172, 0.52) !important;
+  background: #159b63 !important;
+  color: #ffffff !important;
+  box-shadow: 0 18px 34px rgba(0, 0, 0, 0.34) !important;
+}
+
+.retela-dark .retela-continue-shopping-button:hover,
+.premium-shell.retela-dark-shell .retela-continue-shopping-button:hover {
+  background: #0f7a50 !important;
+}
+
+.retela-dark .retela-meetup-schedule-grid > div,
+.retela-dark .retela-meetup-note,
+.retela-dark .retela-meetup-policy-card,
+.retela-dark .retela-meetup-confirmed-box,
+.premium-shell.retela-dark-shell .retela-meetup-schedule-grid > div,
+.premium-shell.retela-dark-shell .retela-meetup-note,
+.premium-shell.retela-dark-shell .retela-meetup-policy-card,
+.premium-shell.retela-dark-shell .retela-meetup-confirmed-box {
+  border-color: rgba(52, 211, 153, 0.24) !important;
+  background: rgba(15, 26, 21, 0.76) !important;
+  color: var(--retela-text-dark) !important;
+}
+
+.retela-dark .retela-meetup-schedule-grid span,
+.retela-dark .retela-meetup-note span,
+.premium-shell.retela-dark-shell .retela-meetup-schedule-grid span,
+.premium-shell.retela-dark-shell .retela-meetup-note span {
+  color: #94e7b5 !important;
+}
+
+.retela-dark .retela-meetup-schedule-grid strong,
+.premium-shell.retela-dark-shell .retela-meetup-schedule-grid strong {
+  color: var(--retela-text-dark) !important;
+}
+
+.retela-dark .retela-meetup-note p,
+.retela-dark .retela-meetup-policy-card p:not(.retela-modal-eyebrow),
+.retela-dark .retela-meetup-confirmed-box p:not(.retela-meetup-confirmed),
+.premium-shell.retela-dark-shell .retela-meetup-note p,
+.premium-shell.retela-dark-shell .retela-meetup-policy-card p:not(.retela-modal-eyebrow),
+.premium-shell.retela-dark-shell .retela-meetup-confirmed-box p:not(.retela-meetup-confirmed) {
+  color: var(--retela-text-muted-dark) !important;
 }
 
 .retela-dark .retela-meetup-response-message,

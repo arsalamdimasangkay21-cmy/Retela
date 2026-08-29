@@ -3830,23 +3830,15 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
   const customerEmail = String(source?.customer_email || source?.customerEmail || source?.email || "").trim();
   const customerName = String(source?.customer_name || source?.display_name || source?.username || "Walk-in Customer").trim() || "Walk-in Customer";
   const completeDeliveryAddress = orderCompleteDeliveryAddress(source);
-  const hasMeetupData = Boolean(
-    source?.meeting_place
-      || source?.meetup_date
-      || source?.meetup_time
-      || (source?.meetup_confirmation_status && source.meetup_confirmation_status !== "pending")
-      || source?.meetup_24h_reminder_sent_at
-      || source?.meetup_1h_reminder_sent_at
-  );
   const acceptedForMeetup = displayFulfillmentStatus(source) === "approved";
-  const activeMeetupStatus = ["approved", "processing", "ready", "completed"].includes(displayFulfillmentStatus(source));
   const meetupScheduleSaved = Boolean(source?.meeting_place && source?.meetup_date && source?.meetup_time);
   const codOrder = ["cod", "cash", "cash_on_delivery"].includes(String(source?.payment_method || "").trim().toLowerCase());
   const meetupAreaEligible = Boolean(codOrder && source?.meetup_area_eligible);
-  const showMeetupDetails = Boolean(meetupAreaEligible && activeMeetupStatus && (acceptedForMeetup || hasMeetupData));
+  const showMeetupDetails = Boolean(meetupAreaEligible && acceptedForMeetup);
   const showMeetupEditor = Boolean(codOrder && source?.meetup_eligible && acceptedForMeetup);
-  const meetupNeedsSchedule = Boolean(meetupAreaEligible && ["approved", "processing"].includes(displayFulfillmentStatus(source)) && !meetupScheduleSaved);
-  const meetupNeedsConfirmation = Boolean(meetupAreaEligible && meetupScheduleSaved && source?.meetup_confirmation_status !== "agreed");
+  const localMeetupGateActive = Boolean(meetupAreaEligible && ["approved", "processing"].includes(displayFulfillmentStatus(source)));
+  const meetupNeedsSchedule = Boolean(localMeetupGateActive && !meetupScheduleSaved);
+  const meetupNeedsConfirmation = Boolean(localMeetupGateActive && meetupScheduleSaved && source?.meetup_confirmation_status !== "agreed");
   const canSendOutForDelivery = ["approved", "processing"].includes(displayFulfillmentStatus(source)) && !meetupNeedsSchedule && !meetupNeedsConfirmation;
   const meetupConfirmation = String(source?.meetup_confirmation_status || "pending").toLowerCase();
   const phoneHref = customerPhone ? customerPhone.replace(/[^\d+]/g, "") : "";

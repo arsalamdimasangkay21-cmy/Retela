@@ -795,7 +795,8 @@ router.patch("/:id/status", requireAuth, requireRole("admin"), asyncHandler(asyn
   if (currentStatus !== status && !allowedAdminStatusTransitions[currentStatus]?.has(status)) {
     throw new HttpError(409, "This order status cannot be changed that way.");
   }
-  const isCod = String(orders[0].payment_method || "").toLowerCase() === "cod";
+  const paymentMethod = String(orders[0].payment_method || "").trim().toLowerCase();
+  const isCod = paymentMethod === "cod" || paymentMethod === "cash" || paymentMethod === "cash_on_delivery";
   if (status === "approved" && !isCod && orders[0].payment_status !== "paid") {
     throw new HttpError(409, "This online order must be paid before it can be accepted.");
   }
@@ -943,7 +944,7 @@ router.patch("/:id/meetup-confirmation", requireAuth, requireApproved, asyncHand
   );
   if (!orders.length) throw new HttpError(404, "Order not found");
   const [eligible] = await decorateMeetupEligibility(orders);
-  if (!eligible.meetup_eligible || !(eligible.meeting_place || eligible.meetup_date || eligible.meetup_time)) {
+  if (!eligible.meetup_eligible || !(eligible.meeting_place && eligible.meetup_date && eligible.meetup_time)) {
     throw new HttpError(409, "There is no active meetup schedule to confirm.");
   }
   const note = input.decision === "disagreed" ? (input.note || null) : null;

@@ -48,7 +48,7 @@ const defaultReturnShippingFee = 50;
 const customerShopPageSize = 8;
 const defaultCustomerFilters = { search: "", brand: "all", category: "all", size: "all", stock: "all", minPrice: "", maxPrice: "", sortBy: "latest" };
 const defaultDeliverySafetyPolicy = "For everyone's safety, customers and delivery personnel should meet only at the confirmed delivery or meeting location shown in the order. Verify the order and customer/delivery identity before handing over or accepting an item. Avoid changing the meetup location through unofficial messages. Keep communication inside RETELA whenever possible. Do not share OTPs, passwords, or sensitive account information. If the location feels unsafe, contact the other party through RETELA and arrange a safer public meeting point before completing the order.";
-const meetupCashOnDeliveryPolicy = "For your safety and convenience, please review the meeting place, date, and time selected by RETELA. Confirm the schedule only if you are available and comfortable with the location.\n\nPlease prepare the correct payment amount and verify your order before completing the transaction. Meet only at the location displayed in your official RETELA order details. If you cannot attend or have concerns about the location, select ‘Cannot Confirm’ so the administrator can arrange another schedule. Never share your password, OTP, or sensitive account information.";
+const meetupCashOnDeliveryPolicy = "Please review the meeting place, date, and time selected by RETELA before confirming. Confirm the schedule only if you are available and comfortable with the location.\n\nPlease prepare the correct payment amount and meet only at the location displayed in your official RETELA order details. If you cannot attend or have concerns about the schedule, select 'Cannot Confirm' so the administrator can arrange another meetup. Never share your password, OTP, or sensitive account information.";
 const onlinePaymentOrderPolicy = "To protect both the customer and RETELA, orders using online payment will be reviewed only after successful payment has been verified. Please confirm your selected items, delivery address, contact details, and total amount before completing your payment. Order acceptance is subject to payment verification and product availability. If payment cannot be verified or an item becomes unavailable, RETELA will contact you and provide the appropriate assistance or refund option. Please keep your official payment receipt for reference.";
 const codOrderPolicy = "Cash on Delivery orders are subject to product availability and delivery-area verification. Please prepare the exact payment amount and ensure that someone is available at the confirmed delivery address to receive and pay for the order. RETELA may contact you to verify your order before acceptance. Repeated refusal, failure to receive an order, or providing incorrect delivery information may affect future COD availability.";
 const paymentNumberLabels = {
@@ -518,7 +518,7 @@ export default function CustomerDashboard({ active, onChange }) {
       const { data } = await api.patch(`/orders/${order.id}/meetup-confirmation`, { decision, note });
       setOrders((current) => current.map((item) => Number(item.id) === Number(order.id) ? { ...item, ...data } : item));
       clearGetCache("/orders");
-      dispatchCustomerToast({ type: "success", message: decision === "agreed" ? "Meetup schedule confirmed." : "Schedule declined. The shop can propose another time." });
+      dispatchCustomerToast({ type: "success", message: decision === "agreed" ? "You have confirmed the meetup schedule." : "Your response has been sent. RETELA will contact you to arrange another schedule." });
       window.dispatchEvent(new CustomEvent("retela:data-change", { detail: { type: "order_update", payload: data } }));
       return data;
     } catch (error) {
@@ -1307,7 +1307,11 @@ function CartPage({
             <p className="text-xs font-bold uppercase tracking-[0.18em] text-emerald-700">Cart</p>
             <h3 className="mt-1 font-display text-2xl font-bold text-slate-950">Selected items</h3>
           </div>
-          <Button type="button" variant="secondary" onClick={onShop}>Continue shopping</Button>
+          <button type="button" onClick={onShop} className="retela-continue-shopping-button">
+            <ShoppingCart size={17} />
+            Continue shopping
+            <ChevronRight size={16} />
+          </button>
         </div>
         <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-neonbrand/20 bg-neonbrand/10 p-3">
           <button type="button" onClick={() => setAllCartSelected(!allSelected)} className="inline-flex items-center gap-3 text-sm font-bold text-white">
@@ -2858,6 +2862,13 @@ function Orders({ rows, profile, reviews = [], returnRequests = [], onNavigate, 
     };
   }, [selectedOrderId]);
 
+  useEffect(() => {
+    if (!selectedOrder?.order?.id) return;
+    const latestOrder = rows.find((order) => Number(order.id) === Number(selectedOrder.order.id));
+    if (!latestOrder) return;
+    setSelectedOrder((current) => current?.order ? { ...current, order: { ...current.order, ...latestOrder } } : current);
+  }, [rows, selectedOrder?.order?.id]);
+
   function openAction(target, event) {
     event.stopPropagation();
     onNavigate?.(target);
@@ -2894,7 +2905,6 @@ function Orders({ rows, profile, reviews = [], returnRequests = [], onNavigate, 
         const cancelled = isOrderCancelled(order);
         const canCancel = canCancelOrder(order);
         const canPay = canPayOrder(order);
-        const orderMapUrl = deliveryMapUrl(deliveryLocationFromOrder(order));
         return (
         <div key={order.id} role="button" tabIndex={0} onClick={() => setSelectedOrderId(order.id)} onKeyDown={(event) => event.key === "Enter" ? setSelectedOrderId(order.id) : null} className="text-left outline-none">
         <Card className="rounded-[20px] border-slate-100 bg-white p-4 shadow-[0_14px_34px_rgba(15,23,42,0.07)] transition hover:-translate-y-0.5 hover:border-emerald-200 hover:shadow-[0_20px_45px_rgba(15,23,42,0.1)]">
@@ -2936,11 +2946,6 @@ function Orders({ rows, profile, reviews = [], returnRequests = [], onNavigate, 
           </div>
           {!cancelled ? <div className="mt-3 grid grid-cols-5 gap-2">{flow.map((s) => <div key={s} className={`h-1.5 rounded-full ${flow.indexOf(s) <= flow.indexOf(normalizeOrderStatus(order.status)) ? "bg-emerald-500" : "bg-slate-200"}`} />)}</div> : null}
           <div className="mt-3 flex flex-wrap items-center gap-2">
-            {!cancelled && order.fulfillment_method === "delivery" && orderMapUrl ? (
-              <a onClick={(event) => event.stopPropagation()} className="inline-flex min-h-9 min-w-[150px] items-center justify-center gap-2 rounded-xl border border-emerald-100 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700 transition hover:bg-emerald-100 max-[600px]:w-full" href={orderMapUrl} target="_blank" rel="noreferrer">
-                <MapPin size={15} /> Open tracking map
-              </a>
-            ) : null}
             {canPay ? (
               <button type="button" onClick={(event) => payOrder(order, event)} className="inline-flex min-h-9 min-w-[150px] items-center justify-center gap-2 rounded-xl bg-emerald-600 px-3 py-2 text-xs font-bold text-white shadow-[0_12px_24px_rgba(22,163,74,0.18)] max-[600px]:w-full">
                 <WalletCards size={15} /> {payingOrderId === order.id ? "Opening..." : `Pay with ${paymentLabel(order.payment_method)}`}
@@ -2975,11 +2980,14 @@ function CustomerOrderModal({ loading, selectedOrder, onPay, payingOrderId, onMe
   const order = selectedOrder?.order;
   const cancelled = isOrderCancelled(order);
   const meetingPlace = String(order?.meeting_place || "").trim();
-  const meetupHasSchedule = Boolean(meetingPlace || order?.meetup_date || order?.meetup_time);
-  const activeMeetupStatus = ["approved", "processing", "ready", "completed"].includes(normalizeOrderStatus(order?.status));
+  const meetupScheduleSaved = Boolean(meetingPlace && order?.meetup_date && order?.meetup_time);
+  const acceptedForMeetup = normalizeOrderStatus(order?.status) === "approved";
   const codOrder = ["cod", "cash", "cash_on_delivery"].includes(String(order?.payment_method || "").trim().toLowerCase());
-  const showMeetupDetails = Boolean(codOrder && order?.meetup_area_eligible && activeMeetupStatus && meetupHasSchedule);
+  const meetupAreaEligible = Boolean(codOrder && order?.meetup_area_eligible);
+  const showMeetupDetails = Boolean(meetupAreaEligible && acceptedForMeetup && meetupScheduleSaved);
+  const showMeetupWaiting = Boolean(meetupAreaEligible && acceptedForMeetup && !meetupScheduleSaved);
   const confirmationStatus = String(order?.meetup_confirmation_status || "pending").toLowerCase();
+  const confirmationLabel = meetupConfirmationLabel(confirmationStatus);
   const [confirmationStep, setConfirmationStep] = useState(null);
   const [meetupNote, setMeetupNote] = useState("");
   const [confirmationSaving, setConfirmationSaving] = useState(false);
@@ -3032,7 +3040,65 @@ function CustomerOrderModal({ loading, selectedOrder, onPay, payingOrderId, onMe
                   <ModalInfo label="Payment Status" value={customerOrderStatus(order.payment_status || "unpaid")} />
                 </div>
                 {order.fulfillment_method === "delivery" ? <OrderDeliveryInfo order={order} title="Delivery Information" mapLabel="View Location" /> : null}
-                {showMeetupDetails ? <section className="retela-meeting-place-card">
+                {showMeetupWaiting ? (
+                  <section className="retela-meeting-place-card retela-meetup-waiting-card">
+                    <div>
+                      <p className="retela-modal-eyebrow">Meetup Schedule</p>
+                      <h4>Waiting for the administrator to set the meetup schedule</h4>
+                    </div>
+                    <p>RETELA will add the meeting place, date, and time after this accepted COD order is scheduled.</p>
+                  </section>
+                ) : null}
+                {showMeetupDetails ? (
+                  <section className="retela-meeting-place-card retela-meetup-schedule-card">
+                    <div>
+                      <p className="retela-modal-eyebrow">Meetup Schedule</p>
+                      <h4>Meetup Schedule</h4>
+                    </div>
+                    <div className="retela-meetup-schedule-grid">
+                      <div>
+                        <span>Meeting Place</span>
+                        <strong>{meetingPlace}</strong>
+                      </div>
+                      <div>
+                        <span>Meetup Date</span>
+                        <strong>{formatMeetupDate(order.meetup_date)}</strong>
+                      </div>
+                      <div>
+                        <span>Meetup Time</span>
+                        <strong>{formatMeetupTime(order.meetup_time)}</strong>
+                      </div>
+                      <div>
+                        <span>Current Confirmation Status</span>
+                        <strong>{confirmationLabel}</strong>
+                      </div>
+                    </div>
+                    {order.meetup_admin_note ? (
+                      <div className="retela-meetup-note">
+                        <span>Admin's Meetup Note</span>
+                        <p>{order.meetup_admin_note}</p>
+                      </div>
+                    ) : null}
+                    <div className="retela-meetup-policy-card">
+                      <p className="retela-modal-eyebrow">Meetup and Cash on Delivery Policy</p>
+                      <p>{meetupCashOnDeliveryPolicy}</p>
+                    </div>
+                    <div>
+                      <p className="retela-modal-eyebrow">Customer Confirmation</p>
+                      <MeetupConfirmationPanel
+                        status={confirmationStatus}
+                        step={confirmationStep}
+                        setStep={setConfirmationStep}
+                        meetupNote={meetupNote}
+                        setMeetupNote={setMeetupNote}
+                        saving={confirmationSaving}
+                        onSubmit={submitMeetupConfirmation}
+                        onMessageShop={messageShop}
+                      />
+                    </div>
+                  </section>
+                ) : null}
+                {false && showMeetupDetails ? <section className="retela-meeting-place-card">
                   <div>
                     <p className="retela-modal-eyebrow">Meeting Place</p>
                     <h4>Admin-selected meetup location</h4>
@@ -3067,7 +3133,7 @@ function CustomerOrderModal({ loading, selectedOrder, onPay, payingOrderId, onMe
                     onMessageShop={messageShop}
                   /> : null}
                 </section> : null}
-                {showMeetupDetails ? <DeliverySafetyPolicyCard policy={meetupCashOnDeliveryPolicy} title="Meetup and Cash on Delivery Policy" /> : null}
+                {false && showMeetupDetails ? <DeliverySafetyPolicyCard policy={meetupCashOnDeliveryPolicy} title="Meetup and Cash on Delivery Policy" /> : null}
                 <div className="grid gap-2">
                   <p className="retela-modal-eyebrow">Items</p>
                   {selectedOrder.items.map((item) => (
@@ -3131,12 +3197,17 @@ function CancelOrderDialog({ order, cancelling, onClose, onConfirm }) {
 
 function MeetupConfirmationPanel({ status, step, setStep, meetupNote, setMeetupNote, saving, onSubmit, onMessageShop }) {
   if (status === "agreed") {
-    return <p className="retela-meetup-confirmed">✓ You confirmed this meetup schedule.</p>;
+    return (
+      <div className="retela-meetup-confirmed-box">
+        <p className="retela-meetup-confirmed">Meetup Confirmed</p>
+        <p>You have confirmed the meetup schedule.</p>
+      </div>
+    );
   }
   if (status === "disagreed") {
     return (
       <div className="retela-meetup-response-message">
-        <p className="retela-meetup-declined">Your response was sent.</p>
+        <p className="retela-meetup-declined">Your response has been sent.</p>
         <p>RETELA will contact you to arrange another schedule.</p>
         <button type="button" onClick={onMessageShop} className="retela-meeting-place-action"><MessageCircle size={15} /> Message Shop</button>
       </div>
@@ -3172,6 +3243,12 @@ function MeetupConfirmationPanel({ status, step, setStep, meetupNote, setMeetupN
       <button type="button" onClick={() => setStep("disagree")} className="retela-meetup-decline-outline">Cannot Confirm</button>
     </div>
   );
+}
+
+function meetupConfirmationLabel(status) {
+  if (status === "agreed") return "Meetup Confirmed";
+  if (status === "disagreed") return "Cannot Confirm";
+  return "Awaiting Confirmation";
 }
 
 function paymentNumberKey(method) {
@@ -3220,14 +3297,14 @@ function paymentLabel(method) {
 function formatMeetupDate(value) {
   if (!value) return "";
   const date = new Date(`${String(value).slice(0, 10)}T00:00:00`);
-  return Number.isNaN(date.getTime()) ? "" : date.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+  return Number.isNaN(date.getTime()) ? "" : date.toLocaleDateString("en-PH", { month: "short", day: "numeric", year: "numeric" });
 }
 
 function formatMeetupTime(value) {
   if (!value) return "";
   const [hours, minutes] = String(value).slice(0, 5).split(":").map(Number);
   if (!Number.isInteger(hours) || !Number.isInteger(minutes)) return "";
-  return new Date(2000, 0, 1, hours, minutes).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+  return new Date(2000, 0, 1, hours, minutes).toLocaleTimeString("en-PH", { hour: "numeric", minute: "2-digit" });
 }
 
 function instagramDisplayLabel(value) {

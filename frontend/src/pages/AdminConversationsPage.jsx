@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Archive, Bot, ChevronLeft, Loader2, MessageCircle, MoreHorizontal, Search, Send, ToggleLeft, ToggleRight, Trash2, UserRound } from "lucide-react";
+import { Bot, CheckCircle2, ChevronLeft, Loader2, MessageCircle, MoreHorizontal, Search, Send, ToggleLeft, ToggleRight, Trash2, UserRound } from "lucide-react";
 import { api } from "../api/client";
 import ConfirmDialog from "../components/ConfirmDialog";
 import { Card, Field } from "../components/ui";
@@ -115,7 +115,8 @@ export default function AdminConversationsPage() {
   const [mobileListOpen, setMobileListOpen] = useState(true);
   const [unreadState, setUnreadState] = useState({});
   const [dismissedCustomerKeys, setDismissedCustomerKeys] = useState({});
-  const [trashConfirmOpen, setTrashConfirmOpen] = useState(false);
+  const [removeConfirmConversation, setRemoveConfirmConversation] = useState(null);
+  const [actionNotice, setActionNotice] = useState(null);
   const scrollRef = useRef(null);
 
   const selectedConversation = conversations.find((conversation) => chatKey(conversation) === selectedChat)
@@ -187,6 +188,12 @@ export default function AdminConversationsPage() {
     const timer = window.setTimeout(() => setTypingIndicator(false), 1200);
     return () => window.clearTimeout(timer);
   }, [selectedConversation?.id, messages.length]);
+
+  useEffect(() => {
+    if (!actionNotice) return undefined;
+    const timer = window.setTimeout(() => setActionNotice(null), 3200);
+    return () => window.clearTimeout(timer);
+  }, [actionNotice]);
 
   async function loadConversations() {
     const [conversationRes, customerRes] = await Promise.all([
@@ -279,32 +286,23 @@ export default function AdminConversationsPage() {
     }
   }
 
-  async function archiveConversation() {
-    if (!selectedConversation?.id) return;
-    setBusyAction("archive");
-    try {
-      await api.patch(`/messages/${selectedConversation.id}/archive`);
-      setSelectedChat("");
-      setMessages([]);
-      await loadConversations();
-    } finally {
-      setBusyAction("");
-    }
-  }
-
   async function trashConversation() {
     if (!selectedConversation?.id) return;
-    setTrashConfirmOpen(true);
+    setRemoveConfirmConversation(selectedConversation);
   }
 
   async function confirmTrashConversation() {
-    if (!selectedConversation?.id) return;
+    const target = removeConfirmConversation;
+    if (!target?.id) return;
     setBusyAction("trash");
     try {
-      await api.patch(`/messages/${selectedConversation.id}/trash`);
-      setSelectedChat("");
-      setMessages([]);
-      setTrashConfirmOpen(false);
+      await api.patch(`/messages/${target.id}/trash`);
+      if (selectedChat === chatKey(target)) {
+        setSelectedChat("");
+        setMessages([]);
+      }
+      setRemoveConfirmConversation(null);
+      setActionNotice({ id: Date.now(), message: "Conversation removed from your list." });
       await loadConversations();
     } finally {
       setBusyAction("");
@@ -390,10 +388,8 @@ export default function AdminConversationsPage() {
               setAutoReplyEnabled={setAutoReplyEnabled}
               onBack={() => setMobileListOpen(true)}
               onTakeover={() => setTakeover(!selectedConversation?.admin_takeover)}
-              onArchive={archiveConversation}
               onTrash={trashConversation}
               takeoverBusy={busyAction === "takeover"}
-              archiveBusy={busyAction === "archive"}
               trashBusy={busyAction === "trash"}
             />
 
@@ -447,15 +443,32 @@ export default function AdminConversationsPage() {
           </Card>
         </motion.div>
       </section>
+      <AnimatePresence>
+        {actionNotice ? (
+          <motion.div
+            key={actionNotice.id}
+            className="conversation-action-toast"
+            initial={{ opacity: 0, y: -10, scale: 0.96 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -8, scale: 0.96 }}
+            transition={{ duration: 0.18 }}
+            role="status"
+            aria-live="polite"
+          >
+            <span><CheckCircle2 size={17} /></span>
+            <p>{actionNotice.message}</p>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
       <ConfirmDialog
-        open={trashConfirmOpen}
-        title="Move conversation to Trash Bin?"
-        message="This conversation will be removed from the active support inbox."
-        detail={selectedConversation?.username || selectedConversation?.display_name || (selectedConversation?.customer_id ? `Customer #${selectedConversation.customer_id}` : "")}
-        confirmLabel="Move to Trash"
+        open={Boolean(removeConfirmConversation)}
+        title="Remove this conversation?"
+        message="This will remove the conversation from your list. This action cannot be undone."
+        detail={removeConfirmConversation?.username || removeConfirmConversation?.display_name || (removeConfirmConversation?.customer_id ? `Customer #${removeConfirmConversation.customer_id}` : "")}
+        confirmLabel="Remove"
         busy={busyAction === "trash"}
         onClose={() => {
-          if (busyAction !== "trash") setTrashConfirmOpen(false);
+          if (busyAction !== "trash") setRemoveConfirmConversation(null);
         }}
         onConfirm={confirmTrashConversation}
       />
@@ -522,8 +535,30 @@ function ConversationListCard({ conversation, active, onClick }) {
   );
 }
 
-function ChatHeader({ selectedConversation, autoReplyEnabled, setAutoReplyEnabled, onBack, onTakeover, onArchive, onTrash, takeoverBusy, archiveBusy, trashBusy }) {
+function ChatHeader({ selectedConversation, autoReplyEnabled, setAutoReplyEnabled, onBack, onTakeover, onTrash, takeoverBusy, trashBusy }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef(null);
+
+  useEffect(() => {
+    if (!menuOpen) return undefined;
+    const handlePointerDown = (event) => {
+      if (!menuRef.current?.contains(event.target)) setMenuOpen(false);
+    };
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape") setMenuOpen(false);
+    };
+    document.addEventListener("mousedown", handlePointerDown);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [menuOpen]);
+
+  useEffect(() => {
+    setMenuOpen(false);
+  }, [selectedConversation?.id]);
+
   return (
     <div className="sticky top-0 z-10 border-b border-[#d8eadf] bg-[#f7fff9] px-4 py-4 sm:px-5">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
@@ -553,20 +588,27 @@ function ChatHeader({ selectedConversation, autoReplyEnabled, setAutoReplyEnable
               {takeoverBusy ? <Loader2 size={17} className="animate-spin" /> : <Bot size={16} />}
               {selectedConversation.admin_takeover ? "Release to AI" : "Take Over Chat"}
             </button>
-            <div className="relative">
-              <button type="button" onClick={() => setMenuOpen((value) => !value)} className="grid h-10 w-10 place-items-center rounded-2xl border border-[#d8eadf] bg-white text-[#102018] transition hover:border-emerald-300 hover:bg-emerald-50 hover:text-[#15803d]" aria-label="Conversation actions">
+            <div className="conversation-actions-menu-wrap" ref={menuRef}>
+              <button type="button" onClick={() => setMenuOpen((value) => !value)} className="conversation-actions-trigger" aria-label="Conversation actions" aria-haspopup="menu" aria-expanded={menuOpen}>
                 <MoreHorizontal size={18} />
               </button>
-              {menuOpen ? (
-                <div className="absolute right-0 top-12 z-30 grid min-w-44 gap-1 rounded-2xl border border-[#d8eadf] bg-white p-2 shadow-xl">
-                  <button type="button" disabled={archiveBusy} onClick={() => { setMenuOpen(false); onArchive?.(); }} className="inline-flex items-center gap-2 rounded-xl px-3 py-2 text-left text-xs font-bold text-[#102018] transition hover:bg-emerald-50 hover:text-[#15803d] disabled:opacity-60">
-                    {archiveBusy ? <Loader2 size={14} className="animate-spin" /> : <Archive size={14} />} Archive
-                  </button>
-                  <button type="button" disabled={trashBusy} onClick={() => { setMenuOpen(false); onTrash?.(); }} className="inline-flex items-center gap-2 rounded-xl px-3 py-2 text-left text-xs font-bold text-rose-700 transition hover:bg-rose-50 disabled:opacity-60">
-                    {trashBusy ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />} Move to Trash
-                  </button>
-                </div>
-              ) : null}
+              <AnimatePresence>
+                {menuOpen ? (
+                  <motion.div
+                    className="conversation-actions-dropdown"
+                    initial={{ opacity: 0, y: -6, scale: 0.96 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: -4, scale: 0.96 }}
+                    transition={{ duration: 0.16, ease: "easeOut" }}
+                    role="menu"
+                  >
+                    <button type="button" disabled={trashBusy} onClick={() => { setMenuOpen(false); onTrash?.(); }} className="conversation-actions-remove" role="menuitem">
+                      {trashBusy ? <Loader2 size={15} className="animate-spin" /> : <Trash2 size={15} />}
+                      Remove
+                    </button>
+                  </motion.div>
+                ) : null}
+              </AnimatePresence>
             </div>
           </div>
         ) : null}
