@@ -40,7 +40,7 @@ async function ensurePosSchema() {
        FROM INFORMATION_SCHEMA.COLUMNS
        WHERE TABLE_SCHEMA = DATABASE()
          AND TABLE_NAME = 'orders'
-         AND COLUMN_NAME IN ('order_channel', 'cash_received', 'change_amount', 'pos_cashier_id')`
+         AND COLUMN_NAME IN ('order_channel', 'cash_received', 'change_amount', 'pos_cashier_id', 'inventory_deducted_at')`
     );
     const columns = new Set(rows.map((row) => row.COLUMN_NAME));
     if (!columns.has("order_channel")) {
@@ -54,6 +54,15 @@ async function ensurePosSchema() {
     }
     if (!columns.has("pos_cashier_id")) {
       await query("ALTER TABLE orders ADD COLUMN pos_cashier_id INT NULL AFTER change_amount");
+    }
+    if (!columns.has("inventory_deducted_at")) {
+      await query("ALTER TABLE orders ADD COLUMN inventory_deducted_at DATETIME NULL AFTER paid_at");
+      await query(
+        `UPDATE orders o
+         SET inventory_deducted_at = COALESCE(o.paid_at, o.updated_at, o.created_at, NOW())
+         WHERE o.inventory_deducted_at IS NULL
+           AND EXISTS (SELECT 1 FROM order_items oi WHERE oi.order_id = o.id)`
+      );
     }
 
     await query(`
@@ -217,9 +226,9 @@ router.post("/checkout", asyncHandler(async (req, res) => {
     const transactionNumber = makeTransactionNumber();
     const [orderResult] = await conn.execute(
       `INSERT INTO orders
-        (user_id, order_channel, status, payment_method, payment_status, payment_reference, transaction_id, paid_at, payment_provider, fulfillment_method, total_amount, cash_received, change_amount, pos_cashier_id)
+        (user_id, order_channel, status, payment_method, payment_status, payment_reference, transaction_id, paid_at, inventory_deducted_at, payment_provider, fulfillment_method, total_amount, cash_received, change_amount, pos_cashier_id)
        VALUES
-        (NULL, 'pos', 'completed', ?, 'paid', ?, ?, NOW(), ?, 'pickup', ?, ?, ?, ?)`,
+        (NULL, 'pos', 'completed', ?, 'paid', ?, ?, NOW(), NOW(), ?, 'pickup', ?, ?, ?, ?)`,
       [
         input.payment_method,
         input.payment_method === "gcash" ? input.gcash_reference_number : null,
@@ -237,10 +246,22 @@ router.post("/checkout", asyncHandler(async (req, res) => {
         "INSERT INTO order_items (order_id, product_id, quantity, price) VALUES (?, ?, ?, ?)",
         [orderResult.insertId, item.product_id, item.quantity, item.price]
       );
-      await conn.execute(
-        `UPDATE products SET stock = stock - ?, status = CASE WHEN stock - ? <= 0 THEN 'Out of Stock' WHEN stock - ? <= ${lowStockThreshold} THEN 'Low Stock' ELSE 'In Stock' END WHERE id = ?`,
-        [item.quantity, item.quantity, item.quantity, item.product_id]
+      const [stockResult] = await conn.execute(
+        `UPDATE products
+         SET stock = stock - ?,
+             status = CASE
+               WHEN stock - ? <= 0 THEN 'Sold'
+               WHEN stock - ? <= ${lowStockThreshold} THEN 'Low Stock'
+               ELSE 'In Stock'
+             END
+         WHERE id = ?
+           AND is_deleted = FALSE
+           AND stock >= ?`,
+        [item.quantity, item.quantity, item.quantity, item.product_id, item.quantity]
       );
+      if (stockResult.affectedRows !== 1) {
+        throw new HttpError(400, `${item.name || "This apparel item"} does not have enough stock.`);
+      }
       const [updatedProducts] = await conn.execute("SELECT id, name, stock FROM products WHERE id = ?", [item.product_id]);
       const nextStock = Number(updatedProducts[0]?.stock || 0);
       const status = productStatusForStock(nextStock, lowStockThreshold);

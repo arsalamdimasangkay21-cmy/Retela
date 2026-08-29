@@ -3175,6 +3175,24 @@ button {
   box-shadow: 0 10px 24px rgba(18, 92, 55, 0.07);
 }
 
+.sales-metric-card.is-clickable {
+  width: 100%;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease, background 0.2s ease;
+}
+
+.sales-metric-card.is-clickable:hover {
+  border-color: #8bd0a2;
+  background: #fbfffc;
+  box-shadow: 0 14px 34px rgba(18, 92, 55, 0.12);
+}
+
+.sales-metric-card.is-clickable:focus-visible {
+  outline: 3px solid rgba(22, 163, 106, 0.28);
+  outline-offset: 3px;
+}
+
 .sales-metric-card p {
   margin: 0;
   color: #38594b !important;
@@ -3236,6 +3254,533 @@ button {
 .sales-metric-card.is-rating .sales-metric-icon {
   background: #ecfeff;
   color: #0891b2;
+}
+
+.sold-items-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  overflow-y: auto;
+  background: rgba(10, 21, 15, 0.56);
+  padding: 18px;
+}
+
+.sold-items-modal {
+  display: flex;
+  width: min(1280px, 100%);
+  max-height: min(92vh, 900px);
+  min-height: min(720px, 92vh);
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid #cfe8d8;
+  background: #ffffff;
+  color: #14241b;
+  box-shadow: 0 30px 90px rgba(12, 38, 22, 0.28);
+}
+
+.sold-inventory-details-modal {
+  width: min(760px, 100%);
+  overflow: hidden;
+  border: 1px solid #cfe8d8;
+  background: #ffffff;
+  color: #14241b;
+}
+
+.sold-items-modal-header {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid #dcebe1;
+  background: linear-gradient(180deg, #ffffff 0%, #f4fbf6 100%);
+  padding: 18px 20px;
+}
+
+.sold-items-modal-header h3 {
+  margin: 4px 0 0;
+  color: #123526;
+  font-size: 1.35rem;
+  font-weight: 900;
+  line-height: 1.15;
+}
+
+.sold-items-modal-header span {
+  display: block;
+  margin-top: 6px;
+  color: #557166;
+  font-size: 0.86rem;
+  font-weight: 750;
+}
+
+.sold-items-modal-eyebrow {
+  margin: 0;
+  color: #16864e;
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.sold-items-modal-header button {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  flex: 0 0 40px;
+  place-items: center;
+  border: 1px solid #cfe3d6;
+  border-radius: 12px;
+  background: #ffffff;
+  color: #315241;
+  transition: border-color 0.18s ease, background 0.18s ease, color 0.18s ease, transform 0.18s ease;
+}
+
+.sold-items-modal-header button:hover,
+.sold-items-modal-header button:focus-visible {
+  border-color: #16a36a;
+  background: #ecfff3;
+  color: #0f5f36;
+  transform: translateY(-1px);
+}
+
+.sold-items-modal-filters {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) 160px 170px repeat(3, auto);
+  gap: 10px;
+  border-bottom: 1px solid #e1eee6;
+  padding: 14px 20px;
+}
+
+.sold-items-search-field,
+.sold-items-modal-filters input,
+.sold-items-modal-filters select,
+.sold-items-modal-filters button {
+  min-height: 42px;
+  border-radius: 12px;
+}
+
+.sold-items-search-field {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #cfe3d6;
+  background: #ffffff;
+  padding: 0 12px;
+  color: #557166;
+}
+
+.sold-items-search-field input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  background: transparent;
+  color: #14241b;
+  font-size: 0.88rem;
+  font-weight: 700;
+  outline: none;
+}
+
+.sold-items-modal-filters > input,
+.sold-items-modal-filters > select {
+  border: 1px solid #cfe3d6;
+  background: #ffffff;
+  padding: 0 12px;
+  color: #14241b;
+  font-size: 0.84rem;
+  font-weight: 800;
+  outline: none;
+}
+
+.sold-items-modal-filters button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid #b7e4cf;
+  background: #ffffff;
+  padding: 0 12px;
+  color: #0f5f36;
+  font-size: 0.82rem;
+  font-weight: 850;
+  white-space: nowrap;
+  transition: border-color 0.18s ease, background 0.18s ease, color 0.18s ease, transform 0.18s ease;
+}
+
+.sold-items-modal-filters button:first-of-type {
+  background: #16a36a;
+  color: #ffffff;
+}
+
+.sold-items-modal-filters button:hover:not(:disabled),
+.sold-items-modal-filters button:focus-visible {
+  border-color: #16a36a;
+  background: #ecfff3;
+  color: #0f5f36;
+  transform: translateY(-1px);
+}
+
+.sold-items-modal-filters button:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.sold-items-modal-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  border-bottom: 1px solid #e1eee6;
+  background: #fbfffc;
+  padding: 12px 20px;
+}
+
+.sold-items-modal-body {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  padding: 14px 20px;
+}
+
+.sold-items-report-table-wrap {
+  overflow-x: auto;
+  border: 1px solid #dcebe1;
+  border-radius: 16px;
+}
+
+.sold-items-report-table {
+  width: 100%;
+  min-width: 1180px;
+  border-collapse: separate;
+  border-spacing: 0;
+  background: #ffffff;
+}
+
+.sold-items-report-table th,
+.sold-items-report-table td {
+  border-bottom: 1px solid #e5efe8;
+  padding: 11px 12px;
+  color: #304238;
+  vertical-align: top;
+}
+
+.sold-items-report-table th {
+  background: #f3faf5;
+  color: #42544a;
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.sold-items-report-table td strong,
+.sold-items-report-card strong {
+  display: block;
+  color: #14241b;
+  font-weight: 900;
+}
+
+.sold-items-report-table td span,
+.sold-items-report-card span {
+  display: block;
+  margin-top: 3px;
+  color: #64756b;
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.sold-items-thumb {
+  width: 56px;
+  height: 56px;
+  overflow: hidden;
+  border: 1px solid #d6e7dc;
+  border-radius: 14px;
+  background: #f6fbf7;
+}
+
+.sold-items-report-card {
+  min-width: 0;
+  border: 1px solid #dcebe1;
+  border-radius: 18px;
+  background: #ffffff;
+  padding: 14px;
+  color: #14241b;
+  box-shadow: 0 8px 22px rgba(19, 69, 43, 0.06);
+}
+
+.sold-items-modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-top: 1px solid #e1eee6;
+  background: #ffffff;
+  padding: 14px 20px;
+  color: #58675f;
+  font-size: 0.86rem;
+  font-weight: 750;
+}
+
+.sold-items-modal-footer > div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.sold-items-modal-footer button,
+.sold-items-modal-footer strong {
+  display: inline-flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #cfe3d6;
+  border-radius: 12px;
+  background: #f7fcf8;
+  padding: 0 12px;
+  color: #304238;
+  font-size: 0.8rem;
+  font-weight: 850;
+}
+
+.sold-items-modal-footer button:hover:not(:disabled),
+.sold-items-modal-footer button:focus-visible {
+  border-color: #8bcfa1;
+  background: #eaf8ee;
+  color: #176b37;
+}
+
+.sold-items-modal-footer button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.sold-items-close-button {
+  background: #16a36a !important;
+  color: #ffffff !important;
+}
+
+.sold-inventory-loading {
+  display: grid;
+  gap: 10px;
+}
+
+.sold-inventory-skeleton {
+  min-height: 72px;
+  overflow: hidden;
+  border: 1px solid #dcebe1;
+  border-radius: 16px;
+  background: linear-gradient(90deg, #f3faf5 0%, #ffffff 45%, #f3faf5 100%);
+  background-size: 220% 100%;
+  animation: retela-skeleton 1.2s ease-in-out infinite;
+}
+
+.sold-inventory-error {
+  border: 1px solid #fecaca;
+  border-radius: 16px;
+  background: #fff1f2;
+  padding: 14px 16px;
+  color: #9f1239;
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+
+.sold-report-status {
+  display: inline-flex;
+  min-height: 26px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #9bd3ad;
+  border-radius: 999px;
+  background: #effaf2;
+  padding: 5px 10px;
+  color: #176b37;
+  font-size: 0.72rem;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.sold-item-status-stack {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.sold-item-return-badge {
+  display: inline-flex;
+  min-height: 26px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #bfdbfe;
+  border-radius: 999px;
+  background: #eff6ff;
+  padding: 5px 10px;
+  color: #1d4ed8;
+  font-size: 0.72rem;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.sold-item-return-badge.is-refunded {
+  border-color: #fecaca;
+  background: #fff1f2;
+  color: #be123c;
+}
+
+.break-anywhere {
+  overflow-wrap: anywhere;
+}
+
+@keyframes retela-skeleton {
+  0% { background-position: 220% 0; }
+  100% { background-position: -220% 0; }
+}
+
+.retela-dark .sales-metric-card.is-clickable:hover,
+.premium-shell.retela-dark-shell .sales-metric-card.is-clickable:hover {
+  border-color: #63d883;
+  background: #1d3025;
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.28);
+}
+
+.retela-dark .sold-items-modal,
+.retela-dark .sold-inventory-details-modal,
+.premium-shell.retela-dark-shell .sold-items-modal,
+.premium-shell.retela-dark-shell .sold-inventory-details-modal {
+  border-color: #365443;
+  background: #17251d;
+  color: #f4fbf6;
+}
+
+.retela-dark .sold-items-modal-header,
+.premium-shell.retela-dark-shell .sold-items-modal-header {
+  border-color: #365443;
+  background: #1b3024;
+}
+
+.retela-dark .sold-items-modal-header h3,
+.premium-shell.retela-dark-shell .sold-items-modal-header h3,
+.retela-dark .sold-items-report-table td strong,
+.premium-shell.retela-dark-shell .sold-items-report-table td strong,
+.retela-dark .sold-items-report-card strong,
+.premium-shell.retela-dark-shell .sold-items-report-card strong {
+  color: #f4fbf6;
+}
+
+.retela-dark .sold-items-modal-header span,
+.premium-shell.retela-dark-shell .sold-items-modal-header span,
+.retela-dark .sold-items-report-table td span,
+.premium-shell.retela-dark-shell .sold-items-report-table td span,
+.retela-dark .sold-items-report-card span,
+.premium-shell.retela-dark-shell .sold-items-report-card span {
+  color: #b7cabe;
+}
+
+.retela-dark .sold-items-modal-filters,
+.retela-dark .sold-items-modal-summary,
+.retela-dark .sold-items-modal-footer,
+.premium-shell.retela-dark-shell .sold-items-modal-filters,
+.premium-shell.retela-dark-shell .sold-items-modal-summary,
+.premium-shell.retela-dark-shell .sold-items-modal-footer {
+  border-color: #365443;
+  background: #17251d;
+}
+
+.retela-dark .sold-items-search-field,
+.retela-dark .sold-items-modal-filters > input,
+.retela-dark .sold-items-modal-filters > select,
+.premium-shell.retela-dark-shell .sold-items-search-field,
+.premium-shell.retela-dark-shell .sold-items-modal-filters > input,
+.premium-shell.retela-dark-shell .sold-items-modal-filters > select {
+  border-color: #365443;
+  background: #122018;
+  color: #f4fbf6;
+}
+
+.retela-dark .sold-items-search-field input,
+.premium-shell.retela-dark-shell .sold-items-search-field input {
+  color: #f4fbf6;
+}
+
+.retela-dark .sold-items-report-table-wrap,
+.retela-dark .sold-items-report-card,
+.premium-shell.retela-dark-shell .sold-items-report-table-wrap,
+.premium-shell.retela-dark-shell .sold-items-report-card {
+  border-color: #365443;
+  background: #17251d;
+}
+
+.retela-dark .sold-items-report-table,
+.premium-shell.retela-dark-shell .sold-items-report-table {
+  background: #17251d;
+}
+
+.retela-dark .sold-items-report-table th,
+.premium-shell.retela-dark-shell .sold-items-report-table th {
+  border-color: #365443;
+  background: #20372a;
+  color: #d9eee0;
+}
+
+.retela-dark .sold-items-report-table td,
+.premium-shell.retela-dark-shell .sold-items-report-table td {
+  border-color: #2d4938;
+  color: #d9eee0;
+}
+
+@media (max-width: 1023px) {
+  .sold-items-modal {
+    min-height: 0;
+  }
+
+  .sold-items-modal-filters {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .sold-items-modal-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .sold-items-modal-footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .sold-items-modal-footer > div {
+    justify-content: stretch;
+  }
+}
+
+@media (max-width: 639px) {
+  .sold-items-modal-backdrop {
+    padding: 10px;
+  }
+
+  .sold-items-modal-filters,
+  .sold-items-modal-body,
+  .sold-items-modal-header,
+  .sold-items-modal-footer {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  .sold-items-modal-filters,
+  .sold-inventory-details-body,
+  .sold-inventory-details-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .sold-inventory-details-image {
+    max-width: 220px;
+  }
+
+  .sold-items-modal-footer button,
+  .sold-items-modal-footer strong {
+    flex: 1 1 auto;
+  }
 }
 
 .sales-barcode-card {
@@ -12976,6 +13521,43 @@ button {
   color: #0e5128 !important;
 }
 
+.inventory-view-tabs {
+  display: inline-flex;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid #b7e4cf;
+  border-radius: 14px;
+  background: #ffffff;
+  padding: 3px;
+}
+
+.inventory-view-tabs button {
+  display: inline-flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border-radius: 11px;
+  padding: 0 12px;
+  color: #19352a;
+  font-size: 0.82rem;
+  font-weight: 850;
+  white-space: nowrap;
+  transition: background 0.18s ease, color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+}
+
+.inventory-view-tabs button:hover,
+.inventory-view-tabs button:focus-visible {
+  background: #ecfff3;
+  color: #0f5f36;
+}
+
+.inventory-view-tabs button.is-active {
+  background: #16a36a;
+  color: #ffffff;
+  box-shadow: 0 8px 18px rgba(22, 163, 106, 0.18);
+}
+
 .inventory-stock-list__table-wrap {
   overflow-x: auto;
   background: #ffffff;
@@ -12985,6 +13567,74 @@ button {
   border-collapse: separate;
   border-spacing: 0;
   color: #15221b;
+}
+
+.sold-inventory-table {
+  min-width: 1320px;
+}
+
+.sold-inventory-table-wrap {
+  background: #ffffff;
+}
+
+.sold-inventory-details-button {
+  border-color: #9cc8f4 !important;
+  background: #f5f9ff !important;
+  color: #1d4e89 !important;
+}
+
+.sold-inventory-details-button:hover,
+.sold-inventory-details-button:focus-visible {
+  border-color: #4d91d9 !important;
+  background: #e7f1ff !important;
+  color: #153e70 !important;
+}
+
+.sold-inventory-fact {
+  min-width: 0;
+  border: 1px solid #dcebe1;
+  border-radius: 14px;
+  background: #f8fcf9;
+  padding: 10px 12px;
+}
+
+.sold-inventory-fact span {
+  display: block;
+  color: #60746a;
+  font-size: 0.7rem;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.sold-inventory-fact strong {
+  display: block;
+  margin-top: 5px;
+  overflow-wrap: anywhere;
+  color: #15221b;
+  font-size: 0.9rem;
+  font-weight: 900;
+}
+
+.sold-inventory-details-body {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 16px;
+  padding: 20px;
+}
+
+.sold-inventory-details-image {
+  aspect-ratio: 1;
+  overflow: hidden;
+  border: 1px solid #d6e7dc;
+  border-radius: 18px;
+  background: #f6fbf7;
+}
+
+.sold-inventory-details-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
 }
 
 .inventory-stock-list-card .inventory-stock-list__head-row {
@@ -13341,6 +13991,31 @@ button {
   color: #ffffff !important;
 }
 
+.retela-dark .inventory-view-tabs,
+.premium-shell.retela-dark-shell .inventory-view-tabs {
+  border-color: #365443;
+  background: #122018;
+}
+
+.retela-dark .inventory-view-tabs button,
+.premium-shell.retela-dark-shell .inventory-view-tabs button {
+  color: #d9eee0;
+}
+
+.retela-dark .inventory-view-tabs button:hover,
+.retela-dark .inventory-view-tabs button:focus-visible,
+.premium-shell.retela-dark-shell .inventory-view-tabs button:hover,
+.premium-shell.retela-dark-shell .inventory-view-tabs button:focus-visible {
+  background: #20372a;
+  color: #8ce9a5;
+}
+
+.retela-dark .inventory-view-tabs button.is-active,
+.premium-shell.retela-dark-shell .inventory-view-tabs button.is-active {
+  background: #2b8a4b;
+  color: #ffffff;
+}
+
 .retela-dark .inventory-stock-list__mobile,
 .premium-shell.retela-dark-shell .inventory-stock-list__mobile {
   background: #122018 !important;
@@ -13431,6 +14106,29 @@ button {
   border-color: #63d883 !important;
   background: #1f6a38 !important;
   color: #effff3 !important;
+}
+
+.retela-dark .sold-inventory-table-wrap,
+.premium-shell.retela-dark-shell .sold-inventory-table-wrap,
+.retela-dark .sold-inventory-mobile-card,
+.premium-shell.retela-dark-shell .sold-inventory-mobile-card {
+  background: #17251d !important;
+}
+
+.retela-dark .sold-inventory-fact,
+.premium-shell.retela-dark-shell .sold-inventory-fact {
+  border-color: #365443;
+  background: #20372a;
+}
+
+.retela-dark .sold-inventory-fact span,
+.premium-shell.retela-dark-shell .sold-inventory-fact span {
+  color: #b7cabe;
+}
+
+.retela-dark .sold-inventory-fact strong,
+.premium-shell.retela-dark-shell .sold-inventory-fact strong {
+  color: #f4fbf6;
 }
 
 @media (max-width: 1279px) {

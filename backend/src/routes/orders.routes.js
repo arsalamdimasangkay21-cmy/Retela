@@ -262,7 +262,7 @@ async function ensureOrderColumns() {
        FROM INFORMATION_SCHEMA.COLUMNS
        WHERE TABLE_SCHEMA = DATABASE()
          AND TABLE_NAME = 'orders'
-         AND COLUMN_NAME IN ('tracking_number', 'fulfillment_method', 'delivery_address', 'delivery_latitude', 'delivery_longitude', 'delivery_municipality', 'delivery_province', 'delivery_region', 'delivery_postal_code', 'delivery_place_id', 'delivery_landmark', 'delivery_notes', 'meeting_place', 'meeting_latitude', 'meeting_longitude', 'meetup_date', 'meetup_time', 'meetup_confirmation_status', 'meetup_confirmed_at', 'meetup_customer_note', 'meetup_admin_note', 'meetup_24h_reminder_sent_at', 'meetup_1h_reminder_sent_at', 'subtotal_amount', 'coupon_discount', 'sale_discount', 'shipping_fee', 'shipping_zone', 'shipping_distance_km', 'shipping_rule', 'coupon_code', 'payment_status', 'payment_reference', 'transaction_id', 'paid_at', 'payment_provider', 'checkout_session_id', 'checkout_url', 'order_channel', 'cash_received', 'change_amount', 'pos_cashier_id')`
+         AND COLUMN_NAME IN ('tracking_number', 'fulfillment_method', 'delivery_address', 'delivery_latitude', 'delivery_longitude', 'delivery_municipality', 'delivery_province', 'delivery_region', 'delivery_postal_code', 'delivery_place_id', 'delivery_landmark', 'delivery_notes', 'meeting_place', 'meeting_latitude', 'meeting_longitude', 'meetup_date', 'meetup_time', 'meetup_confirmation_status', 'meetup_confirmed_at', 'meetup_customer_note', 'meetup_admin_note', 'meetup_24h_reminder_sent_at', 'meetup_1h_reminder_sent_at', 'subtotal_amount', 'coupon_discount', 'sale_discount', 'shipping_fee', 'shipping_zone', 'shipping_distance_km', 'shipping_rule', 'coupon_code', 'payment_status', 'payment_reference', 'transaction_id', 'paid_at', 'inventory_deducted_at', 'payment_provider', 'checkout_session_id', 'checkout_url', 'order_channel', 'cash_received', 'change_amount', 'pos_cashier_id')`
     );
     const columns = new Set(rows.map((row) => row.COLUMN_NAME));
     await safeModifyColumn("orders", "status", "status enum update", "ALTER TABLE orders MODIFY status ENUM('pending','awaiting_payment','paid','approved','processing','ready','completed','cancelled','payment_failed') NOT NULL DEFAULT 'pending'");
@@ -308,6 +308,15 @@ async function ensureOrderColumns() {
     if (!columns.has("payment_reference")) await query("ALTER TABLE orders ADD COLUMN payment_reference VARCHAR(160) NULL AFTER payment_status");
     if (!columns.has("transaction_id")) await query("ALTER TABLE orders ADD COLUMN transaction_id VARCHAR(160) NULL AFTER payment_reference");
     if (!columns.has("paid_at")) await query("ALTER TABLE orders ADD COLUMN paid_at DATETIME NULL AFTER transaction_id");
+    if (!columns.has("inventory_deducted_at")) {
+      await query("ALTER TABLE orders ADD COLUMN inventory_deducted_at DATETIME NULL AFTER paid_at");
+      await query(
+        `UPDATE orders o
+         SET inventory_deducted_at = COALESCE(o.paid_at, o.updated_at, o.created_at, NOW())
+         WHERE o.inventory_deducted_at IS NULL
+           AND EXISTS (SELECT 1 FROM order_items oi WHERE oi.order_id = o.id)`
+      );
+    }
     if (!columns.has("payment_provider")) await query("ALTER TABLE orders ADD COLUMN payment_provider VARCHAR(40) NULL AFTER paid_at");
     if (!columns.has("checkout_session_id")) await query("ALTER TABLE orders ADD COLUMN checkout_session_id VARCHAR(160) NULL AFTER payment_provider");
     if (!columns.has("checkout_url")) await query("ALTER TABLE orders ADD COLUMN checkout_url TEXT NULL AFTER checkout_session_id");
@@ -325,7 +334,7 @@ async function loadDecoratedOrder(orderId, userContext = {}) {
   const ownershipFilter = userContext.role === "admin" ? "" : "AND o.user_id = :userId";
   const orders = await query(
     `SELECT o.id, o.user_id, o.order_channel, o.status, o.payment_method, o.payment_status, o.payment_reference,
-       o.transaction_id, o.paid_at, o.cash_received, o.change_amount,
+       o.transaction_id, o.paid_at, o.inventory_deducted_at, o.cash_received, o.change_amount,
        o.tracking_number, o.fulfillment_method, o.delivery_address, o.delivery_latitude,
        o.delivery_longitude, o.delivery_municipality, o.delivery_province, o.delivery_region,
        o.delivery_postal_code, o.delivery_place_id, o.delivery_landmark, o.delivery_notes,
@@ -515,7 +524,7 @@ router.patch("/:id/cancel", requireAuth, requireApproved, asyncHandler(async (re
   try {
     await conn.beginTransaction();
     const [orders] = await conn.execute(
-      `SELECT id, user_id, status, payment_status, payment_method, total_amount, checkout_url
+      `SELECT id, user_id, status, payment_status, payment_method, total_amount, checkout_url, inventory_deducted_at
        FROM orders
        WHERE id = ?
        FOR UPDATE`,
@@ -529,37 +538,40 @@ router.patch("/:id/cancel", requireAuth, requireApproved, asyncHandler(async (re
       throw new HttpError(409, "This order can no longer be cancelled.");
     }
 
-    const [items] = await conn.execute(
-      "SELECT product_id, quantity FROM order_items WHERE order_id = ?",
-      [orderId]
-    );
     const inventoryUpdates = [];
-    for (const item of items) {
-      await conn.execute(
-        `UPDATE products
-         SET stock = stock + ?,
-             status = CASE
-               WHEN stock + ? <= 0 THEN 'Out of Stock'
-               WHEN stock + ? <= ${lowStockThreshold} THEN 'Low Stock'
-               ELSE 'In Stock'
-             END
-         WHERE id = ?`,
-        [item.quantity, item.quantity, item.quantity, item.product_id]
+    if (order.inventory_deducted_at) {
+      const [items] = await conn.execute(
+        "SELECT product_id, quantity FROM order_items WHERE order_id = ?",
+        [orderId]
       );
-      const [updatedProducts] = await conn.execute("SELECT id, name, stock FROM products WHERE id = ?", [item.product_id]);
-      const nextStock = Number(updatedProducts[0]?.stock || 0);
-      inventoryUpdates.push({
-        id: Number(item.product_id),
-        name: updatedProducts[0]?.name,
-        stock: nextStock,
-        status: nextStock <= 0 ? "Out of Stock" : nextStock <= lowStockThreshold ? "Low Stock" : "In Stock"
-      });
+      for (const item of items) {
+        await conn.execute(
+          `UPDATE products
+           SET stock = stock + ?,
+               status = CASE
+                 WHEN stock + ? <= 0 THEN 'Sold'
+                 WHEN stock + ? <= ${lowStockThreshold} THEN 'Low Stock'
+                 ELSE 'In Stock'
+               END
+           WHERE id = ?`,
+          [item.quantity, item.quantity, item.quantity, item.product_id]
+        );
+        const [updatedProducts] = await conn.execute("SELECT id, name, stock FROM products WHERE id = ?", [item.product_id]);
+        const nextStock = Number(updatedProducts[0]?.stock || 0);
+        inventoryUpdates.push({
+          id: Number(item.product_id),
+          name: updatedProducts[0]?.name,
+          stock: nextStock,
+          status: nextStock <= 0 ? "Sold" : nextStock <= lowStockThreshold ? "Low Stock" : "In Stock"
+        });
+      }
     }
 
     await conn.execute(
       `UPDATE orders
        SET status = 'cancelled',
            payment_status = 'cancelled',
+           inventory_deducted_at = NULL,
            checkout_url = NULL,
            checkout_session_id = NULL
        WHERE id = ?`,
@@ -580,7 +592,7 @@ router.patch("/:id/cancel", requireAuth, requireApproved, asyncHandler(async (re
 
     const [updatedRows] = await conn.execute(
       `SELECT id, user_id, order_channel, status, payment_method, payment_status, payment_reference,
-         transaction_id, paid_at, cash_received, change_amount, tracking_number, fulfillment_method,
+         transaction_id, paid_at, inventory_deducted_at, cash_received, change_amount, tracking_number, fulfillment_method,
          delivery_address, delivery_latitude, delivery_longitude, delivery_municipality, delivery_province,
          delivery_region, delivery_postal_code, delivery_place_id, delivery_landmark, delivery_notes, meeting_place,
          subtotal_amount, coupon_discount, sale_discount, shipping_fee, shipping_zone, shipping_distance_km,
@@ -612,8 +624,6 @@ router.patch("/:id/cancel", requireAuth, requireApproved, asyncHandler(async (re
 }));
 
 async function createOrderTransactionAttempt(req, input, pricing, attempt) {
-  const { config } = await loadSystemSettings();
-  const lowStockThreshold = Number(config?.inventory?.lowStockThreshold ?? 3);
   const conn = await pool.getConnection();
   const startedAt = Date.now();
   const userId = req.user.id;
@@ -682,43 +692,12 @@ async function createOrderTransactionAttempt(req, input, pricing, attempt) {
       ]
     );
 
-    const inventoryUpdates = [];
-    const outOfStockProducts = [];
     for (const item of pricing.items) {
       const finalLinePrice = item.quantity ? Math.max(0, (item.subtotal - item.saleDiscount) / item.quantity) : item.price;
       await conn.execute(
         "INSERT INTO order_items (order_id, product_id, quantity, price) VALUES (?, ?, ?, ?)",
         [orderResult.insertId, item.product_id, item.quantity, finalLinePrice]
       );
-      const [stockResult] = await conn.execute(
-        `UPDATE products
-         SET stock = stock - ?,
-             status = CASE
-               WHEN stock - ? <= 0 THEN 'Out of Stock'
-               WHEN stock - ? <= ${lowStockThreshold} THEN 'Low Stock'
-               ELSE 'In Stock'
-             END
-         WHERE id = ?
-           AND is_deleted = FALSE
-           AND stock >= ?`,
-        [item.quantity, item.quantity, item.quantity, item.product_id, item.quantity]
-      );
-      if (stockResult.affectedRows !== 1) {
-        const product = productById.get(Number(item.product_id));
-        throw new HttpError(400, `${product?.name || "This apparel item"} does not have enough stock.`);
-      }
-      const [updatedProducts] = await conn.execute("SELECT id, name, stock FROM products WHERE id = ?", [item.product_id]);
-      const nextStock = Number(updatedProducts[0]?.stock || 0);
-      const nextStatus = nextStock <= 0 ? "Out of Stock" : nextStock <= lowStockThreshold ? "Low Stock" : "In Stock";
-      inventoryUpdates.push({
-        id: Number(item.product_id),
-        name: updatedProducts[0]?.name,
-        stock: nextStock,
-        status: nextStatus
-      });
-      if (nextStock === 0) {
-        outOfStockProducts.push({ id: Number(item.product_id), name: updatedProducts[0]?.name || item.name });
-      }
     }
 
     if (pricing.items.length) {
@@ -740,8 +719,8 @@ async function createOrderTransactionAttempt(req, input, pricing, attempt) {
 
     return {
       orderId: orderResult.insertId,
-      inventoryUpdates,
-      outOfStockProducts,
+      inventoryUpdates: [],
+      outOfStockProducts: [],
       response: {
         id: orderResult.insertId,
         total_amount: pricing.total,
@@ -780,6 +759,99 @@ async function createOrderWithRetry(req, input, pricing) {
     }
   }
   throw new HttpError(409, "This item is temporarily being updated. Please try checkout again.");
+}
+
+async function markOrderCompletedAndDeductInventory(orderId) {
+  const { config } = await loadSystemSettings();
+  const lowStockThreshold = Number(config?.inventory?.lowStockThreshold ?? 3);
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const [orders] = await conn.execute(
+      "SELECT id, payment_method, payment_status, inventory_deducted_at FROM orders WHERE id = ? FOR UPDATE",
+      [orderId]
+    );
+    if (!orders.length) throw new HttpError(404, "Order not found");
+    const inventoryUpdates = [];
+    const outOfStockProducts = [];
+    if (!orders[0].inventory_deducted_at) {
+      const [items] = await conn.execute(
+        "SELECT product_id, SUM(quantity) AS quantity FROM order_items WHERE order_id = ? GROUP BY product_id ORDER BY product_id ASC",
+        [orderId]
+      );
+      const productIds = items.map((item) => Number(item.product_id)).filter((id) => Number.isInteger(id) && id > 0);
+      if (productIds.length) {
+        const placeholders = productIds.map(() => "?").join(",");
+        const [products] = await conn.execute(
+          `SELECT id, name, stock
+           FROM products
+           WHERE id IN (${placeholders})
+             AND is_deleted = FALSE
+           ORDER BY id ASC
+           FOR UPDATE`,
+          productIds
+        );
+        const productById = new Map(products.map((product) => [Number(product.id), product]));
+        if (productById.size !== productIds.length) throw new HttpError(404, "One or more apparel items were not found.");
+        for (const item of items) {
+          const productId = Number(item.product_id);
+          const quantity = Number(item.quantity || 0);
+          const product = productById.get(productId);
+          if (!product || quantity <= 0) continue;
+          if (Number(product.stock || 0) < quantity) {
+            throw new HttpError(409, `${product.name || "This apparel item"} only has ${product.stock} in stock.`);
+          }
+          const [stockResult] = await conn.execute(
+            `UPDATE products
+             SET stock = stock - ?,
+                 status = CASE
+                   WHEN stock - ? <= 0 THEN 'Sold'
+                   WHEN stock - ? <= ${lowStockThreshold} THEN 'Low Stock'
+                   ELSE 'In Stock'
+                 END
+             WHERE id = ?
+               AND is_deleted = FALSE
+               AND stock >= ?`,
+            [quantity, quantity, quantity, productId, quantity]
+          );
+          if (stockResult.affectedRows !== 1) {
+            throw new HttpError(409, `${product.name || "This apparel item"} does not have enough stock.`);
+          }
+          const [updatedProducts] = await conn.execute("SELECT id, name, stock FROM products WHERE id = ?", [productId]);
+          const nextStock = Number(updatedProducts[0]?.stock || 0);
+          const nextStatus = nextStock <= 0 ? "Sold" : nextStock <= lowStockThreshold ? "Low Stock" : "In Stock";
+          const update = {
+            id: productId,
+            name: updatedProducts[0]?.name || product.name,
+            stock: nextStock,
+            status: nextStatus
+          };
+          inventoryUpdates.push(update);
+          if (nextStock === 0) outOfStockProducts.push(update);
+        }
+      }
+    }
+    await conn.execute(
+      `UPDATE orders
+       SET status = 'completed',
+           payment_status = CASE
+             WHEN LOWER(REPLACE(REPLACE(REPLACE(TRIM(COALESCE(payment_method, '')), ' ', ''), '_', ''), '-', '')) IN ('cod', 'cash', 'cashondelivery', 'cashupondelivery', 'payondelivery', 'paymentondelivery')
+                  AND payment_status IN ('unpaid', 'awaiting_payment')
+               THEN 'paid'
+             ELSE payment_status
+           END,
+           inventory_deducted_at = COALESCE(inventory_deducted_at, NOW())
+       WHERE id = ?`,
+      [orderId]
+    );
+    await conn.commit();
+    return { inventoryUpdates, outOfStockProducts };
+  } catch (error) {
+    await rollbackQuietly(conn, "order-complete-inventory");
+    throw error;
+  } finally {
+    conn.release();
+  }
 }
 
 async function runOrderCreatedSideEffects(req, result) {
@@ -910,7 +982,12 @@ router.patch("/:id/status", requireAuth, requireRole("admin"), asyncHandler(asyn
       }
     }
   }
-  await query("UPDATE orders SET status = :status WHERE id = :id", { id: req.params.id, status });
+  const inventoryResult = status === "completed" && currentStatus !== "completed"
+    ? await markOrderCompletedAndDeductInventory(req.params.id)
+    : { inventoryUpdates: [], outOfStockProducts: [] };
+  if (status !== "completed" || currentStatus === "completed") {
+    await query("UPDATE orders SET status = :status WHERE id = :id", { id: req.params.id, status });
+  }
   const updatedOrder = await loadDecoratedOrder(req.params.id, { role: "admin" });
   const title = status === "ready" ? "Out for Delivery" : status === "completed" ? "Order received" : "Order update";
   const body = status === "ready"
@@ -928,9 +1005,21 @@ router.patch("/:id/status", requireAuth, requireRole("admin"), asyncHandler(asyn
       { body: `Order #${req.params.id} was received by the customer. Feedback can now be collected.` }
     );
   }
+  for (const product of inventoryResult.outOfStockProducts) {
+    await query(
+      "INSERT INTO notifications (type, title, body, product_id) VALUES ('inventory', 'Sold out', :body, :id)",
+      { id: product.id, body: `${product.name || "An apparel item"} is now sold out.` }
+    );
+  }
   const updatePayload = updatedOrder || { id: Number(req.params.id), status };
   if (order.user_id) req.app.get("io")?.to(`user:${order.user_id}`).emit("order:update", updatePayload);
   req.app.get("io")?.to("admin").emit("order:update", updatePayload);
+  inventoryResult.inventoryUpdates.forEach((update) => {
+    req.app.get("io")?.emit("inventory:update", { type: "inventory", action: "order-completed", ...update });
+  });
+  inventoryResult.outOfStockProducts.forEach((product) => {
+    req.app.get("io")?.to("admin").emit("notification:new", { type: "inventory", title: "Sold out", body: `${product.name || "An apparel item"} is now sold out.`, product_id: product.id });
+  });
   res.json({ message: "Order updated", order: updatePayload });
 }));
 

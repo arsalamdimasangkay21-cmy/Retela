@@ -3,6 +3,7 @@ import { query } from "../config/db.js";
 import { asyncHandler } from "../utils/errors.js";
 import { requireAuth, requireRole } from "../middleware/auth.js";
 import { ensureProductInventoryColumns, nonDeletedProductWhere } from "../utils/productInventory.js";
+import { productImageExpression } from "../utils/productImages.js";
 import { loadSystemSettings } from "../utils/systemSettings.js";
 
 const router = Router();
@@ -11,7 +12,12 @@ let productColumnsReady;
 let reviewColumnsReady;
 
 function reportableOrderCondition(alias = "o") {
-  return `LOWER(TRIM(${alias}.status)) = 'completed'`;
+  const status = `LOWER(TRIM(${alias}.status))`;
+  const paymentStatus = `LOWER(TRIM(COALESCE(${alias}.payment_status, '')))`;
+  const paymentMethod = `LOWER(REPLACE(REPLACE(REPLACE(TRIM(COALESCE(${alias}.payment_method, '')), ' ', ''), '_', ''), '-', ''))`;
+  return `(${status} = 'completed'
+    AND ${paymentStatus} NOT IN ('failed', 'expired', 'cancelled')
+    AND (${paymentStatus} IN ('paid', 'refunded') OR ${paymentMethod} IN ('cod', 'cash', 'cashondelivery', 'cashupondelivery', 'payondelivery', 'paymentondelivery')))`;
 }
 
 const reportableOrderSql = reportableOrderCondition("o");
@@ -65,6 +71,81 @@ function reportChannelFilter(inputChannel = "all", alias = "o") {
   const channel = normalizeSalesChannel(inputChannel);
   if (channel === "all") return { channel, where: "1 = 1", params: {} };
   return { channel, where: `${alias}.order_channel = :salesChannel`, params: { salesChannel: channel } };
+}
+
+function intQueryParam(value, fallback, min, max) {
+  const number = Number(value);
+  if (!Number.isInteger(number)) return fallback;
+  return Math.max(min, Math.min(max, number));
+}
+
+function soldItemsOrderNumberSql(alias = "o") {
+  return `CASE
+    WHEN LOWER(TRIM(COALESCE(${alias}.order_channel, 'online'))) = 'pos'
+      THEN COALESCE(NULLIF(TRIM(${alias}.transaction_id), ''), CONCAT('POS-', LPAD(${alias}.id, 5, '0')))
+    ELSE CONCAT('#ORD-', YEAR(${alias}.created_at), '-', LPAD(${alias}.id, 5, '0'))
+  END`;
+}
+
+function soldItemsSearchSql() {
+  return `(
+    LOWER(p.name) LIKE :search
+    OR LOWER(COALESCE(p.sku, '')) LIKE :search
+    OR LOWER(COALESCE(p.brand, '')) LIKE :search
+    OR LOWER(COALESCE(p.category, '')) LIKE :search
+    OR LOWER(COALESCE(u.display_name, '')) LIKE :search
+    OR LOWER(COALESCE(u.username, '')) LIKE :search
+    OR LOWER(COALESCE(o.transaction_id, '')) LIKE :search
+    OR CAST(o.id AS CHAR) LIKE :search
+    OR LOWER(${soldItemsOrderNumberSql("o")}) LIKE :search
+  )`;
+}
+
+function soldItemsBaseSelect(whereSql) {
+  return `
+    SELECT
+      oi.id AS sale_item_id,
+      o.id AS order_id,
+      o.order_channel,
+      ${soldItemsOrderNumberSql("o")} AS order_number,
+      p.id AS product_id,
+      p.sku,
+      p.name AS product_name,
+      p.brand,
+      p.category,
+      p.size,
+      p.\`condition\`,
+      ${productImageExpression("p")} AS image_url,
+      oi.quantity AS quantity_sold,
+      oi.price AS unit_price,
+      (oi.quantity * oi.price) AS total_amount,
+      COALESCE(NULLIF(TRIM(u.display_name), ''), u.username, 'Walk-in Customer') AS customer_name,
+      o.payment_method,
+      o.payment_status,
+      o.status AS order_status,
+      o.created_at AS sold_at,
+      EXISTS(
+        SELECT 1
+        FROM returns r
+        WHERE r.order_id = o.id
+          AND (r.product_id IS NULL OR r.product_id = oi.product_id)
+          AND r.status IN ('approved', 'refunded')
+        LIMIT 1
+      ) AS returned,
+      EXISTS(
+        SELECT 1
+        FROM returns r
+        WHERE r.order_id = o.id
+          AND (r.product_id IS NULL OR r.product_id = oi.product_id)
+          AND r.status = 'refunded'
+        LIMIT 1
+      ) AS refunded
+    FROM orders o
+    JOIN order_items oi ON oi.order_id = o.id
+    JOIN products p ON p.id = oi.product_id
+    LEFT JOIN users u ON u.id = o.user_id
+    WHERE ${whereSql}
+  `;
 }
 
 async function ensureProductColumns() {
@@ -221,6 +302,79 @@ const getAnalyticsSummary = asyncHandler(async (req, res) => {
 
 router.get("/", getAnalyticsSummary);
 router.get("/summary", getAnalyticsSummary);
+
+router.get("/sold-items", asyncHandler(async (req, res) => {
+  await ensureProductColumns();
+  const start = req.query.start || req.query.startDate;
+  const end = req.query.end || req.query.endDate;
+  const { range, where: rangeSql, params: rangeParams } = reportDateFilter(req.query.range, start, end, "o");
+  const { channel, where: channelSql, params: channelParams } = reportChannelFilter(req.query.channel, "o");
+  const searchText = String(req.query.search || "").trim().slice(0, 120);
+  const soldDate = dateOnly(req.query.date || req.query.soldDate);
+  const page = intQueryParam(req.query.page, 1, 1, 100000);
+  const pageSize = intQueryParam(req.query.pageSize, 10, 1, 500);
+  const whereParts = [rangeSql, reportableOrderSql, channelSql];
+  const params = { ...rangeParams, ...channelParams };
+  if (soldDate) {
+    whereParts.push("DATE(o.created_at) = :soldDate");
+    params.soldDate = soldDate;
+  }
+  if (searchText) {
+    whereParts.push(soldItemsSearchSql());
+    params.search = `%${searchText.toLowerCase()}%`;
+  }
+
+  const baseSelect = soldItemsBaseSelect(whereParts.join(" AND "));
+  const [totals] = await query(
+    `SELECT
+       COUNT(*) AS total_rows,
+       COALESCE(SUM(quantity_sold), 0) AS total_quantity,
+       COALESCE(SUM(total_amount), 0) AS total_amount
+     FROM (${baseSelect}) sold_items`,
+    params
+  );
+  const totalRows = Number(totals?.total_rows || 0);
+  const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const offset = (currentPage - 1) * pageSize;
+  const items = await query(
+    `${baseSelect}
+     ORDER BY sold_at DESC, sale_item_id DESC
+     LIMIT ${pageSize} OFFSET ${offset}`,
+    params
+  );
+
+  res.json({
+    range,
+    channel,
+    startDate: dateOnly(start),
+    endDate: dateOnly(end),
+    date: soldDate,
+    search: searchText,
+    totals: {
+      totalRows,
+      totalQuantity: Number(totals?.total_quantity || 0),
+      totalAmount: Number(totals?.total_amount || 0)
+    },
+    pagination: {
+      page: currentPage,
+      pageSize,
+      totalPages,
+      totalRows
+    },
+    items: items.map((item) => ({
+      ...item,
+      sale_item_id: Number(item.sale_item_id),
+      order_id: Number(item.order_id),
+      product_id: Number(item.product_id),
+      quantity_sold: Number(item.quantity_sold || 0),
+      unit_price: Number(item.unit_price || 0),
+      total_amount: Number(item.total_amount || 0),
+      returned: Boolean(Number(item.returned || 0)),
+      refunded: Boolean(Number(item.refunded || 0))
+    }))
+  });
+}));
 
 router.get("/sales", asyncHandler(async (req, res) => {
   await ensureProductColumns();

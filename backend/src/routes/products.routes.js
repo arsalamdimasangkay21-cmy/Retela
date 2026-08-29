@@ -309,6 +309,23 @@ function productSelect(tableExpression = "products") {
     ${table}.updated_at`;
 }
 
+function validCompletedSaleCondition(alias = "o") {
+  const status = `LOWER(TRIM(${alias}.status))`;
+  const paymentStatus = `LOWER(TRIM(COALESCE(${alias}.payment_status, '')))`;
+  const paymentMethod = `LOWER(REPLACE(REPLACE(REPLACE(TRIM(COALESCE(${alias}.payment_method, '')), ' ', ''), '_', ''), '-', ''))`;
+  return `(${status} = 'completed'
+    AND ${paymentStatus} NOT IN ('failed', 'expired', 'cancelled')
+    AND (${paymentStatus} IN ('paid', 'refunded') OR ${paymentMethod} IN ('cod', 'cash', 'cashondelivery', 'cashupondelivery', 'payondelivery', 'paymentondelivery')))`;
+}
+
+function soldInventoryOrderNumberSql(alias = "o") {
+  return `CASE
+    WHEN LOWER(TRIM(COALESCE(${alias}.order_channel, 'online'))) = 'pos'
+      THEN COALESCE(NULLIF(TRIM(${alias}.transaction_id), ''), CONCAT('POS-', LPAD(${alias}.id, 5, '0')))
+    ELSE CONCAT('#ORD-', YEAR(${alias}.created_at), '-', LPAD(${alias}.id, 5, '0'))
+  END`;
+}
+
 function duplicateSignature(product) {
   return [
     normalizeProductMatchValue(product.name),
@@ -482,6 +499,149 @@ router.get("/inventory", requireAuth, requireRole("admin"), asyncHandler(async (
      ORDER BY created_at DESC`
   );
   res.json(await hydrateAdditionalImages(products.map(productListResponse)));
+}));
+
+router.get("/sold-items", requireAuth, requireRole("admin"), asyncHandler(async (req, res) => {
+  await ensureProductInventoryColumns();
+  const lowStockThreshold = await configuredLowStockThreshold();
+  const input = z.object({
+    search: z.string().trim().max(120).optional().default(""),
+    category: z.string().trim().optional().default("all"),
+    size: z.string().trim().optional().default("all"),
+    condition: z.string().trim().optional().default("all"),
+    page: z.coerce.number().int().min(1).optional().default(1),
+    pageSize: z.coerce.number().int().min(1).max(500).optional().default(500)
+  }).parse(req.query);
+  const whereParts = [
+    nonDeletedProductWhere("p."),
+    "p.stock <= 0",
+    validCompletedSaleCondition("o")
+  ];
+  const params = {};
+  if (input.search) {
+    whereParts.push(`(
+      LOWER(p.name) LIKE :search
+      OR LOWER(COALESCE(p.sku, '')) LIKE :search
+      OR LOWER(COALESCE(p.brand, '')) LIKE :search
+      OR LOWER(COALESCE(p.category, '')) LIKE :search
+      OR LOWER(${soldInventoryOrderNumberSql("o")}) LIKE :search
+      OR CAST(o.id AS CHAR) LIKE :search
+    )`);
+    params.search = `%${input.search.toLowerCase()}%`;
+  }
+  if (input.category && input.category !== "all") {
+    whereParts.push("p.category = :category");
+    params.category = input.category;
+  }
+  if (input.size && input.size !== "all") {
+    whereParts.push("p.size = :size");
+    params.size = input.size;
+  }
+  if (input.condition && input.condition !== "all") {
+    whereParts.push("p.`condition` = :condition");
+    params.condition = input.condition;
+  }
+  const whereSql = whereParts.join(" AND ");
+  const baseSelect = `
+    SELECT
+      p.id,
+      p.sku,
+      p.name,
+      p.brand,
+      p.category,
+      p.gender,
+      p.size,
+      p.color,
+      p.price,
+      p.stock,
+      ${inventoryStatusSql("p.stock", lowStockThreshold)} AS status,
+      CASE WHEN MAX(p.image_data IS NOT NULL) THEN CONCAT('/api/products/', p.id, '/image') ELSE MAX(p.image_url) END AS image_url,
+      p.\`condition\`,
+      p.description,
+      COALESCE(SUM(oi.quantity), 0) AS quantity_sold,
+      COALESCE(SUM(oi.quantity * oi.price), 0) AS total_sales_amount,
+      COALESCE(MAX(oi.price), p.price, 0) AS selling_price,
+      (COALESCE(p.stock, 0) + COALESCE(SUM(oi.quantity), 0)) AS original_stock,
+      MAX(o.created_at) AS date_sold,
+      GROUP_CONCAT(DISTINCT CASE WHEN LOWER(TRIM(COALESCE(o.order_channel, 'online'))) = 'pos' THEN 'POS' ELSE 'Online' END SEPARATOR ', ') AS sales_channel,
+      GROUP_CONCAT(DISTINCT ${soldInventoryOrderNumberSql("o")} SEPARATOR ', ') AS sale_reference,
+      COUNT(DISTINCT o.id) AS sale_count,
+      COALESCE(SUM(CASE WHEN EXISTS(
+        SELECT 1 FROM returns r
+        WHERE r.order_id = o.id
+          AND (r.product_id IS NULL OR r.product_id = oi.product_id)
+          AND r.status IN ('approved', 'refunded')
+        LIMIT 1
+      ) THEN oi.quantity ELSE 0 END), 0) AS returned_quantity,
+      COALESCE(SUM(CASE WHEN EXISTS(
+        SELECT 1 FROM returns r
+        WHERE r.order_id = o.id
+          AND (r.product_id IS NULL OR r.product_id = oi.product_id)
+          AND r.status = 'refunded'
+        LIMIT 1
+      ) THEN oi.quantity ELSE 0 END), 0) AS refunded_quantity
+    FROM products p
+    JOIN order_items oi ON oi.product_id = p.id
+    JOIN orders o ON o.id = oi.order_id
+    WHERE ${whereSql}
+    GROUP BY
+      p.id,
+      p.sku,
+      p.name,
+      p.brand,
+      p.category,
+      p.gender,
+      p.size,
+      p.color,
+      p.price,
+      p.stock,
+      p.\`condition\`,
+      p.description
+  `;
+  const [totals] = await query(
+    `SELECT COUNT(*) AS total_rows,
+       COALESCE(SUM(quantity_sold), 0) AS total_quantity,
+       COALESCE(SUM(total_sales_amount), 0) AS total_amount
+     FROM (${baseSelect}) sold_inventory`,
+    params
+  );
+  const totalRows = Number(totals?.total_rows || 0);
+  const totalPages = Math.max(1, Math.ceil(totalRows / input.pageSize));
+  const page = Math.min(input.page, totalPages);
+  const offset = (page - 1) * input.pageSize;
+  const rows = await query(
+    `${baseSelect}
+     ORDER BY date_sold DESC, id DESC
+     LIMIT ${input.pageSize} OFFSET ${offset}`,
+    params
+  );
+  res.json({
+    items: rows.map((row) => ({
+      ...row,
+      id: Number(row.id),
+      barcode: row.sku,
+      imageUrl: row.image_url,
+      stock: Number(row.stock || 0),
+      original_stock: Number(row.original_stock || 0),
+      quantity_sold: Number(row.quantity_sold || 0),
+      selling_price: Number(row.selling_price || 0),
+      total_sales_amount: Number(row.total_sales_amount || 0),
+      sale_count: Number(row.sale_count || 0),
+      returned_quantity: Number(row.returned_quantity || 0),
+      refunded_quantity: Number(row.refunded_quantity || 0)
+    })),
+    pagination: {
+      page,
+      pageSize: input.pageSize,
+      totalPages,
+      totalRows
+    },
+    totals: {
+      totalRows,
+      totalQuantity: Number(totals?.total_quantity || 0),
+      totalAmount: Number(totals?.total_amount || 0)
+    }
+  });
 }));
 
 router.get("/available", requireAuth, requireApproved, asyncHandler(async (req, res) => {

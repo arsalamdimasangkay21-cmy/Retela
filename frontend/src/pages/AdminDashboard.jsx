@@ -8,6 +8,8 @@ import { Activity, Archive, Barcode, Bot, Camera, Check, CheckCircle2, ChevronLe
 import { api, API_URL, cachedGet, clearGetCache, getApiErrorMessage } from "../api/client";
 import JsBarcode from "jsbarcode";
 import { jsPDF } from "jspdf";
+import autoTable from "jspdf-autotable";
+import * as XLSX from "xlsx";
 import { createApparelOption, deleteApparelOption, fetchApparelOptions } from "../api/apparelOptions";
 import { ChangePasswordForm } from "../components/ChangePasswordForm";
 import ConfirmDialog from "../components/ConfirmDialog";
@@ -426,7 +428,7 @@ export default function AdminDashboard({ active, onChange }) {
     const type = detail.type || detail.payload?.type || detail.notification?.type || detail.data?.type;
     if (eventName === "retela:user-status") return ["Dashboard", "Customers", "Locations"].includes(page);
     if (eventName === "retela:notification-new") return ["Dashboard", "Notifications"].includes(page);
-    if (["order", "shipping", "refund", "return"].includes(type)) return ["Dashboard", "Orders", "Returns", "Reports", "Sales Analytics", "Sales"].includes(page);
+    if (["order", "order_update", "shipping", "refund", "return"].includes(type)) return ["Dashboard", "Orders", "Returns", "Reports", "Sales Analytics", "Sales", "Inventory"].includes(page);
     if (["inventory", "product", "new_product"].includes(type)) return ["Dashboard", "Apparel", "Inventory"].includes(page);
     return page === "Dashboard";
   }, []);
@@ -1338,13 +1340,20 @@ function PremiumInventoryPage({
   onDismissToast
 }) {
   const sourceProducts = useMemo(() => products.map(normalizeInventoryProduct), [products]);
+  const [inventoryView, setInventoryView] = useState("stock");
+  const [soldInventoryItems, setSoldInventoryItems] = useState([]);
+  const [soldInventoryLoading, setSoldInventoryLoading] = useState(false);
+  const [soldInventoryError, setSoldInventoryError] = useState("");
+  const [selectedSoldItem, setSelectedSoldItem] = useState(null);
   const [page, setPage] = useState(1);
+  const [soldPage, setSoldPage] = useState(1);
   const [barcodeQuery, setBarcodeQuery] = useState("");
   const [focusedSku, setFocusedSku] = useState("");
   const [barcodeModalOpen, setBarcodeModalOpen] = useState(false);
   const [selectedBarcodeIds, setSelectedBarcodeIds] = useState([]);
   const [lowStockThreshold, setLowStockThreshold] = useState(3);
   const [inventoryStatusFilter, setInventoryStatusFilter] = useState("all");
+  const stockProducts = useMemo(() => sourceProducts.filter((product) => Number(product.stock || 0) > 0 && stockFilterValue(product, lowStockThreshold) !== "sold"), [sourceProducts, lowStockThreshold]);
   const pageSize = 6;
   useEffect(() => {
     let active = true;
@@ -1356,7 +1365,35 @@ function PremiumInventoryPage({
       .catch(() => {});
     return () => { active = false; };
   }, []);
-  const visibleProducts = useMemo(() => sourceProducts.filter((product) => {
+  const loadSoldInventory = useCallback(() => {
+    setSoldInventoryLoading(true);
+    setSoldInventoryError("");
+    return api.get("/products/sold-items", { params: { pageSize: 500, ts: Date.now() } })
+      .then(({ data }) => {
+        setSoldInventoryItems(Array.isArray(data?.items) ? data.items.map(normalizeSoldInventoryItem) : []);
+      })
+      .catch((error) => {
+        setSoldInventoryItems([]);
+        setSoldInventoryError(getApiErrorMessage(error, "Unable to load sold items."));
+      })
+      .finally(() => setSoldInventoryLoading(false));
+  }, []);
+
+  useEffect(() => {
+    loadSoldInventory().catch(() => {});
+  }, [loadSoldInventory]);
+
+  useEffect(() => {
+    function handleSoldInventoryRefresh(event) {
+      const type = event.detail?.type || event.detail?.payload?.type || "";
+      if (!["inventory", "product", "order", "order_update", "return", "refund"].includes(type)) return;
+      loadSoldInventory().catch(() => {});
+    }
+    window.addEventListener("retela:data-change", handleSoldInventoryRefresh);
+    return () => window.removeEventListener("retela:data-change", handleSoldInventoryRefresh);
+  }, [loadSoldInventory]);
+
+  const visibleProducts = useMemo(() => stockProducts.filter((product) => {
     const text = `${productSku(product)} ${product.name} ${product.brand || ""} ${product.category} ${product.size} ${product.condition}`.toLowerCase();
     const matchesSearch = text.includes(filters.search.toLowerCase());
     const matchesCategory = filters.category === "all" || product.category === filters.category;
@@ -1367,18 +1404,29 @@ function PremiumInventoryPage({
       || status === inventoryStatusFilter
       || (Number(product.stock || 0) <= 0 && ["out_of_stock", "sold"].includes(inventoryStatusFilter));
     return matchesSearch && matchesCategory && matchesSize && matchesCondition && matchesStatus;
-  }), [sourceProducts, filters, inventoryStatusFilter, lowStockThreshold]);
+  }), [stockProducts, filters, inventoryStatusFilter, lowStockThreshold]);
+  const visibleSoldItems = useMemo(() => soldInventoryItems.filter((product) => {
+    const text = `${productSku(product)} ${product.name} ${product.brand || ""} ${product.category} ${product.size} ${product.condition} ${product.sale_reference || ""} ${product.sales_channel || ""}`.toLowerCase();
+    const matchesSearch = text.includes(filters.search.toLowerCase());
+    const matchesCategory = filters.category === "all" || product.category === filters.category;
+    const matchesSize = filters.size === "all" || product.size === filters.size;
+    const matchesCondition = filters.condition === "all" || product.condition === filters.condition;
+    return matchesSearch && matchesCategory && matchesSize && matchesCondition;
+  }), [soldInventoryItems, filters]);
   const totalPages = Math.max(1, Math.ceil(visibleProducts.length / pageSize));
-  useEffect(() => { setPage(1); }, [filters, inventoryStatusFilter, lowStockThreshold]);
+  const soldTotalPages = Math.max(1, Math.ceil(visibleSoldItems.length / pageSize));
+  useEffect(() => { setPage(1); }, [filters, inventoryStatusFilter, lowStockThreshold, inventoryView]);
+  useEffect(() => { setSoldPage(1); }, [filters, inventoryView, soldInventoryItems]);
   const pageProducts = visibleProducts.slice((page - 1) * pageSize, page * pageSize);
-  const scannedProduct = useMemo(() => findProductByBarcode(sourceProducts, barcodeQuery), [sourceProducts, barcodeQuery]);
+  const pageSoldItems = visibleSoldItems.slice((soldPage - 1) * pageSize, soldPage * pageSize);
+  const scannedProduct = useMemo(() => findProductByBarcode(stockProducts, barcodeQuery), [stockProducts, barcodeQuery]);
   const allBarcodeIds = useMemo(() => visibleProducts.map((product) => Number(product.id)).filter(Boolean), [visibleProducts]);
-  const selectedBarcodeProducts = useMemo(() => sourceProducts.filter((product) => selectedBarcodeIds.includes(Number(product.id))), [sourceProducts, selectedBarcodeIds]);
+  const selectedBarcodeProducts = useMemo(() => stockProducts.filter((product) => selectedBarcodeIds.includes(Number(product.id))), [stockProducts, selectedBarcodeIds]);
   const stats = [
-    { title: "T-Shirts Stock", value: stockByCategory(sourceProducts, "T-Shirts"), subtitle: "Available tees", icon: PackageCheck },
-    { title: "Caps Stock", value: stockByCategory(sourceProducts, "Caps"), subtitle: "Caps on hand", icon: PackagePlus },
-    { title: "Jackets Stock", value: stockByCategory(sourceProducts, "Jackets"), subtitle: "Outerwear count", icon: ShoppingBagIcon },
-    { title: "Total Apparel Inventory", value: sourceProducts.reduce((sum, product) => sum + Number(product.stock || 0), 0), subtitle: `${sourceProducts.length} apparel items`, icon: SlidersHorizontal }
+    { title: "T-Shirts Stock", value: stockByCategory(stockProducts, "T-Shirts"), subtitle: "Available tees", icon: PackageCheck },
+    { title: "Caps Stock", value: stockByCategory(stockProducts, "Caps"), subtitle: "Caps on hand", icon: PackagePlus },
+    { title: "Jackets Stock", value: stockByCategory(stockProducts, "Jackets"), subtitle: "Outerwear count", icon: ShoppingBagIcon },
+    { title: "Sold Items", value: soldInventoryItems.reduce((sum, product) => sum + Number(product.quantity_sold || 0), 0), subtitle: `${soldInventoryItems.length} sold-out records`, icon: ReceiptText }
   ];
 
   useEffect(() => {
@@ -1394,10 +1442,10 @@ function PremiumInventoryPage({
     if (!incomingSku) return;
     setBarcodeQuery(incomingSku);
     setFilters((current) => ({ ...current, search: incomingSku, category: "all", brand: "all", size: "all", condition: "all" }));
-    const targetIndex = sourceProducts.findIndex((product) => productSku(product).toLowerCase() === incomingSku.toLowerCase());
+    const targetIndex = stockProducts.findIndex((product) => productSku(product).toLowerCase() === incomingSku.toLowerCase());
     if (targetIndex >= 0) setPage(Math.floor(targetIndex / pageSize) + 1);
     setFocusedSku(incomingSku);
-  }, [focusSku, setFilters, sourceProducts]);
+  }, [focusSku, setFilters, stockProducts]);
 
   useEffect(() => {
     if (!focusedSku) return undefined;
@@ -1421,7 +1469,7 @@ function PremiumInventoryPage({
     setBarcodeQuery(normalized);
     setFilters({ ...filters, search: normalized, category: "all", brand: "all", size: "all", condition: "all" });
     if (normalized) {
-      const targetIndex = sourceProducts.findIndex((product) => productSku(product).toLowerCase() === normalized.toLowerCase());
+      const targetIndex = stockProducts.findIndex((product) => productSku(product).toLowerCase() === normalized.toLowerCase());
       if (targetIndex >= 0) setPage(Math.floor(targetIndex / pageSize) + 1);
       setFocusedSku(normalized);
     }
@@ -1432,7 +1480,7 @@ function PremiumInventoryPage({
     if (!sku) return;
     setBarcodeQuery(sku);
     setFilters((current) => ({ ...current, search: sku, category: "all", brand: "all", size: "all", condition: "all" }));
-    const targetIndex = sourceProducts.findIndex((item) => productSku(item).toLowerCase() === sku.toLowerCase());
+    const targetIndex = stockProducts.findIndex((item) => productSku(item).toLowerCase() === sku.toLowerCase());
     if (targetIndex >= 0) setPage(Math.floor(targetIndex / pageSize) + 1);
     setFocusedSku(sku);
   }
@@ -1485,12 +1533,12 @@ function PremiumInventoryPage({
       />
 
       <Card className="inventory-filter-card">
-        <div className="grid gap-3 lg:grid-cols-[minmax(220px,1fr)_160px_150px_170px_180px_auto]">
+        <div className={`grid gap-3 ${inventoryView === "stock" ? "lg:grid-cols-[minmax(220px,1fr)_160px_150px_170px_180px_auto]" : "lg:grid-cols-[minmax(220px,1fr)_160px_150px_170px_auto]"}`}>
           <Field icon={Search} placeholder="Search apparel inventory" value={filters.search} onChange={(e) => setFilters({ ...filters, search: e.target.value })} />
           <InventorySelect label="Category" value={filters.category} onChange={(value) => setFilters({ ...filters, category: value })} options={["all", ...(optionValues.categories || []).filter((value) => value !== "Other")]} />
           <InventorySelect label="Size" value={filters.size} onChange={(value) => setFilters({ ...filters, size: value })} options={["all", ...(optionValues.sizes || []).filter((value) => value !== "Other")]} />
           <InventorySelect label="Condition" value={filters.condition} onChange={(value) => setFilters({ ...filters, condition: value })} options={["all", ...(optionValues.conditions || []).filter((value) => value !== "Other")]} />
-          <InventorySelect label="Stock Status" value={inventoryStatusFilter} onChange={setInventoryStatusFilter} options={["all", "in_stock", "low_stock", "out_of_stock", "sold"]} />
+          {inventoryView === "stock" ? <InventorySelect label="Stock Status" value={inventoryStatusFilter} onChange={setInventoryStatusFilter} options={["all", "in_stock", "low_stock"]} /> : null}
           <button type="button" className="inline-flex items-center justify-center gap-2 rounded-2xl border border-neonbrand/30 bg-neonbrand/10 px-5 py-3 text-sm font-bold text-neonbrand transition hover:bg-neonbrand hover:text-black hover:shadow-[0_0_30px_rgba(56,255,136,0.18)]">
             <SlidersHorizontal size={17} />
             Filter
@@ -1501,17 +1549,31 @@ function PremiumInventoryPage({
       <Card className="inventory-stock-list-card overflow-hidden p-0">
         <div className="inventory-stock-list__header flex flex-wrap items-center justify-between gap-3 border-b border-white/10 px-4 py-4 sm:px-5">
           <div>
-            <h2 className="font-display text-xl font-bold text-white">Stock List</h2>
-            <p className="mt-1 text-sm text-white/45">Inventory is the source of truth for apparel, stock, and barcodes.</p>
+            <h2 className="font-display text-xl font-bold text-white">{inventoryView === "stock" ? "Stock List" : "Sold Items"}</h2>
+            <p className="mt-1 text-sm text-white/45">{inventoryView === "stock" ? "Available apparel with stock greater than zero." : "Sold-out apparel backed by completed sale records."}</p>
           </div>
           <div className="flex flex-wrap items-center justify-end gap-2">
-            <button type="button" onClick={() => setBarcodeModalOpen(true)} className="inventory-barcode-button inline-flex items-center justify-center gap-2 rounded-2xl border border-neonbrand/30 bg-neonbrand/10 px-4 py-2.5 text-sm font-bold text-neonbrand transition hover:bg-neonbrand hover:text-black">
+            <div className="inventory-view-tabs" role="tablist" aria-label="Inventory views">
+              {[
+                { value: "stock", label: "Stock Items", icon: PackageCheck },
+                { value: "sold", label: "Sold Items", icon: ReceiptText }
+              ].map((option) => {
+                const Icon = option.icon;
+                return (
+                  <button key={option.value} type="button" role="tab" aria-selected={inventoryView === option.value} onClick={() => setInventoryView(option.value)} className={inventoryView === option.value ? "is-active" : ""}>
+                    <Icon size={16} />
+                    {option.label}
+                  </button>
+                );
+              })}
+            </div>
+            {inventoryView === "stock" ? <button type="button" onClick={() => setBarcodeModalOpen(true)} className="inventory-barcode-button inline-flex items-center justify-center gap-2 rounded-2xl border border-neonbrand/30 bg-neonbrand/10 px-4 py-2.5 text-sm font-bold text-neonbrand transition hover:bg-neonbrand hover:text-black">
               <Barcode size={17} />
               Barcodes
-            </button>
+            </button> : null}
           </div>
         </div>
-        {pageProducts.length ? (
+        {inventoryView === "stock" ? (pageProducts.length ? (
           <>
             <div className="inventory-stock-list__table-wrap hidden xl:block">
               <table className="w-full table-fixed text-left text-sm">
@@ -1617,8 +1679,15 @@ function PremiumInventoryPage({
               ))}
             </div>
           </>
-        ) : <div className="p-5"><EmptyState title="No inventory yet" subtitle="Add real apparel items to populate this database-backed inventory view." /></div>}
-        <div className="flex flex-col justify-between gap-3 px-4 py-4 text-sm text-white/50 sm:flex-row sm:items-center sm:px-5">
+        ) : <div className="p-5"><EmptyState title="No inventory yet" subtitle="Add real apparel items to populate this database-backed inventory view." /></div>) : (
+          <SoldInventoryList
+            items={pageSoldItems}
+            loading={soldInventoryLoading}
+            error={soldInventoryError}
+            onViewDetails={setSelectedSoldItem}
+          />
+        )}
+        {inventoryView === "stock" ? <div className="flex flex-col justify-between gap-3 px-4 py-4 text-sm text-white/50 sm:flex-row sm:items-center sm:px-5">
           <p>Showing {pageProducts.length ? (page - 1) * pageSize + 1 : 0}-{Math.min(page * pageSize, visibleProducts.length)} of {visibleProducts.length} inventory items</p>
           <div className="flex items-center gap-2">
             <button type="button" disabled={page === 1} onClick={() => setPage((value) => Math.max(1, value - 1))} className="grid h-10 w-10 place-items-center rounded-xl border border-white/10 bg-white/[0.06] text-white/70 transition hover:text-neonbrand disabled:cursor-not-allowed disabled:opacity-40">
@@ -1629,7 +1698,7 @@ function PremiumInventoryPage({
               <ChevronRight size={18} />
             </button>
           </div>
-        </div>
+        </div> : <SoldInventoryPagination page={soldPage} pageSize={pageSize} totalPages={soldTotalPages} totalItems={visibleSoldItems.length} shownItems={pageSoldItems.length} onPageChange={setSoldPage} />}
       </Card>
 
       {barcodeModalOpen ? (
@@ -1681,6 +1750,7 @@ function PremiumInventoryPage({
         />
       ) : null}
       {productToast ? <AdminToast toast={productToast} onClose={onDismissToast} /> : null}
+      {selectedSoldItem ? <SoldInventoryDetailsModal item={selectedSoldItem} onClose={() => setSelectedSoldItem(null)} /> : null}
     </motion.div>
   );
 }
@@ -1760,6 +1830,193 @@ function InventoryActions({ product, onEdit, onDelete, deletingProductIds = [] }
         {deleting ? "Deleting..." : "Delete"}
       </InventoryActionButton>
     </div>
+  );
+}
+
+function SoldInventoryList({ items, loading, error, onViewDetails }) {
+  if (loading) {
+    return (
+      <div className="sold-inventory-loading p-4 sm:p-5">
+        {Array.from({ length: 4 }).map((_, index) => <div key={index} className="sold-inventory-skeleton" />)}
+      </div>
+    );
+  }
+  if (error) {
+    return (
+      <div className="p-5">
+        <div className="sold-inventory-error">{error}</div>
+      </div>
+    );
+  }
+  if (!items.length) {
+    return <div className="p-5"><EmptyState title="No sold items were found for the selected filters." subtitle="Completed sales will move sold-out apparel into this view." /></div>;
+  }
+  return (
+    <>
+      <div className="inventory-stock-list__table-wrap sold-inventory-table-wrap hidden xl:block">
+        <table className="sold-inventory-table w-full text-left text-sm">
+          <thead>
+            <tr className="inventory-stock-list__head-row border-b border-white/10 bg-white/[0.035] text-[11px] uppercase tracking-[0.08em] text-white/42">
+              <th className="px-3 py-4">Image</th>
+              <th className="px-3 py-4">Apparel</th>
+              <th className="px-3 py-4">Barcode/SKU</th>
+              <th className="px-3 py-4">Category</th>
+              <th className="px-3 py-4">Size</th>
+              <th className="px-3 py-4">Condition</th>
+              <th className="px-3 py-4">Original Stock</th>
+              <th className="px-3 py-4">Qty Sold</th>
+              <th className="px-3 py-4">Price</th>
+              <th className="px-3 py-4">Total</th>
+              <th className="px-3 py-4">Channel</th>
+              <th className="px-3 py-4">Reference</th>
+              <th className="px-3 py-4">Date Sold</th>
+              <th className="px-3 py-4">Status</th>
+              <th className="px-3 py-4">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((item) => (
+              <tr key={item.id} className="border-b border-white/7 align-top transition duration-300 hover:bg-neonbrand/[0.045]">
+                <td className="px-3 py-4">
+                  <div className="inventory-product-thumb h-14 w-14 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.06] shadow-lg shadow-black/20">
+                    <ProductImage product={item} className="h-full w-full object-cover" alt={item.name} />
+                  </div>
+                </td>
+                <td className="px-3 py-4">
+                  <strong className="block break-words text-white">{item.name}</strong>
+                  <span className="mt-1 block break-words text-xs text-white/42">{item.brand || "Other"}</span>
+                </td>
+                <td className="break-all px-3 py-4 text-xs font-bold text-neonbrand">{productSku(item)}</td>
+                <td className="break-words px-3 py-4 text-white/70">{item.category}</td>
+                <td className="break-words px-3 py-4 text-white/70">{item.size || "Free Size"}</td>
+                <td className="break-words px-3 py-4 text-white/70">{normalizeCondition(item.condition)}</td>
+                <td className="px-3 py-4 font-bold text-white">{Number(item.original_stock || 0).toLocaleString()}</td>
+                <td className="px-3 py-4 font-bold text-white">{Number(item.quantity_sold || 0).toLocaleString()}</td>
+                <td className="px-3 py-4 font-bold text-white">{money(item.selling_price)}</td>
+                <td className="px-3 py-4 font-bold text-white">{money(item.total_sales_amount)}</td>
+                <td className="break-words px-3 py-4 text-white/70">{item.sales_channel || "Online"}</td>
+                <td className="break-words px-3 py-4 text-white/70">{item.sale_reference || "Not recorded"}</td>
+                <td className="break-words px-3 py-4 text-white/70">{formatSoldDateTime(item.date_sold)}</td>
+                <td className="px-3 py-4"><SoldItemStatusBadges item={item} /></td>
+                <td className="px-3 py-4">
+                  <InventoryActionButton tone="edit" icon={Eye} title="View sale details" onClick={() => onViewDetails(item)}>
+                    View Sale Details
+                  </InventoryActionButton>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="inventory-stock-list__mobile sold-inventory-mobile grid gap-3 p-4 xl:hidden">
+        {items.map((item) => (
+          <article key={item.id} className="inventory-stock-mobile-card sold-inventory-mobile-card rounded-3xl border border-white/10 bg-white/[0.055] p-3">
+            <div className="flex gap-3">
+              <div className="inventory-product-thumb h-20 w-20 shrink-0 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.06]">
+                <ProductImage product={item} className="h-full w-full object-cover" alt={item.name} />
+              </div>
+              <div className="min-w-0 flex-1">
+                <strong className="block break-words text-white">{item.name}</strong>
+                <span className="mt-1 block break-words text-xs text-white/45">{item.brand || "Other"} | {item.category || "Apparel"} | {item.size || "Free Size"}</span>
+                <div className="mt-2"><SoldItemStatusBadges item={item} /></div>
+              </div>
+            </div>
+            <div className="mt-3 grid gap-2 text-sm text-white/65 sm:grid-cols-2">
+              <SoldInventoryFact label="Barcode/SKU" value={productSku(item)} />
+              <SoldInventoryFact label="Condition" value={normalizeCondition(item.condition)} />
+              <SoldInventoryFact label="Original Stock" value={Number(item.original_stock || 0).toLocaleString()} />
+              <SoldInventoryFact label="Quantity Sold" value={Number(item.quantity_sold || 0).toLocaleString()} />
+              <SoldInventoryFact label="Selling Price" value={money(item.selling_price)} />
+              <SoldInventoryFact label="Total Sales" value={money(item.total_sales_amount)} />
+              <SoldInventoryFact label="Sales Channel" value={item.sales_channel || "Online"} />
+              <SoldInventoryFact label="Reference" value={item.sale_reference || "Not recorded"} />
+              <SoldInventoryFact label="Date Sold" value={formatSoldDateTime(item.date_sold)} />
+            </div>
+            <button type="button" onClick={() => onViewDetails(item)} className="sold-inventory-details-button mt-3 inline-flex w-full items-center justify-center gap-2 rounded-2xl border px-4 py-3 text-sm font-bold transition">
+              <Eye size={16} />
+              View Sale Details
+            </button>
+          </article>
+        ))}
+      </div>
+    </>
+  );
+}
+
+function SoldInventoryFact({ label, value }) {
+  return (
+    <div className="sold-inventory-fact">
+      <span>{label}</span>
+      <strong>{value || "Not recorded"}</strong>
+    </div>
+  );
+}
+
+function SoldInventoryPagination({ page, pageSize, totalPages, totalItems, shownItems, onPageChange }) {
+  return (
+    <div className="flex flex-col justify-between gap-3 px-4 py-4 text-sm text-white/50 sm:flex-row sm:items-center sm:px-5">
+      <p>Showing {shownItems ? (page - 1) * pageSize + 1 : 0}-{Math.min(page * pageSize, totalItems)} of {totalItems} sold items</p>
+      <div className="flex items-center gap-2">
+        <button type="button" disabled={page === 1} onClick={() => onPageChange((value) => Math.max(1, value - 1))} className="grid h-10 w-10 place-items-center rounded-xl border border-white/10 bg-white/[0.06] text-white/70 transition hover:text-neonbrand disabled:cursor-not-allowed disabled:opacity-40">
+          <ChevronLeft size={18} />
+        </button>
+        <span className="rounded-xl border border-white/10 bg-black/25 px-4 py-2 font-bold text-white/75">Page {page} of {totalPages}</span>
+        <button type="button" disabled={page === totalPages} onClick={() => onPageChange((value) => Math.min(totalPages, value + 1))} className="grid h-10 w-10 place-items-center rounded-xl border border-white/10 bg-white/[0.06] text-white/70 transition hover:text-neonbrand disabled:cursor-not-allowed disabled:opacity-40">
+          <ChevronRight size={18} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function SoldItemStatusBadges({ item }) {
+  return (
+    <div className="sold-item-status-stack">
+      <span className="inventory-status-badge inventory-status-badge--sold inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-1 text-xs font-bold">
+        <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-current" />
+        Sold
+      </span>
+      {item.refunded_quantity > 0 ? <span className="sold-item-return-badge is-refunded">Refunded</span> : null}
+      {item.returned_quantity > 0 && !item.refunded_quantity ? <span className="sold-item-return-badge">Returned</span> : null}
+    </div>
+  );
+}
+
+function SoldInventoryDetailsModal({ item, onClose }) {
+  if (!item) return null;
+  return createPortal(
+    <motion.div className="retela-modal-backdrop sold-items-modal-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onMouseDown={onClose}>
+      <motion.section className="retela-modal-card sold-inventory-details-modal" initial={{ opacity: 0, scale: 0.96, y: 18 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.96, y: 18 }} onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label="Sold item sale details">
+        <div className="sold-items-modal-header">
+          <div>
+            <p className="sold-items-modal-eyebrow">Sold Item</p>
+            <h3>{item.name}</h3>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close sold item details"><X size={18} /></button>
+        </div>
+        <div className="sold-inventory-details-body">
+          <div className="sold-inventory-details-image">
+            <ProductImage product={item} className="h-full w-full object-cover" alt={item.name} />
+          </div>
+          <div className="sold-inventory-details-grid">
+            <SoldInventoryFact label="Brand" value={item.brand || "Other"} />
+            <SoldInventoryFact label="Barcode/SKU" value={productSku(item)} />
+            <SoldInventoryFact label="Category" value={item.category || "Apparel"} />
+            <SoldInventoryFact label="Size" value={item.size || "Free Size"} />
+            <SoldInventoryFact label="Condition" value={normalizeCondition(item.condition)} />
+            <SoldInventoryFact label="Original Stock" value={Number(item.original_stock || 0).toLocaleString()} />
+            <SoldInventoryFact label="Quantity Sold" value={Number(item.quantity_sold || 0).toLocaleString()} />
+            <SoldInventoryFact label="Selling Price" value={money(item.selling_price)} />
+            <SoldInventoryFact label="Total Sales Amount" value={money(item.total_sales_amount)} />
+            <SoldInventoryFact label="Sales Channel" value={item.sales_channel || "Online"} />
+            <SoldInventoryFact label="Order/Transaction" value={item.sale_reference || "Not recorded"} />
+            <SoldInventoryFact label="Date Sold" value={formatSoldDateTime(item.date_sold)} />
+            <SoldInventoryFact label="Sale Status" value={item.refunded_quantity > 0 ? "Refunded sale history retained" : item.returned_quantity > 0 ? "Returned sale history retained" : "Sold"} />
+          </div>
+        </div>
+      </motion.section>
+    </motion.div>,
+    document.body
   );
 }
 
@@ -2406,7 +2663,29 @@ function normalizeInventoryProduct(product) {
     ...product,
     category: normalizeInventoryCategory(product.category),
     condition: normalizeCondition(product.condition),
-    status: product.status || (Number(product.stock) <= 0 ? "Out of Stock" : Number(product.stock) <= 3 ? "Low Stock" : "In Stock")
+    status: product.status || (Number(product.stock) <= 0 ? "Sold" : Number(product.stock) <= 3 ? "Low Stock" : "In Stock")
+  };
+}
+
+function normalizeSoldInventoryItem(product) {
+  const normalized = normalizeInventoryProduct({
+    ...product,
+    status: "Sold",
+    stock: Number(product?.stock || 0)
+  });
+  return {
+    ...normalized,
+    original_stock: Number(product?.original_stock || product?.originalStock || 0),
+    quantity_sold: Number(product?.quantity_sold || product?.quantitySold || 0),
+    selling_price: Number(product?.selling_price || product?.sellingPrice || product?.price || 0),
+    total_sales_amount: Number(product?.total_sales_amount || product?.totalSalesAmount || 0),
+    sales_channel: product?.sales_channel || product?.salesChannel || "",
+    sale_reference: product?.sale_reference || product?.saleReference || "",
+    date_sold: product?.date_sold || product?.dateSold || product?.sold_at || null,
+    returned_quantity: Number(product?.returned_quantity || product?.returnedQuantity || 0),
+    refunded_quantity: Number(product?.refunded_quantity || product?.refundedQuantity || 0),
+    imageUrl: product?.imageUrl || product?.image_url || "",
+    image_url: product?.image_url || product?.imageUrl || ""
   };
 }
 
@@ -2420,6 +2699,13 @@ function normalizeCondition(condition) {
 
 function stockByCategory(products, category) {
   return products.filter((product) => product.category === category).reduce((sum, product) => sum + Number(product.stock || 0), 0);
+}
+
+function formatSoldDateTime(value) {
+  if (!value) return "Not recorded";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Not recorded";
+  return date.toLocaleString(undefined, { year: "numeric", month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit" });
 }
 
 function ShoppingBagIcon(props) {
@@ -2648,6 +2934,7 @@ function SalesAnalytics({ summary, onViewInventory }) {
   const [reportMessage, setReportMessage] = useState("");
   const [barcodeProducts, setBarcodeProducts] = useState([]);
   const [salesBarcodeQuery, setSalesBarcodeQuery] = useState("");
+  const [soldItemsOpen, setSoldItemsOpen] = useState(false);
   const salesChartRef = useRef(null);
   const paymentChartRef = useRef(null);
   const visibleSummary = analyticsSummary || summary || {};
@@ -2704,7 +2991,7 @@ function SalesAnalytics({ summary, onViewInventory }) {
   const cards = [
     { title: "Total Sales", value: money(totalSales), change: "Live", caption: "database revenue", icon: TrendingUp, tone: "sales" },
     { title: "Average Order Value", value: money(averageOrder), change: "Live", caption: "per reportable order", icon: WalletCards, tone: "aov" },
-    { title: "Items Sold", value: itemsSold.toLocaleString(), change: "Live", caption: "database quantities", icon: ShoppingBag, tone: "items" },
+    { title: "Items Sold", value: itemsSold.toLocaleString(), change: "Live", caption: "database quantities", icon: ShoppingBag, tone: "items", onClick: () => setSoldItemsOpen(true) },
     { title: "Average Rating", value: averageRating.toFixed(1), change: `${reviewCount} reviews`, caption: "customer feedback", icon: Star, tone: "rating" }
   ];
   const hasAnalyticsData = totalOrders > 0
@@ -3119,27 +3406,471 @@ function SalesAnalytics({ summary, onViewInventory }) {
         onPrimary={reportAction === "pdf" ? handleExportPdf : reportAction === "excel" ? handleExportExcel : handlePrintReport}
       />
       <AnalyticsReportModal state={reportState} message={reportMessage} onClose={() => setReportState(null)} />
+      <SoldItemsModal
+        open={soldItemsOpen}
+        onClose={() => setSoldItemsOpen(false)}
+        options={currentDateReportOptions}
+        expectedQuantity={itemsSold}
+      />
     </motion.div>
   );
 }
 
-function SalesMetricCard({ title, value, change, caption, icon: Icon, index, tone = "sales" }) {
+function SalesMetricCard({ title, value, change, caption, icon: Icon, index, tone = "sales", onClick }) {
+  const interactive = typeof onClick === "function";
+  const cardClass = `metric-card sales-metric-card is-${tone} ${interactive ? "is-clickable" : ""}`;
+  const content = (
+    <div className="flex items-start justify-between gap-4">
+      <div className="min-w-0">
+        <p>{title}</p>
+        <strong className="metric-value block font-display font-bold">{value}</strong>
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <span className="sales-metric-chip">{change}</span>
+          <span className="sales-metric-caption">{caption}</span>
+        </div>
+      </div>
+      <span className="sales-metric-icon">
+        <Icon size={23} />
+      </span>
+    </div>
+  );
+  if (interactive) {
+    return (
+      <motion.button type="button" className={cardClass} onClick={onClick} aria-label={`Open ${title} details`} initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} whileHover={{ y: -3, scale: 1.01 }} whileTap={{ scale: 0.99 }} transition={{ duration: 0.28, delay: index * 0.04 }}>
+        {content}
+      </motion.button>
+    );
+  }
   return (
-    <motion.article className={`metric-card sales-metric-card is-${tone}`} initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} whileHover={{ y: -3, scale: 1.01 }} transition={{ duration: 0.28, delay: index * 0.04 }}>
-      <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <p>{title}</p>
-          <strong className="metric-value block font-display font-bold">{value}</strong>
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <span className="sales-metric-chip">{change}</span>
-            <span className="sales-metric-caption">{caption}</span>
+    <motion.article className={cardClass} initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} whileHover={{ y: -3, scale: 1.01 }} transition={{ duration: 0.28, delay: index * 0.04 }}>
+      {content}
+    </motion.article>
+  );
+}
+
+function normalizeSoldReportItem(item) {
+  const quantity = Number(item?.quantity_sold || item?.quantitySold || 0);
+  const unitPrice = Number(item?.unit_price || item?.unitPrice || 0);
+  return {
+    ...item,
+    sale_item_id: Number(item?.sale_item_id || item?.saleItemId || 0),
+    order_id: Number(item?.order_id || item?.orderId || 0),
+    product_id: Number(item?.product_id || item?.productId || 0),
+    name: item?.product_name || item?.name || "Apparel item",
+    brand: item?.brand || "Other",
+    category: item?.category || "Apparel",
+    size: item?.size || "Free Size",
+    condition: item?.condition || "Good",
+    sku: item?.sku || item?.barcode || "",
+    barcode: item?.sku || item?.barcode || "",
+    image_url: item?.image_url || item?.imageUrl || "",
+    imageUrl: item?.imageUrl || item?.image_url || "",
+    quantity_sold: quantity,
+    unit_price: unitPrice,
+    total_amount: Number(item?.total_amount || item?.totalAmount || quantity * unitPrice),
+    order_channel: String(item?.order_channel || "online").toLowerCase(),
+    order_number: item?.order_number || item?.orderNumber || (item?.order_id ? `#${item.order_id}` : "Not recorded"),
+    customer_name: item?.customer_name || item?.customerName || "",
+    payment_method: item?.payment_method || item?.paymentMethod || "",
+    payment_status: item?.payment_status || item?.paymentStatus || "",
+    sold_at: item?.sold_at || item?.soldAt || item?.created_at || null,
+    order_status: item?.order_status || item?.orderStatus || "",
+    returned: Boolean(item?.returned),
+    refunded: Boolean(item?.refunded)
+  };
+}
+
+function soldItemsRequestParams(options, filters, page = 1, pageSize = 10) {
+  const channel = filters?.channel || options?.channel || "all";
+  const params = {
+    ...reportOptionsParams({ ...defaultReportOptions, ...options, channel }),
+    page,
+    pageSize,
+    ts: Date.now()
+  };
+  if (channel === "all") delete params.channel;
+  if (filters?.search) params.search = filters.search;
+  if (filters?.date) params.date = filters.date;
+  return params;
+}
+
+async function fetchSoldItemsForReport(options, filters) {
+  const pageSize = 500;
+  let page = 1;
+  let totalPages = 1;
+  let totals = { totalRows: 0, totalQuantity: 0, totalAmount: 0 };
+  const items = [];
+  while (page <= totalPages && page <= 40) {
+    const { data } = await api.get("/reports/sold-items", { params: soldItemsRequestParams(options, filters, page, pageSize) });
+    items.push(...(Array.isArray(data?.items) ? data.items.map(normalizeSoldReportItem) : []));
+    totals = data?.totals || totals;
+    totalPages = Number(data?.pagination?.totalPages || 1);
+    page += 1;
+  }
+  return { items, totals };
+}
+
+function soldChannelLabel(channel) {
+  return String(channel || "online").toLowerCase() === "pos" ? "POS" : "Online";
+}
+
+function displayStatusText(value, fallback = "Not recorded") {
+  const text = String(value || "").trim();
+  if (!text) return fallback;
+  return text.replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function soldItemsRows(items) {
+  return items.map((item) => ({
+    Product: item.name,
+    Brand: item.brand || "Other",
+    Category: item.category || "Apparel",
+    Size: item.size || "Free Size",
+    Condition: normalizeCondition(item.condition),
+    "Barcode/SKU": productSku(item),
+    "Quantity Sold": Number(item.quantity_sold || 0),
+    "Unit Price": money(item.unit_price),
+    "Total Amount": money(item.total_amount),
+    "Sales Channel": soldChannelLabel(item.order_channel),
+    "Order/Transaction": item.order_number || "Not recorded",
+    Customer: item.customer_name || "Not recorded",
+    "Payment Method": paymentLabel(item.payment_method),
+    "Payment Status": displayStatusText(item.payment_status),
+    "Date and Time Sold": formatSoldDateTime(item.sold_at),
+    "Order Status": displayStatusText(item.order_status),
+    "Return/Refund": item.refunded ? "Refunded" : item.returned ? "Returned" : "None"
+  }));
+}
+
+async function exportSoldItemsPdfReport(items, totals, options) {
+  const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+  doc.setFillColor(15, 122, 59);
+  doc.rect(0, 0, 297, 26, "F");
+  doc.setTextColor(255, 255, 255);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(14);
+  doc.text("RETELA Sold Items Report", 14, 11);
+  doc.setFontSize(8);
+  doc.setFont("helvetica", "normal");
+  doc.text(reportDateRangeLabel(options), 14, 18);
+  doc.text(`Generated ${formatSoldDateTime(new Date())}`, 283, 18, { align: "right" });
+  autoTable(doc, {
+    startY: 32,
+    head: [["Product", "SKU", "Qty", "Unit", "Total", "Channel", "Reference", "Customer", "Payment", "Sold", "Status"]],
+    body: soldItemsRows(items).map((row) => [
+      `${row.Product} / ${row.Brand}`,
+      row["Barcode/SKU"],
+      row["Quantity Sold"],
+      row["Unit Price"],
+      row["Total Amount"],
+      row["Sales Channel"],
+      row["Order/Transaction"],
+      row.Customer,
+      `${row["Payment Method"]} / ${row["Payment Status"]}`,
+      row["Date and Time Sold"],
+      `${row["Order Status"]}${row["Return/Refund"] !== "None" ? ` / ${row["Return/Refund"]}` : ""}`
+    ]),
+    foot: [[
+      "Totals",
+      "",
+      Number(totals?.totalQuantity || 0).toLocaleString(),
+      "",
+      money(totals?.totalAmount),
+      "",
+      "",
+      "",
+      "",
+      "",
+      ""
+    ]],
+    theme: "grid",
+    styles: { fontSize: 7, cellPadding: 1.6, lineColor: [190, 220, 202], lineWidth: 0.15 },
+    headStyles: { fillColor: [15, 122, 59], textColor: 255 },
+    footStyles: { fillColor: [236, 253, 245], textColor: [15, 122, 59], fontStyle: "bold" }
+  });
+  doc.save(`RETELA-Sold-Items-${new Date().toISOString().slice(0, 10)}.pdf`);
+}
+
+function exportSoldItemsExcelReport(items, totals, options) {
+  const rows = [
+    { Field: "Report", Value: "RETELA Sold Items" },
+    { Field: "Date Range", Value: reportDateRangeLabel(options) },
+    { Field: "Generated", Value: formatSoldDateTime(new Date()) },
+    { Field: "Total Quantity", Value: Number(totals?.totalQuantity || 0) },
+    { Field: "Total Amount", Value: money(totals?.totalAmount) }
+  ];
+  const workbook = XLSX.utils.book_new();
+  const worksheet = XLSX.utils.json_to_sheet([...rows, {}, ...soldItemsRows(items)]);
+  worksheet["!cols"] = Array.from({ length: 17 }, () => ({ wch: 20 }));
+  XLSX.utils.book_append_sheet(workbook, worksheet, "Sold Items");
+  XLSX.writeFile(workbook, `RETELA-Sold-Items-${new Date().toISOString().slice(0, 10)}.xlsx`);
+}
+
+function printSoldItemsReport(items, totals, options) {
+  const printWindow = window.open("", "_blank", "width=1180,height=820");
+  if (!printWindow) return;
+  const rows = soldItemsRows(items).map((row) => `
+    <tr>
+      <td>${escapePrintHtml(row.Product)}</td>
+      <td>${escapePrintHtml(row.Brand)}</td>
+      <td>${escapePrintHtml(row["Barcode/SKU"])}</td>
+      <td>${escapePrintHtml(row["Quantity Sold"])}</td>
+      <td>${escapePrintHtml(row["Unit Price"])}</td>
+      <td>${escapePrintHtml(row["Total Amount"])}</td>
+      <td>${escapePrintHtml(row["Sales Channel"])}</td>
+      <td>${escapePrintHtml(row["Order/Transaction"])}</td>
+      <td>${escapePrintHtml(row.Customer)}</td>
+      <td>${escapePrintHtml(row["Payment Method"])}</td>
+      <td>${escapePrintHtml(row["Payment Status"])}</td>
+      <td>${escapePrintHtml(row["Date and Time Sold"])}</td>
+      <td>${escapePrintHtml(row["Order Status"])}</td>
+      <td>${escapePrintHtml(row["Return/Refund"])}</td>
+    </tr>
+  `).join("");
+  printWindow.document.write(`
+    <html>
+      <head>
+        <title>RETELA Sold Items Report</title>
+        <style>
+          @page { size: landscape; margin: 10mm; }
+          * { box-sizing: border-box; }
+          body { margin: 0; font-family: Arial, sans-serif; color: #102018; background: #ffffff; }
+          main { padding: 24px; }
+          header { display: flex; justify-content: space-between; gap: 16px; border-bottom: 2px solid #0f7a3b; padding-bottom: 12px; }
+          h1 { margin: 0; color: #0f7a3b; font-size: 22px; }
+          p { margin: 4px 0 0; color: #475569; font-size: 12px; }
+          table { width: 100%; border-collapse: collapse; margin-top: 16px; font-size: 10px; }
+          th, td { border: 1px solid #bedcca; padding: 6px; text-align: left; vertical-align: top; }
+          th { background: #0f7a3b; color: #ffffff; }
+          tfoot td { background: #ecfdf5; color: #0f7a3b; font-weight: 800; }
+        </style>
+      </head>
+      <body>
+        <main>
+          <header>
+            <div><h1>RETELA Sold Items Report</h1><p>${escapePrintHtml(reportDateRangeLabel(options))}</p></div>
+            <div><p>Total Quantity: ${escapePrintHtml(Number(totals?.totalQuantity || 0).toLocaleString())}</p><p>Total Amount: ${escapePrintHtml(money(totals?.totalAmount))}</p></div>
+          </header>
+          <table>
+            <thead><tr><th>Product</th><th>Brand</th><th>SKU</th><th>Qty</th><th>Unit</th><th>Total</th><th>Channel</th><th>Reference</th><th>Customer</th><th>Payment</th><th>Payment Status</th><th>Sold</th><th>Status</th><th>Return</th></tr></thead>
+            <tbody>${rows || `<tr><td colspan="14">No sold items were found for the selected filters.</td></tr>`}</tbody>
+            <tfoot><tr><td colspan="3">Totals</td><td>${escapePrintHtml(Number(totals?.totalQuantity || 0).toLocaleString())}</td><td></td><td>${escapePrintHtml(money(totals?.totalAmount))}</td><td colspan="8"></td></tr></tfoot>
+          </table>
+        </main>
+        <script>window.addEventListener("load", () => { window.requestAnimationFrame(() => window.print()); });</script>
+      </body>
+    </html>
+  `);
+  printWindow.document.close();
+}
+
+function SoldItemsModal({ open, onClose, options, expectedQuantity = 0 }) {
+  const [filters, setFilters] = useState({ search: "", date: "", channel: options?.channel || "all" });
+  const [page, setPage] = useState(1);
+  const [items, setItems] = useState([]);
+  const [totals, setTotals] = useState({ totalRows: 0, totalQuantity: 0, totalAmount: 0 });
+  const [pagination, setPagination] = useState({ page: 1, pageSize: 10, totalPages: 1, totalRows: 0 });
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [exporting, setExporting] = useState("");
+  const pageSize = 10;
+
+  useEffect(() => {
+    if (!open) return;
+    setFilters({ search: "", date: "", channel: options?.channel || "all" });
+    setPage(1);
+  }, [open, options?.dateRange, options?.startDate, options?.endDate, options?.channel]);
+
+  useEffect(() => {
+    if (!open) return;
+    let active = true;
+    setLoading(true);
+    setError("");
+    api.get("/reports/sold-items", { params: soldItemsRequestParams(options, filters, page, pageSize) })
+      .then(({ data }) => {
+        if (!active) return;
+        setItems(Array.isArray(data?.items) ? data.items.map(normalizeSoldReportItem) : []);
+        setTotals(data?.totals || { totalRows: 0, totalQuantity: 0, totalAmount: 0 });
+        setPagination(data?.pagination || { page, pageSize, totalPages: 1, totalRows: 0 });
+      })
+      .catch((requestError) => {
+        if (!active) return;
+        setItems([]);
+        setTotals({ totalRows: 0, totalQuantity: 0, totalAmount: 0 });
+        setPagination({ page: 1, pageSize, totalPages: 1, totalRows: 0 });
+        setError(getApiErrorMessage(requestError, "Unable to load sold items."));
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => { active = false; };
+  }, [open, options, filters, page]);
+
+  function updateFilter(key, value) {
+    setFilters((current) => ({ ...current, [key]: value }));
+    setPage(1);
+  }
+
+  async function runExport(type) {
+    if (exporting) return;
+    setExporting(type);
+    try {
+      const report = await fetchSoldItemsForReport(options, filters);
+      if (type === "pdf") await exportSoldItemsPdfReport(report.items, report.totals, options);
+      if (type === "excel") exportSoldItemsExcelReport(report.items, report.totals, options);
+      if (type === "print") printSoldItemsReport(report.items, report.totals, options);
+    } catch (exportError) {
+      setError(exportError?.message || "Unable to export sold items.");
+    } finally {
+      setExporting("");
+    }
+  }
+
+  if (!open) return null;
+  const modalQuantity = Number(totals?.totalQuantity || 0);
+  const initialFiltersActive = !filters.search && !filters.date && (filters.channel || "all") === (options?.channel || "all");
+  const quantityLabel = initialFiltersActive
+    ? `${modalQuantity.toLocaleString()} of ${Number(expectedQuantity || 0).toLocaleString()} items`
+    : `${modalQuantity.toLocaleString()} items`;
+
+  return createPortal(
+    <motion.div className="retela-modal-backdrop sold-items-modal-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onMouseDown={onClose}>
+      <motion.section className="retela-modal-card sold-items-modal" initial={{ opacity: 0, scale: 0.96, y: 18 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.96, y: 18 }} onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="sold-items-title">
+        <div className="sold-items-modal-header">
+          <div>
+            <p className="sold-items-modal-eyebrow">Apparel Analytics</p>
+            <h3 id="sold-items-title">Sold Items</h3>
+            <span>{reportDateRangeLabel(options)} - {quantityLabel}</span>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close sold items"><X size={18} /></button>
+        </div>
+
+        <div className="sold-items-modal-filters">
+          <label className="sold-items-search-field">
+            <Search size={16} />
+            <input type="search" value={filters.search} onChange={(event) => updateFilter("search", event.target.value)} placeholder="Search product, SKU, order, customer" />
+          </label>
+          <input type="date" value={filters.date} onChange={(event) => updateFilter("date", event.target.value)} aria-label="Sold date" />
+          <select value={filters.channel} onChange={(event) => updateFilter("channel", event.target.value)} aria-label="Sales channel">
+            <option value="all">All Sales</option>
+            <option value="pos">POS</option>
+            <option value="online">Online Order</option>
+          </select>
+          <button type="button" disabled={loading || exporting === "pdf"} onClick={() => runExport("pdf")}><Download size={15} />Export PDF</button>
+          <button type="button" disabled={loading || exporting === "excel"} onClick={() => runExport("excel")}><FileSpreadsheet size={15} />Export Excel</button>
+          <button type="button" disabled={loading || exporting === "print"} onClick={() => runExport("print")}><Printer size={15} />Print Report</button>
+        </div>
+
+        <div className="sold-items-modal-summary">
+          <SoldInventoryFact label="Quantity Sold" value={modalQuantity.toLocaleString()} />
+          <SoldInventoryFact label="Total Amount" value={money(totals?.totalAmount)} />
+          <SoldInventoryFact label="Sale Lines" value={Number(totals?.totalRows || 0).toLocaleString()} />
+        </div>
+
+        <div className="sold-items-modal-body">
+          {loading ? (
+            <div className="sold-inventory-loading">
+              {Array.from({ length: 5 }).map((_, index) => <div key={index} className="sold-inventory-skeleton" />)}
+            </div>
+          ) : error ? (
+            <div className="sold-inventory-error">{error}</div>
+          ) : items.length ? (
+            <>
+              <div className="sold-items-report-table-wrap hidden lg:block">
+                <table className="sold-items-report-table">
+                  <thead>
+                    <tr>
+                      <th>Image</th>
+                      <th>Product</th>
+                      <th>Details</th>
+                      <th>Barcode/SKU</th>
+                      <th>Qty</th>
+                      <th>Unit Price</th>
+                      <th>Total</th>
+                      <th>Channel</th>
+                      <th>Order/Transaction</th>
+                      <th>Customer</th>
+                      <th>Payment</th>
+                      <th>Sold</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {items.map((item) => (
+                      <tr key={`${item.order_id}-${item.sale_item_id}`}>
+                        <td>
+                          <div className="sold-items-thumb"><ProductImage product={item} className="h-full w-full object-cover" alt={item.name} /></div>
+                        </td>
+                        <td><strong>{item.name}</strong><span>{item.brand || "Other"}</span></td>
+                        <td>{item.category || "Apparel"} / {item.size || "Free Size"} / {normalizeCondition(item.condition)}</td>
+                        <td className="break-anywhere">{productSku(item)}</td>
+                        <td>{Number(item.quantity_sold || 0).toLocaleString()}</td>
+                        <td>{money(item.unit_price)}</td>
+                        <td>{money(item.total_amount)}</td>
+                        <td>{soldChannelLabel(item.order_channel)}</td>
+                        <td className="break-anywhere">{item.order_number || "Not recorded"}</td>
+                        <td>{item.customer_name || "Not recorded"}</td>
+                        <td>{paymentLabel(item.payment_method)}<span>{displayStatusText(item.payment_status)}</span></td>
+                        <td>{formatSoldDateTime(item.sold_at)}</td>
+                        <td><SoldReportStatus item={item} /></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="sold-items-report-cards grid gap-3 lg:hidden">
+                {items.map((item) => (
+                  <article key={`${item.order_id}-${item.sale_item_id}`} className="sold-items-report-card">
+                    <div className="flex gap-3">
+                      <div className="sold-items-thumb"><ProductImage product={item} className="h-full w-full object-cover" alt={item.name} /></div>
+                      <div className="min-w-0 flex-1">
+                        <strong>{item.name}</strong>
+                        <span>{item.brand || "Other"} / {productSku(item)}</span>
+                        <div className="mt-2"><SoldReportStatus item={item} /></div>
+                      </div>
+                    </div>
+                    <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                      <SoldInventoryFact label="Details" value={`${item.category || "Apparel"} / ${item.size || "Free Size"} / ${normalizeCondition(item.condition)}`} />
+                      <SoldInventoryFact label="Quantity Sold" value={Number(item.quantity_sold || 0).toLocaleString()} />
+                      <SoldInventoryFact label="Unit Price" value={money(item.unit_price)} />
+                      <SoldInventoryFact label="Total Amount" value={money(item.total_amount)} />
+                      <SoldInventoryFact label="Sales Channel" value={soldChannelLabel(item.order_channel)} />
+                      <SoldInventoryFact label="Order/Transaction" value={item.order_number || "Not recorded"} />
+                      <SoldInventoryFact label="Customer" value={item.customer_name || "Not recorded"} />
+                      <SoldInventoryFact label="Payment" value={`${paymentLabel(item.payment_method)} / ${displayStatusText(item.payment_status)}`} />
+                      <SoldInventoryFact label="Date and Time Sold" value={formatSoldDateTime(item.sold_at)} />
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </>
+          ) : (
+            <EmptyState title="No sold items were found for the selected filters." subtitle="Completed and paid sales will appear here." />
+          )}
+        </div>
+
+        <div className="sold-items-modal-footer">
+          <span>Showing {items.length ? (Number(pagination.page || page) - 1) * pageSize + 1 : 0}-{Math.min(Number(pagination.page || page) * pageSize, Number(pagination.totalRows || 0))} of {Number(pagination.totalRows || 0)} sale lines</span>
+          <div>
+            <button type="button" disabled={page <= 1 || loading} onClick={() => setPage((value) => Math.max(1, value - 1))}><ChevronLeft size={16} /></button>
+            <strong>Page {page} of {Number(pagination.totalPages || 1)}</strong>
+            <button type="button" disabled={page >= Number(pagination.totalPages || 1) || loading} onClick={() => setPage((value) => Math.min(Number(pagination.totalPages || 1), value + 1))}><ChevronRight size={16} /></button>
+            <button type="button" className="sold-items-close-button" onClick={onClose}>Close</button>
           </div>
         </div>
-        <span className="sales-metric-icon">
-          <Icon size={23} />
-        </span>
-      </div>
-    </motion.article>
+      </motion.section>
+    </motion.div>,
+    document.body
+  );
+}
+
+function SoldReportStatus({ item }) {
+  return (
+    <div className="sold-item-status-stack">
+      <span className="sold-report-status">{displayStatusText(item.order_status)}</span>
+      {item.refunded ? <span className="sold-item-return-badge is-refunded">Refunded</span> : null}
+      {item.returned && !item.refunded ? <span className="sold-item-return-badge">Returned</span> : null}
+    </div>
   );
 }
 

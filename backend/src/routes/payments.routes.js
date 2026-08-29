@@ -5,6 +5,7 @@ import { query, safeModifyColumn, transaction } from "../config/db.js";
 import { asyncHandler, HttpError } from "../utils/errors.js";
 import { requireApproved, requireAuth } from "../middleware/auth.js";
 import { createAdminNotification } from "../utils/adminNotifications.js";
+import { loadSystemSettings } from "../utils/systemSettings.js";
 
 const router = Router();
 let paymentColumnsReady;
@@ -27,7 +28,7 @@ async function ensurePaymentColumns() {
        FROM INFORMATION_SCHEMA.COLUMNS
        WHERE TABLE_SCHEMA = DATABASE()
          AND TABLE_NAME = 'orders'
-         AND COLUMN_NAME IN ('payment_status', 'payment_reference', 'transaction_id', 'paid_at', 'payment_provider', 'checkout_session_id', 'checkout_url', 'payment_intent_id', 'payment_method_id', 'qr_code_url', 'payment_expires_at')`
+         AND COLUMN_NAME IN ('payment_status', 'payment_reference', 'transaction_id', 'paid_at', 'inventory_deducted_at', 'payment_provider', 'checkout_session_id', 'checkout_url', 'payment_intent_id', 'payment_method_id', 'qr_code_url', 'payment_expires_at')`
     );
     const columns = new Set(rows.map((row) => row.COLUMN_NAME));
     await safeModifyColumn("orders", "status", "status enum update", "ALTER TABLE orders MODIFY status ENUM('pending','awaiting_payment','paid','approved','processing','ready','completed','cancelled','payment_failed') NOT NULL DEFAULT 'pending'");
@@ -37,6 +38,15 @@ async function ensurePaymentColumns() {
     if (!columns.has("payment_reference")) await query("ALTER TABLE orders ADD COLUMN payment_reference VARCHAR(160) NULL AFTER payment_status");
     if (!columns.has("transaction_id")) await query("ALTER TABLE orders ADD COLUMN transaction_id VARCHAR(160) NULL AFTER payment_reference");
     if (!columns.has("paid_at")) await query("ALTER TABLE orders ADD COLUMN paid_at DATETIME NULL AFTER transaction_id");
+    if (!columns.has("inventory_deducted_at")) {
+      await query("ALTER TABLE orders ADD COLUMN inventory_deducted_at DATETIME NULL AFTER paid_at");
+      await query(
+        `UPDATE orders o
+         SET inventory_deducted_at = COALESCE(o.paid_at, o.updated_at, o.created_at, NOW())
+         WHERE o.inventory_deducted_at IS NULL
+           AND EXISTS (SELECT 1 FROM order_items oi WHERE oi.order_id = o.id)`
+      );
+    }
     if (!columns.has("payment_provider")) await query("ALTER TABLE orders ADD COLUMN payment_provider VARCHAR(40) NULL AFTER paid_at");
     if (!columns.has("checkout_session_id")) await query("ALTER TABLE orders ADD COLUMN checkout_session_id VARCHAR(160) NULL AFTER payment_provider");
     if (!columns.has("checkout_url")) await query("ALTER TABLE orders ADD COLUMN checkout_url TEXT NULL AFTER checkout_session_id");
@@ -363,8 +373,8 @@ function emitPaymentFailureUpdate(io, order) {
   if (!order) return;
   const payload = {
     id: Number(order.id),
-    status: "payment_failed",
-    payment_status: "failed",
+    status: order.status || "payment_failed",
+    payment_status: order.payment_status || "failed",
     payment_reference: order.payment_reference || null,
     transaction_id: order.transaction_id || null
   };
@@ -372,22 +382,66 @@ function emitPaymentFailureUpdate(io, order) {
   io?.to("admin").emit("order:update", payload);
 }
 
+async function paymentLowStockThreshold() {
+  const { config } = await loadSystemSettings();
+  const threshold = Number(config?.inventory?.lowStockThreshold);
+  return Number.isFinite(threshold) && threshold >= 0 ? threshold : 3;
+}
+
+async function restoreDeductedOrderInventory(run, order, lowStockThreshold) {
+  if (!order?.inventory_deducted_at) return [];
+  const items = await run(
+    "SELECT product_id, SUM(quantity) AS quantity FROM order_items WHERE order_id = :orderId GROUP BY product_id ORDER BY product_id ASC",
+    { orderId: order.id }
+  );
+  const updates = [];
+  for (const item of items) {
+    const quantity = Number(item.quantity || 0);
+    if (quantity <= 0) continue;
+    await run(
+      `UPDATE products
+       SET stock = stock + :quantity,
+           status = CASE
+             WHEN stock + :quantity <= 0 THEN 'Sold'
+             WHEN stock + :quantity <= ${lowStockThreshold} THEN 'Low Stock'
+             ELSE 'In Stock'
+           END
+       WHERE id = :productId
+         AND is_deleted = FALSE`,
+      { productId: item.product_id, quantity }
+    );
+    const products = await run("SELECT id, name, stock, status FROM products WHERE id = :productId LIMIT 1", { productId: item.product_id });
+    if (products[0]) {
+      updates.push({
+        id: Number(products[0].id),
+        name: products[0].name,
+        stock: Number(products[0].stock || 0),
+        status: products[0].status
+      });
+    }
+  }
+  return updates;
+}
+
 async function markOrderFailed({ orderId, transactionId, reference, io = null }) {
+  const lowStockThreshold = await paymentLowStockThreshold();
   const result = await transaction(async (run) => {
     const rows = await run(
-      "SELECT id, user_id, status, payment_status FROM orders WHERE id = :orderId FOR UPDATE",
+      "SELECT id, user_id, status, payment_status, inventory_deducted_at FROM orders WHERE id = :orderId FOR UPDATE",
       { orderId }
     );
     if (!rows.length || ["paid", "failed", "expired"].includes(rows[0].payment_status) || rows[0].status === "cancelled" || rows[0].payment_status === "cancelled") {
-      return { updated: false, userId: rows[0]?.user_id || null };
+      return { updated: false, userId: rows[0]?.user_id || null, inventoryUpdates: [] };
     }
+    const inventoryUpdates = await restoreDeductedOrderInventory(run, rows[0], lowStockThreshold);
     await run(
       `UPDATE orders
        SET status = 'payment_failed',
            payment_status = 'failed',
            transaction_id = COALESCE(:transactionId, transaction_id),
            payment_reference = COALESCE(:reference, payment_reference),
-           payment_provider = 'paymongo'
+           payment_provider = 'paymongo',
+           inventory_deducted_at = NULL
        WHERE id = :orderId`,
       { orderId, transactionId: transactionId || null, reference: reference || null }
     );
@@ -395,17 +449,53 @@ async function markOrderFailed({ orderId, transactionId, reference, io = null })
       "INSERT INTO notifications (user_id, type, title, body) VALUES (:userId, 'order', 'Payment failed', :body)",
       { userId: rows[0].user_id, body: `Payment for Order #${orderId} failed or was cancelled.` }
     );
-    return { updated: true, userId: rows[0].user_id };
+    return { updated: true, userId: rows[0].user_id, inventoryUpdates };
   });
   const order = await getOrderPaymentStatus(orderId);
   if (result.updated) {
     emitPaymentFailureUpdate(io, order);
+    result.inventoryUpdates.forEach((update) => {
+      io?.emit("inventory:update", { type: "inventory", action: "payment-failed-restock", ...update });
+    });
     io?.to(`user:${result.userId}`).emit("notification:new", {
       type: "order",
       title: "Payment failed",
       body: `Payment for Order #${orderId} failed or was cancelled.`,
       order_id: Number(orderId),
       created_at: new Date().toISOString()
+    });
+  }
+  return { order, updated: result.updated };
+}
+
+async function markOrderExpired({ orderId, io = null }) {
+  const lowStockThreshold = await paymentLowStockThreshold();
+  const result = await transaction(async (run) => {
+    const rows = await run(
+      "SELECT id, user_id, status, payment_status, inventory_deducted_at FROM orders WHERE id = :orderId FOR UPDATE",
+      { orderId }
+    );
+    if (!rows.length || ["paid", "cancelled", "expired"].includes(rows[0].payment_status)) {
+      return { updated: false, inventoryUpdates: [] };
+    }
+    const inventoryUpdates = await restoreDeductedOrderInventory(run, rows[0], lowStockThreshold);
+    await run(
+      `UPDATE orders
+       SET status = CASE WHEN status = 'awaiting_payment' THEN 'payment_failed' ELSE status END,
+           payment_status = 'expired',
+           inventory_deducted_at = NULL,
+           qr_code_url = NULL,
+           payment_expires_at = NULL
+       WHERE id = :orderId`,
+      { orderId }
+    );
+    return { updated: true, inventoryUpdates };
+  });
+  const order = await getOrderPaymentStatus(orderId);
+  if (result.updated) {
+    emitPaymentFailureUpdate(io, order);
+    result.inventoryUpdates.forEach((update) => {
+      io?.emit("inventory:update", { type: "inventory", action: "payment-expired-restock", ...update });
     });
   }
   return { order, updated: result.updated };
@@ -639,15 +729,7 @@ async function verifyQrPaymentIntent(order, io) {
   const expiresAt = latest?.payment_expires_at ? new Date(latest.payment_expires_at) : null;
   const expired = Boolean(expiresAt && expiresAt <= new Date()) && !statusIsSuccessful(providerStatus);
   if (expired && latest?.payment_status !== "expired") {
-    await query(
-      `UPDATE orders
-       SET status = CASE WHEN status = 'awaiting_payment' THEN 'payment_failed' ELSE status END,
-           payment_status = 'expired',
-           qr_code_url = NULL,
-           payment_expires_at = NULL
-       WHERE id = :orderId AND payment_status NOT IN ('paid', 'cancelled')`,
-      { orderId: order.id }
-    );
+    await markOrderExpired({ orderId: order.id, io });
   }
   return { order: expired ? await getOrderPaymentStatus(order.id) : latest, providerStatus, confirmed: false, expired };
 }
@@ -1068,15 +1150,7 @@ router.post(["/webhook", "/paymongo/webhook"], asyncHandler(async (req, res) => 
     }
   }
   if (!paymentConfirmed && qrExpired) {
-    await query(
-      `UPDATE orders
-       SET status = CASE WHEN status = 'awaiting_payment' THEN 'payment_failed' ELSE status END,
-           payment_status = CASE WHEN payment_status IN ('paid', 'cancelled') THEN payment_status ELSE 'expired' END,
-           qr_code_url = NULL,
-           payment_expires_at = NULL
-       WHERE id = :orderId`,
-      { orderId: order.id }
-    );
+    await markOrderExpired({ orderId: order.id, io: req.app.get("io") });
   } else if (!paymentConfirmed && (statusLooksFailed(eventType) || isSessionPaymentFailed(session))) {
     await markOrderFailed({
       orderId: order.id,

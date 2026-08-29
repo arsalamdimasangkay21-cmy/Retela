@@ -27,7 +27,7 @@ export const DEFAULT_LOW_STOCK_THRESHOLD = 3;
 
 export function productStatusForStock(stock, lowStockThreshold = DEFAULT_LOW_STOCK_THRESHOLD) {
   const quantity = Number(stock || 0);
-  if (quantity <= 0) return "Out of Stock";
+  if (quantity <= 0) return "Sold";
   if (quantity <= Number(lowStockThreshold)) return "Low Stock";
   return "In Stock";
 }
@@ -43,7 +43,7 @@ export function availableProductWhere(alias = "") {
 export function inventoryStatusSql(stockExpression = "stock", lowStockThreshold = DEFAULT_LOW_STOCK_THRESHOLD) {
   const threshold = Math.max(0, Math.min(999999, Number(lowStockThreshold) || DEFAULT_LOW_STOCK_THRESHOLD));
   return `CASE
-    WHEN ${stockExpression} <= 0 THEN 'Out of Stock'
+    WHEN ${stockExpression} <= 0 THEN 'Sold'
     WHEN ${stockExpression} <= ${threshold} THEN 'Low Stock'
     ELSE 'In Stock'
   END`;

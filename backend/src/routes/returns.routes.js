@@ -1,11 +1,13 @@
 import { Router } from "express";
 import { z } from "zod";
-import { query, safeModifyColumn } from "../config/db.js";
+import { query, safeModifyColumn, transaction } from "../config/db.js";
 import { asyncHandler, HttpError } from "../utils/errors.js";
 import { requireApproved, requireAuth, requireRole } from "../middleware/auth.js";
 import { upload } from "../middleware/upload.js";
 import { productImageExpression } from "../utils/productImages.js";
 import { createAdminNotification, NOTIFICATION_TYPE_ENUM_SQL } from "../utils/adminNotifications.js";
+import { productStatusForStock } from "../utils/productInventory.js";
+import { loadSystemSettings } from "../utils/systemSettings.js";
 
 const router = Router();
 let returnColumnsReady;
@@ -14,6 +16,12 @@ let returnNotificationTypesReady;
 const returnReasons = ["Wrong item received", "Damaged apparel", "Damaged product", "Size issue", "Defective item", "Missing item", "Other"];
 const refundTypes = ["Replacement", "Refund", "Store Credit"];
 const returnStatuses = ["pending", "under_review", "approved", "rejected", "refunded"];
+
+async function configuredLowStockThreshold() {
+  const { config } = await loadSystemSettings();
+  const threshold = Number(config?.inventory?.lowStockThreshold);
+  return Number.isFinite(threshold) && threshold >= 0 ? threshold : 3;
+}
 
 function parseImageList(value, fallback = null) {
   if (Array.isArray(value)) return value.filter(Boolean).map(String);
@@ -264,18 +272,63 @@ router.patch("/:id/decision", requireAuth, requireRole("admin"), asyncHandler(as
   await ensureReturnColumns();
   const schema = z.object({ status: z.enum(returnStatuses), admin_note: z.string().optional() });
   const input = schema.parse(req.body);
-  const rows = await query("SELECT user_id FROM returns WHERE id = :id", { id: req.params.id });
-  if (!rows.length) throw new HttpError(404, "Request not found");
-  await query("UPDATE returns SET status=:status, admin_note=:admin_note, decided_at=NOW() WHERE id=:id", {
-    ...input,
-    admin_note: input.admin_note || null,
-    id: req.params.id
+  const lowStockThreshold = await configuredLowStockThreshold();
+  const result = await transaction(async (run) => {
+    const rows = await run(
+      "SELECT id, user_id, order_id, product_id, status FROM returns WHERE id = :id FOR UPDATE",
+      { id: req.params.id }
+    );
+    if (!rows.length) throw new HttpError(404, "Request not found");
+    const existing = rows[0];
+    const shouldRestock = input.status === "approved" && !["approved", "refunded"].includes(String(existing.status || "").toLowerCase());
+    await run("UPDATE returns SET status=:status, admin_note=:admin_note, decided_at=NOW() WHERE id=:id", {
+      ...input,
+      admin_note: input.admin_note || null,
+      id: req.params.id
+    });
+
+    const inventoryUpdates = [];
+    if (shouldRestock) {
+      const productFilter = existing.product_id ? "AND oi.product_id = :productId" : "";
+      const returnedItems = await run(
+        `SELECT oi.product_id, SUM(oi.quantity) AS quantity
+         FROM order_items oi
+         WHERE oi.order_id = :orderId ${productFilter}
+         GROUP BY oi.product_id`,
+        { orderId: existing.order_id, productId: existing.product_id }
+      );
+      for (const item of returnedItems) {
+        const quantity = Number(item.quantity || 0);
+        if (quantity <= 0) continue;
+        const products = await run(
+          "SELECT id, name, stock FROM products WHERE id = :productId AND is_deleted = FALSE FOR UPDATE",
+          { productId: item.product_id }
+        );
+        if (!products.length) continue;
+        const nextStock = Number(products[0].stock || 0) + quantity;
+        const nextStatus = productStatusForStock(nextStock, lowStockThreshold);
+        await run(
+          "UPDATE products SET stock = :stock, status = :status, updated_at = NOW() WHERE id = :productId",
+          { productId: item.product_id, stock: nextStock, status: nextStatus }
+        );
+        inventoryUpdates.push({
+          id: Number(item.product_id),
+          name: products[0].name,
+          stock: nextStock,
+          status: nextStatus
+        });
+      }
+    }
+    return { userId: existing.user_id, inventoryUpdates };
   });
   await query(
     "INSERT INTO notifications (user_id, type, title, body) VALUES (:userId, 'refund', 'Return request update', :body)",
-    { userId: rows[0].user_id, body: `Your return request is now ${input.status.replace("_", " ")}.` }
+    { userId: result.userId, body: `Your return request is now ${input.status.replace("_", " ")}.` }
   );
-  req.app.get("io")?.to(`user:${rows[0].user_id}`).emit("return:update", { id: Number(req.params.id), status: input.status });
+  result.inventoryUpdates.forEach((update) => {
+    req.app.get("io")?.emit("inventory:update", { type: "inventory", action: "return-restocked", ...update });
+  });
+  req.app.get("io")?.to(`user:${result.userId}`).emit("return:update", { id: Number(req.params.id), status: input.status });
   res.json({ message: "Return/refund decision saved" });
 }));
 
