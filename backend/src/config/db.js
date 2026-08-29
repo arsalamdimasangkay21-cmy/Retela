@@ -671,6 +671,9 @@ async function ensureCoreTables() {
       id TINYINT PRIMARY KEY,
       config_json LONGTEXT NOT NULL,
       openai_api_key_encrypted TEXT NULL,
+      shop_logo_data LONGBLOB NULL,
+      shop_logo_mime VARCHAR(100) NULL,
+      shop_logo_updated_at DATETIME NULL,
       gcash_qr_data LONGBLOB NULL,
       gcash_qr_mime VARCHAR(100) NULL,
       gcash_qr_updated_at DATETIME NULL,
@@ -679,6 +682,9 @@ async function ensureCoreTables() {
     )
   `);
   await ensureColumn("system_settings", "openai_api_key_encrypted", "openai_api_key_encrypted TEXT NULL AFTER config_json");
+  await ensureColumn("system_settings", "shop_logo_data", "shop_logo_data LONGBLOB NULL AFTER openai_api_key_encrypted");
+  await ensureColumn("system_settings", "shop_logo_mime", "shop_logo_mime VARCHAR(100) NULL AFTER shop_logo_data");
+  await ensureColumn("system_settings", "shop_logo_updated_at", "shop_logo_updated_at DATETIME NULL AFTER shop_logo_mime");
   await ensureColumn("system_settings", "gcash_qr_data", "gcash_qr_data LONGBLOB NULL AFTER openai_api_key_encrypted");
   await ensureColumn("system_settings", "gcash_qr_mime", "gcash_qr_mime VARCHAR(100) NULL AFTER gcash_qr_data");
   await ensureColumn("system_settings", "gcash_qr_updated_at", "gcash_qr_updated_at DATETIME NULL AFTER gcash_qr_mime");

@@ -2,15 +2,21 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowRight, CheckCircle2, KeyRound, Loader2, Mail, RotateCcw, ShieldCheck, User, UserPlus } from "lucide-react";
 import { api, cachedGet, getApiErrorMessage } from "../../api/client";
 import { logoFromSettings, RETELA_LOGO_URL } from "../../config/branding";
+import LogoImage from "../LogoImage";
 import { useAuth } from "../../context/AuthContext";
 import { getPasswordBlueprint, getPasswordStrength, PasswordBlueprint } from "../PasswordBlueprint";
 import { Button, Field } from "../ui";
 import Register from "./Register";
 import RegistrationAgreementModal from "./RegistrationAgreementModal";
 
-function savedLogoUrl() {
+function cachedLogoFallback() {
   const cached = localStorage.getItem("retela_logo_url");
-  return cached && !cached.includes("scontent.") ? cached : RETELA_LOGO_URL;
+  return cached && cached !== RETELA_LOGO_URL && !cached.includes("scontent.") ? cached : "";
+}
+
+function rememberLogoUrl(url) {
+  if (url && url !== RETELA_LOGO_URL) localStorage.setItem("retela_logo_url", url);
+  else localStorage.removeItem("retela_logo_url");
 }
 
 let recaptchaScriptPromise;
@@ -92,7 +98,7 @@ export default function AuthPage() {
   const [captchaResetKey, setCaptchaResetKey] = useState(0);
   const [signupForm, setSignupForm] = useState({ username: "", email: "", phoneNumber: "", location: "", otp: "", password: "", confirmPassword: "" });
   const [resetForm, setResetForm] = useState({ email: "", otp: "", password: "", confirmPassword: "" });
-  const [logoUrl, setLogoUrl] = useState(savedLogoUrl);
+  const [logoUrl, setLogoUrl] = useState(RETELA_LOGO_URL);
   const signupPasswordBlueprint = useMemo(() => getPasswordBlueprint(signupForm.password), [signupForm.password]);
   const signupPasswordStrength = useMemo(() => getPasswordStrength(signupPasswordBlueprint), [signupPasswordBlueprint]);
   const signupPasswordStrong = signupPasswordBlueprint.every((item) => item.met);
@@ -117,9 +123,12 @@ export default function AuthPage() {
         if (cancelled) return;
         const nextLogo = logoFromSettings(data);
         setLogoUrl(nextLogo);
-        localStorage.setItem("retela_logo_url", nextLogo);
+        rememberLogoUrl(nextLogo);
       })
-      .catch(() => {});
+      .catch(() => {
+        const cached = cachedLogoFallback();
+        if (!cancelled && cached) setLogoUrl(cached);
+      });
     return () => {
       cancelled = true;
     };
@@ -354,7 +363,7 @@ export default function AuthPage() {
           <div className="auth-panel-ring auth-panel-ring-one" aria-hidden="true" />
           <div className="auth-panel-ring auth-panel-ring-two" aria-hidden="true" />
           <div className="relative z-10">
-            <img src={logoUrl} className="mb-6 h-20 w-20 rounded-3xl border border-white/30 bg-white object-cover shadow-lg shadow-emerald-950/20" alt="RETELA SYSTEM logo" />
+            <LogoImage src={logoUrl} className="mb-6 h-20 w-20 rounded-3xl border border-white/30 bg-white object-cover shadow-lg shadow-emerald-950/20" alt="RETELA SYSTEM logo" />
             <h1 className="font-display text-4xl font-bold tracking-tight sm:text-5xl">Retela</h1>
             <p className="mt-4 max-w-sm text-base leading-7 text-white/85 sm:text-lg">Sales, inventory, and ecommerce management for Tela to Pera Thrift Shop.</p>
           </div>
@@ -366,7 +375,7 @@ export default function AuthPage() {
 
         <section className="auth-form-panel bg-white p-5 sm:p-8 md:p-12">
           <div className="mb-4 flex items-center gap-3 md:hidden">
-            <img src={logoUrl} className="h-12 w-12 rounded-2xl border border-emerald-100 bg-white object-cover shadow-sm" alt="RETELA SYSTEM logo" />
+            <LogoImage src={logoUrl} className="h-12 w-12 rounded-2xl border border-emerald-100 bg-white object-cover shadow-sm" alt="RETELA SYSTEM logo" />
             <div>
               <p className="font-display text-xl font-bold text-emerald-900">RETELA</p>
               <p className="text-xs font-bold uppercase tracking-[0.18em] text-emerald-700">Commerce System</p>

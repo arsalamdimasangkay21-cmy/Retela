@@ -1,5 +1,4 @@
 import fs from "fs/promises";
-import crypto from "crypto";
 import path from "path";
 import { fileURLToPath } from "url";
 import { Router } from "express";
@@ -13,7 +12,9 @@ import { ensureProductInventoryColumns } from "../utils/productInventory.js";
 import {
   DEFAULT_SYSTEM_SETTINGS,
   GCASH_QR_URL,
+  SHOP_LOGO_URL,
   getGcashQrImage,
+  getShopLogoImage,
   loadSystemSettings,
   normalizeSystemSettings,
   resetSystemSettings,
@@ -81,6 +82,18 @@ router.get("/gcash-qr", asyncHandler(async (req, res) => {
   if (!image) throw new HttpError(404, "GCash QR image not found.");
   res.setHeader("Content-Type", image.mime);
   res.setHeader("Cache-Control", "public, max-age=60, must-revalidate");
+  const updatedAt = image.updatedAt ? new Date(image.updatedAt) : null;
+  if (updatedAt && !Number.isNaN(updatedAt.getTime())) res.setHeader("Last-Modified", updatedAt.toUTCString());
+  res.send(image.data);
+}));
+
+router.get("/shop-logo", asyncHandler(async (req, res) => {
+  const image = await getShopLogoImage();
+  if (!image) throw new HttpError(404, "Shop logo not found.");
+  res.setHeader("Content-Type", image.mime);
+  // Keep the public branding URL revalidated so a newly saved logo appears
+  // immediately in login and registration screens.
+  res.setHeader("Cache-Control", "no-store, max-age=0, must-revalidate");
   const updatedAt = image.updatedAt ? new Date(image.updatedAt) : null;
   if (updatedAt && !Number.isNaN(updatedAt.getTime())) res.setHeader("Last-Modified", updatedAt.toUTCString());
   res.send(image.data);
@@ -307,11 +320,9 @@ async function applyUploadUrls(settings, files = {}) {
   const shopLogo = files.shopLogo?.[0];
   const gcashQr = files.gcashQr?.[0];
   if (shopLogo?.buffer?.length) {
-    const extensions = { "image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp" };
-    const filename = `${crypto.randomUUID()}${extensions[shopLogo.mimetype] || ".jpg"}`;
-    await fs.mkdir(uploadsDir, { recursive: true });
-    await fs.writeFile(path.join(uploadsDir, filename), shopLogo.buffer);
-    nextSettings.general.shopLogoUrl = `/uploads/${filename}`;
+    // Logo bytes are committed to system_settings together with the settings
+    // JSON below, so the saved URL remains valid across restarts/deployments.
+    nextSettings.general.shopLogoUrl = SHOP_LOGO_URL;
   }
   if (gcashQr?.buffer?.length) nextSettings.payment.gcashQrUrl = GCASH_QR_URL;
   return nextSettings;
@@ -362,7 +373,10 @@ router.put("/", settingsUpload.fields([
     }
   }
   if (req.files?.gcashQr?.[0]) await saveGcashQrImage(req.files.gcashQr[0]);
-  saved = await saveSystemSettings(payload, { openaiApiKey: openaiApiKey || undefined });
+  saved = await saveSystemSettings(payload, {
+    openaiApiKey: openaiApiKey || undefined,
+    shopLogoImage: req.files?.shopLogo?.[0] || null
+  });
   emitShippingUpdate(req, savedShipping);
   const databaseStatus = await getDatabaseStatus();
   res.json({

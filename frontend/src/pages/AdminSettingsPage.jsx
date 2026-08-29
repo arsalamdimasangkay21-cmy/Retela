@@ -38,6 +38,7 @@ import {
 import { api, API_URL, cachedGet, clearGetCache, getApiErrorMessage } from "../api/client";
 import { osmTileUrl } from "../config/maps";
 import { ChangePasswordForm } from "../components/ChangePasswordForm";
+import LogoImage from "../components/LogoImage";
 import { useAuth } from "../context/AuthContext";
 import useBlockingLoader from "../hooks/useBlockingLoader";
 import { emitUserThemeChange, readUserTheme, saveUserTheme } from "../utils/userTheme";
@@ -46,6 +47,7 @@ const defaultSettings = {
   general: {
     shopName: "Tela to Pera Thrift Shop",
     shopLogoUrl: "",
+    shopLogoUpdatedAt: null,
     shopDescription: "AI-assisted thrift ecommerce for curated apparel and customer support.",
     contactNumber: "",
     emailAddress: "",
@@ -330,7 +332,13 @@ export default function AdminSettingsPage({ onChange }) {
   const restoreInputRef = useRef(null);
   const toastTimerRef = useRef(null);
 
-  const shopLogoPreview = useMemo(() => files.shopLogo ? URL.createObjectURL(files.shopLogo) : assetUrl(settings.general.shopLogoUrl), [files.shopLogo, settings.general.shopLogoUrl]);
+  const shopLogoPreview = useMemo(() => {
+    if (files.shopLogo) return URL.createObjectURL(files.shopLogo);
+    const savedUrl = assetUrl(settings.general.shopLogoUrl);
+    if (!savedUrl) return "";
+    const version = settings.general.shopLogoUpdatedAt || Date.now();
+    return `${savedUrl}${savedUrl.includes("?") ? "&" : "?"}v=${encodeURIComponent(version)}`;
+  }, [files.shopLogo, settings.general.shopLogoUrl, settings.general.shopLogoUpdatedAt]);
   const gcashQrPreview = useMemo(() => {
     if (files.gcashQr) return URL.createObjectURL(files.gcashQr);
     const savedUrl = assetUrl(settings.payment.gcashQrUrl);
@@ -528,6 +536,18 @@ export default function AdminSettingsPage({ onChange }) {
   }
 
   function updateFile(key, file) {
+    if (file) {
+      const allowedTypes = new Set(["image/png", "image/jpeg", "image/webp"]);
+      const label = key === "shopLogo" ? "Shop logo" : "GCash QR";
+      if (!allowedTypes.has(file.type)) {
+        pushToast("error", `${label} must be a PNG, JPG, JPEG, or WEBP image.`);
+        return;
+      }
+      if (file.size > 5 * 1024 * 1024) {
+        pushToast("error", `${label} must be 5MB or smaller.`);
+        return;
+      }
+    }
     setFiles((current) => ({ ...current, [key]: file }));
   }
 
@@ -1220,7 +1240,7 @@ function SettingsValueStatus({ label, enabled }) {
 function SettingsLogoPreview({ src }) {
   return (
     <div className="settings-logo-preview">
-      {src ? <img src={src} alt="Saved RETELA shop logo" /> : <span className="settings-logo-preview__empty"><Store size={22} /></span>}
+      {src ? <LogoImage src={src} className="settings-logo-preview__empty" alt="Saved RETELA shop logo" /> : <span className="settings-logo-preview__empty"><Store size={22} /></span>}
       <div>
         <span className="settings-value__label">Shop Logo</span>
         <strong className="settings-value__text">{src ? "Logo configured" : "No logo configured"}</strong>
@@ -2324,7 +2344,7 @@ function FileInput({ label, file, preview, onChange }) {
           <span className="mt-1 block text-xs text-white/45">PNG, JPG, or WEBP up to 5MB</span>
         </div>
         <span className="relative shrink-0">
-          <input type="file" accept="image/*" className="absolute inset-0 cursor-pointer opacity-0" onChange={(event) => onChange(event.target.files?.[0] || null)} />
+          <input type="file" accept="image/png,image/jpeg,image/webp" className="absolute inset-0 cursor-pointer opacity-0" onChange={(event) => onChange(event.target.files?.[0] || null)} />
           <span className="inline-flex items-center justify-center rounded-2xl border border-white/10 bg-white/[0.08] px-3 py-2 text-sm font-bold text-white transition hover:border-neonbrand/40 hover:text-neonbrand">Browse</span>
         </span>
       </div>

@@ -2,16 +2,18 @@ import crypto from "crypto";
 import fs from "fs/promises";
 import path from "path";
 import { z } from "zod";
-import { query } from "../config/db.js";
+import { pool, query } from "../config/db.js";
 import { UPLOAD_ROOT } from "../config/uploads.js";
 import { DEFAULT_FREE_DELIVERY_MUNICIPALITIES, normalizeMunicipalityList } from "./shippingCalculator.js";
 
 export const GCASH_QR_URL = "/api/settings/gcash-qr";
+export const SHOP_LOGO_URL = "/api/settings/shop-logo";
 
 export const DEFAULT_SYSTEM_SETTINGS = {
   general: {
     shopName: "Tela to Pera Thrift Shop",
     shopLogoUrl: "",
+    shopLogoUpdatedAt: null,
     shopDescription: "AI-assisted thrift ecommerce for curated apparel and customer support.",
     contactNumber: "",
     emailAddress: "",
@@ -120,6 +122,7 @@ const settingsSchema = z.object({
   general: z.object({
     shopName: z.string().trim().min(2, "Shop name is required").max(120),
     shopLogoUrl: z.string().trim().max(255).optional().default(""),
+    shopLogoUpdatedAt: z.string().nullable().optional().default(null),
     shopDescription: z.string().trim().max(1200).optional().default(""),
     contactNumber: z.string().trim().max(30).optional().default(""),
     emailAddress: z.string().trim().email("Use a valid email address").or(z.literal("")).default(""),
@@ -301,6 +304,46 @@ function legacyQrUpload(config) {
   return { filename, mime };
 }
 
+function legacyLogoUpload(config) {
+  const rawUrl = String(config?.general?.shopLogoUrl || "").trim();
+  if (!rawUrl || rawUrl === SHOP_LOGO_URL) return null;
+  let pathname = rawUrl;
+  try {
+    pathname = new URL(rawUrl, "http://retela.local").pathname;
+  } catch {
+    return null;
+  }
+  if (!pathname.startsWith("/uploads/")) return null;
+  const filename = path.basename(pathname);
+  if (!filename) return null;
+  const extension = path.extname(filename).toLowerCase();
+  const mime = extension === ".png" ? "image/png" : extension === ".webp" ? "image/webp" : extension === ".jpg" || extension === ".jpeg" ? "image/jpeg" : null;
+  return mime ? { filename, mime } : null;
+}
+
+async function migrateLegacyShopLogo(config) {
+  const legacy = legacyLogoUpload(config);
+  if (!legacy) return false;
+  try {
+    const data = await fs.readFile(path.join(UPLOAD_ROOT, legacy.filename));
+    if (!data.length) return false;
+    await query(
+      `UPDATE system_settings
+       SET shop_logo_data = :data,
+           shop_logo_mime = :mime,
+           shop_logo_updated_at = NOW()
+       WHERE id = 1`,
+      { data, mime: legacy.mime }
+    );
+    return true;
+  } catch (error) {
+    if (error?.code !== "ENOENT") {
+      console.warn("[settings] Legacy shop logo migration failed", { code: error?.code, message: error?.message });
+    }
+    return false;
+  }
+}
+
 async function migrateLegacyGcashQr(config) {
   const legacy = legacyQrUpload(config);
   if (!legacy) return false;
@@ -331,6 +374,9 @@ export async function ensureSettingsTable() {
         id TINYINT PRIMARY KEY,
         config_json LONGTEXT NOT NULL,
         openai_api_key_encrypted TEXT NULL,
+        shop_logo_data LONGBLOB NULL,
+        shop_logo_mime VARCHAR(100) NULL,
+        shop_logo_updated_at DATETIME NULL,
         gcash_qr_data LONGBLOB NULL,
         gcash_qr_mime VARCHAR(100) NULL,
         gcash_qr_updated_at DATETIME NULL,
@@ -343,9 +389,12 @@ export async function ensureSettingsTable() {
        FROM INFORMATION_SCHEMA.COLUMNS
        WHERE TABLE_SCHEMA = DATABASE()
          AND TABLE_NAME = 'system_settings'
-         AND COLUMN_NAME IN ('gcash_qr_data', 'gcash_qr_mime', 'gcash_qr_updated_at')`
+         AND COLUMN_NAME IN ('shop_logo_data', 'shop_logo_mime', 'shop_logo_updated_at', 'gcash_qr_data', 'gcash_qr_mime', 'gcash_qr_updated_at')`
     );
     const columns = new Set(rows.map((row) => row.COLUMN_NAME));
+    if (!columns.has("shop_logo_data")) await query("ALTER TABLE system_settings ADD COLUMN shop_logo_data LONGBLOB NULL AFTER openai_api_key_encrypted");
+    if (!columns.has("shop_logo_mime")) await query("ALTER TABLE system_settings ADD COLUMN shop_logo_mime VARCHAR(100) NULL AFTER shop_logo_data");
+    if (!columns.has("shop_logo_updated_at")) await query("ALTER TABLE system_settings ADD COLUMN shop_logo_updated_at DATETIME NULL AFTER shop_logo_mime");
     if (!columns.has("gcash_qr_data")) await query("ALTER TABLE system_settings ADD COLUMN gcash_qr_data LONGBLOB NULL AFTER openai_api_key_encrypted");
     if (!columns.has("gcash_qr_mime")) await query("ALTER TABLE system_settings ADD COLUMN gcash_qr_mime VARCHAR(100) NULL AFTER gcash_qr_data");
     if (!columns.has("gcash_qr_updated_at")) await query("ALTER TABLE system_settings ADD COLUMN gcash_qr_updated_at DATETIME NULL AFTER gcash_qr_mime");
@@ -389,7 +438,7 @@ export function sanitizeSystemSettings(settings, encryptedOpenAiApiKey, database
 
 export async function loadSystemSettings() {
   await ensureSettingsTable();
-  const rows = await query("SELECT config_json, openai_api_key_encrypted, gcash_qr_data IS NOT NULL AS has_gcash_qr FROM system_settings WHERE id = 1");
+  const rows = await query("SELECT config_json, openai_api_key_encrypted, shop_logo_data IS NOT NULL AS has_shop_logo, shop_logo_updated_at, gcash_qr_data IS NOT NULL AS has_gcash_qr FROM system_settings WHERE id = 1");
   if (!rows.length) {
     const config = normalizeSystemSettings(DEFAULT_SYSTEM_SETTINGS);
     await query(
@@ -401,6 +450,16 @@ export async function loadSystemSettings() {
     return { config, encryptedOpenAiApiKey: null };
   }
   const config = normalizeSystemSettings(parseStoredConfig(rows[0].config_json));
+  const migratedLogo = !Boolean(rows[0].has_shop_logo) && await migrateLegacyShopLogo(config);
+  const hasPersistedLogo = Boolean(rows[0].has_shop_logo) || migratedLogo;
+  if (hasPersistedLogo) {
+    config.general.shopLogoUrl = SHOP_LOGO_URL;
+    config.general.shopLogoUpdatedAt = rows[0].shop_logo_updated_at
+      ? new Date(rows[0].shop_logo_updated_at).toISOString()
+      : migratedLogo ? new Date().toISOString() : null;
+  } else {
+    config.general.shopLogoUpdatedAt = null;
+  }
   const hasPersistedQr = Boolean(rows[0].has_gcash_qr) || await migrateLegacyGcashQr(config);
   if (hasPersistedQr) {
     config.payment.gcashQrUrl = GCASH_QR_URL;
@@ -414,8 +473,16 @@ export async function saveSystemSettings(nextSettings, options = {}) {
   await ensureSettingsTable();
   const current = await loadSystemSettings();
   const config = normalizeSystemSettings(nextSettings);
+  const logoFile = options.shopLogoImage;
   const cleanConfig = {
     ...config,
+    general: {
+      ...config.general,
+      ...(logoFile ? {
+        shopLogoUrl: SHOP_LOGO_URL,
+        shopLogoUpdatedAt: new Date().toISOString()
+      } : {})
+    },
     ai: {
       ...config.ai,
       openaiApiKey: "",
@@ -428,17 +495,41 @@ export async function saveSystemSettings(nextSettings, options = {}) {
       ? encryptSecret(options.openaiApiKey)
       : current.encryptedOpenAiApiKey;
 
-  await query(
-    `INSERT INTO system_settings (id, config_json, openai_api_key_encrypted)
+  const saveParams = {
+    configJson: JSON.stringify(cleanConfig),
+    openaiApiKey: nextEncryptedKey
+  };
+  const saveSql = `INSERT INTO system_settings (id, config_json, openai_api_key_encrypted)
      VALUES (1, :configJson, :openaiApiKey)
      ON DUPLICATE KEY UPDATE
        config_json = VALUES(config_json),
-       openai_api_key_encrypted = VALUES(openai_api_key_encrypted)`,
-    {
-      configJson: JSON.stringify(cleanConfig),
-      openaiApiKey: nextEncryptedKey
+       openai_api_key_encrypted = VALUES(openai_api_key_encrypted)`;
+  if (logoFile) {
+    if (!Buffer.isBuffer(logoFile.buffer) || logoFile.buffer.length === 0) {
+      throw new Error("Shop logo image data is required");
     }
-  );
+    const conn = await pool.getConnection();
+    try {
+      await conn.beginTransaction();
+      await conn.execute(saveSql, saveParams);
+      await conn.execute(
+        `UPDATE system_settings
+         SET shop_logo_data = :imageData,
+             shop_logo_mime = :imageMime,
+             shop_logo_updated_at = NOW()
+         WHERE id = 1`,
+        { imageData: logoFile.buffer, imageMime: logoFile.mimetype || "image/png" }
+      );
+      await conn.commit();
+    } catch (error) {
+      await conn.rollback().catch(() => {});
+      throw error;
+    } finally {
+      conn.release();
+    }
+  } else {
+    await query(saveSql, saveParams);
+  }
   return { config: cleanConfig, encryptedOpenAiApiKey: nextEncryptedKey };
 }
 
@@ -462,6 +553,13 @@ export async function resetSystemSettings() {
      ON DUPLICATE KEY UPDATE config_json = VALUES(config_json), openai_api_key_encrypted = NULL`,
     { configJson: JSON.stringify(config) }
   );
+  await query(
+    `UPDATE system_settings
+     SET shop_logo_data = NULL,
+         shop_logo_mime = NULL,
+         shop_logo_updated_at = NULL
+     WHERE id = 1`
+  );
   return { config, encryptedOpenAiApiKey: null };
 }
 
@@ -476,6 +574,20 @@ export async function getGcashQrImage() {
     data: row.gcash_qr_data,
     mime: row.gcash_qr_mime || "image/png",
     updatedAt: row.gcash_qr_updated_at || null
+  };
+}
+
+export async function getShopLogoImage() {
+  await ensureSettingsTable();
+  const rows = await query(
+    "SELECT shop_logo_data, shop_logo_mime, shop_logo_updated_at FROM system_settings WHERE id = 1 LIMIT 1"
+  );
+  const row = rows[0];
+  if (!Buffer.isBuffer(row?.shop_logo_data) || row.shop_logo_data.length === 0) return null;
+  return {
+    data: row.shop_logo_data,
+    mime: row.shop_logo_mime || "image/png",
+    updatedAt: row.shop_logo_updated_at || null
   };
 }
 

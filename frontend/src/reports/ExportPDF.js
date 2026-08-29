@@ -43,12 +43,37 @@ function pageMetrics(doc) {
   };
 }
 
-function addHeader(doc, report, options) {
+async function imageUrlToDataUrl(url) {
+  if (!url || /^(?:data:|blob:)/i.test(url)) return url;
+  try {
+    const response = await fetch(url, { credentials: "include" });
+    if (!response.ok) return null;
+    const blob = await response.blob();
+    return await new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : null);
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(blob);
+    });
+  } catch {
+    return null;
+  }
+}
+
+function imageFormat(dataUrl) {
+  if (/^data:image\/jpe?g/i.test(dataUrl || "")) return "JPEG";
+  if (/^data:image\/webp/i.test(dataUrl || "")) return "WEBP";
+  return "PNG";
+}
+
+async function addHeader(doc, report, options) {
   const { width } = pageMetrics(doc);
   doc.setFillColor(...brandGreen);
   doc.rect(0, 0, width, 30, "F");
   try {
-    doc.addImage(logoFromSettings(report), "PNG", 14, 7, 14, 14);
+    const logoData = await imageUrlToDataUrl(logoFromSettings(report));
+    if (!logoData) throw new Error("Logo image unavailable");
+    doc.addImage(logoData, imageFormat(logoData), 14, 7, 14, 14);
   } catch {
     doc.setFillColor(255, 255, 255);
     doc.circle(21, 14, 7, "F");
@@ -280,7 +305,7 @@ function addCharts(doc, chartImages, y) {
 export async function exportSalesReportPdf({ report, range, options = defaultReportOptions, chartRefs }) {
   const reportOptions = { ...defaultReportOptions, ...options, dateRange: options?.dateRange || range || defaultReportOptions.dateRange };
   const doc = new jsPDF(reportOptions.orientation === "landscape" ? "l" : "p", "mm", reportOptions.paperSize || "a4");
-  addHeader(doc, report, reportOptions);
+  await addHeader(doc, report, reportOptions);
   let y = addReportMeta(doc, report, reportOptions);
   const chartImages = {
     sales: await captureElement(chartRefs?.sales?.current),

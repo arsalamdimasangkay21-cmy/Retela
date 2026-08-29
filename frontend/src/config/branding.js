@@ -11,5 +11,11 @@ export const DEFAULT_RETELA_LOGO_URL = resolveAssetUrl(DEFAULT_RETELA_LOGO_PATH)
 export const RETELA_LOGO_URL = DEFAULT_RETELA_LOGO_URL;
 
 export function logoFromSettings(settings) {
-  return resolveAssetUrl(settings?.general?.shopLogoUrl) || DEFAULT_RETELA_LOGO_URL;
+  const configured = String(settings?.general?.shopLogoUrl || "").trim();
+  const resolved = resolveAssetUrl(configured);
+  if (!resolved) return DEFAULT_RETELA_LOGO_URL;
+  if (/^(?:blob:|data:)/i.test(resolved)) return resolved;
+  const version = settings?.general?.shopLogoUpdatedAt || settings?.general?.shopLogoVersion || Date.now();
+  const separator = resolved.includes("?") ? "&" : "?";
+  return `${resolved}${separator}v=${encodeURIComponent(version)}`;
 }

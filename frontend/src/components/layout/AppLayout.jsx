@@ -4,14 +4,20 @@ import { api, cachedGet, clearGetCache } from "../../api/client";
 import { acquireSocket, releaseSocket } from "../../api/socket";
 import CustomerToastStack from "../CustomerToastStack";
 import ProductImage from "../ProductImage";
+import LogoImage from "../LogoImage";
 import { logoFromSettings, RETELA_LOGO_URL } from "../../config/branding";
 import { useAuth } from "../../context/AuthContext";
 import { applyUserTheme, emitUserThemeChange, readUserTheme, saveUserTheme } from "../../utils/userTheme";
 import Sidebar from "./Sidebar";
 
-function savedLogoUrl() {
+function cachedLogoFallback() {
   const cached = localStorage.getItem("retela_logo_url");
-  return cached && !cached.includes("scontent.") ? cached : RETELA_LOGO_URL;
+  return cached && cached !== RETELA_LOGO_URL && !cached.includes("scontent.") ? cached : "";
+}
+
+function rememberLogoUrl(url) {
+  if (url && url !== RETELA_LOGO_URL) localStorage.setItem("retela_logo_url", url);
+  else localStorage.removeItem("retela_logo_url");
 }
 
 export default function AppLayout({ children, active, onChange }) {
@@ -23,7 +29,7 @@ export default function AppLayout({ children, active, onChange }) {
   const [messageCount, setMessageCount] = useState(0);
   const [now, setNow] = useState(new Date());
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem("retela_sidebar_collapsed") === "true");
-  const [logoUrl, setLogoUrl] = useState(savedLogoUrl);
+  const [logoUrl, setLogoUrl] = useState(RETELA_LOGO_URL);
   const [darkMode, setDarkMode] = useState(false);
   const [socket, setSocket] = useState(null);
   const lastActivityEmitRef = useRef(0);
@@ -257,9 +263,12 @@ export default function AppLayout({ children, active, onChange }) {
         if (cancelled) return;
         const nextLogo = logoFromSettings(data);
         setLogoUrl(nextLogo);
-        localStorage.setItem("retela_logo_url", nextLogo);
+        rememberLogoUrl(nextLogo);
       })
-      .catch(() => {});
+      .catch(() => {
+        const cached = cachedLogoFallback();
+        if (!cancelled && cached) setLogoUrl(cached);
+      });
     return () => {
       cancelled = true;
     };
@@ -269,7 +278,7 @@ export default function AppLayout({ children, active, onChange }) {
     function applyBranding(event) {
       const nextLogo = logoFromSettings(event.detail);
       setLogoUrl(nextLogo);
-      localStorage.setItem("retela_logo_url", nextLogo);
+      rememberLogoUrl(nextLogo);
     }
     window.addEventListener("retela:branding-settings", applyBranding);
     return () => window.removeEventListener("retela:branding-settings", applyBranding);
@@ -320,7 +329,7 @@ export default function AppLayout({ children, active, onChange }) {
           <div className="premium-topbar flex min-h-16 flex-wrap items-center justify-between gap-2 rounded-[22px] border border-slate-200 bg-white px-3 py-3 shadow-lg shadow-slate-200/70 sm:gap-3 sm:px-4">
           <div className="retela-topbar-title min-w-0 flex-1">
             <div className="flex items-center gap-3">
-              <img src={logoUrl} className="h-10 w-10 shrink-0 rounded-xl border border-emerald-100 object-cover" alt="RETELA logo" />
+              <LogoImage src={logoUrl} className="h-10 w-10 shrink-0 rounded-xl border border-emerald-100 object-cover" alt="RETELA logo" />
               <div className="min-w-0">
                 <p className="truncate text-[10px] font-bold uppercase tracking-[0.16em] text-emerald-700 sm:text-xs sm:tracking-[0.22em]">Tela to Pera Thrift Shop</p>
                 <h2 className="break-words font-display text-[clamp(1.05rem,4.8vw,1.5rem)] font-bold leading-tight text-slate-950">{active}</h2>

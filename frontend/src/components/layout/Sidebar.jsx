@@ -1,6 +1,7 @@
 import { BarChart3, Barcode, Bell, Bot, Home, Info, LayoutDashboard, LogOut, MapPin, Megaphone, Menu, MessageCircle, Package, ReceiptText, RotateCcw, Settings, ShoppingBag, ShoppingCart, Star, Users } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { RETELA_LOGO_URL } from "../../config/branding";
+import LogoImage from "../LogoImage";
 import { useAuth } from "../../context/AuthContext";
 
 const adminItems = [
@@ -120,7 +121,7 @@ export default function Sidebar({ active, collapsed, onChange, onToggleCollapsed
       >
         <div className={`retela-sidebar-brand-card ${isAdmin ? "admin-sidebar-brand" : ""} ${isCustomer ? "customer-sidebar-brand" : ""} flex items-center gap-3 overflow-hidden rounded-[20px] border border-[#14532D]/30 bg-[#14532D] text-white shadow-md shadow-emerald-950/20 ${desktopCollapsed ? "p-2 lg:flex-col lg:justify-center" : "p-4"}`}>
           <div className={`retela-sidebar-brand-main flex min-w-0 flex-1 items-center gap-3 ${desktopCollapsed ? "lg:flex-none lg:justify-center" : ""}`}>
-            <img src={logoUrl} className="retela-sidebar-logo h-12 w-12 rounded-2xl border border-white/25 bg-white object-cover shadow-sm" alt="RETELA SYSTEM logo" />
+            <LogoImage src={logoUrl} className="retela-sidebar-logo h-12 w-12 rounded-2xl border border-white/25 bg-white object-cover shadow-sm" alt="RETELA SYSTEM logo" />
             <div className={`retela-sidebar-brand-copy min-w-0 ${desktopCollapsed ? "lg:hidden" : ""}`}>
               <h1 className="retela-sidebar-title truncate font-display text-xl font-bold tracking-wide text-white">RETELA SYSTEM</h1>
               <p className="retela-sidebar-subtitle mt-0.5 truncate text-xs font-extrabold uppercase tracking-[0.18em] text-emerald-100">{isAdmin ? "Admin Portal" : "Customer Portal"}</p>
