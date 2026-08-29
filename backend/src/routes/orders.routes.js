@@ -1216,6 +1216,12 @@ router.patch("/:id/status", requireAuth, requireRole("admin"), asyncHandler(asyn
   const isCod = isCodPaymentMethod(order.payment_method ?? order.paymentMethod);
   const paymentStatus = normalizeOrderStatus(order.payment_status ?? order.paymentStatus);
   const hasFailedOnlinePayment = orderHasFailedOnlinePayment(order);
+  const allowsPaymentFailureRejection = status === "rejected"
+    && !isCod
+    && (
+      currentStatus === "payment_failed"
+      || (currentStatus === "cancelled" && failedOnlinePaymentStatuses.has(paymentStatus))
+    );
   console.info("ORDER STATUS PATCH RECEIVED", {
     orderId,
     adminId: Number(req.user?.id) || null,
@@ -1225,7 +1231,7 @@ router.patch("/:id/status", requireAuth, requireRole("admin"), asyncHandler(asyn
     requestedStatus: status
   });
   if (status === "rejected") {
-    const rejectionReason = input.reason || paymentFailedRejectionReason;
+    const rejectionReason = paymentFailedRejectionReason;
     console.info("REJECT REQUEST RECEIVED", {
       orderId,
       currentStatus,
@@ -1266,7 +1272,7 @@ router.patch("/:id/status", requireAuth, requireRole("admin"), asyncHandler(asyn
   if (hasFailedOnlinePayment && paymentFailedBlockedAdminTargets.has(status)) {
     throw new HttpError(409, "Payment-failed online orders cannot be accepted, sent out for delivery, or completed.");
   }
-  if (currentStatus !== status && !allowedAdminStatusTransitions[currentStatus]?.has(status)) {
+  if (currentStatus !== status && !allowsPaymentFailureRejection && !allowedAdminStatusTransitions[currentStatus]?.has(status)) {
     throw new HttpError(409, "This order status cannot be changed that way.");
   }
   if (status === "approved" && !isCod && paymentStatus !== "paid") {
