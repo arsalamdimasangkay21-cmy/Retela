@@ -114,6 +114,7 @@ export const corsOptions = {
     "Content-Type",
     "Authorization",
     "Accept",
+    "Idempotency-Key",
     "X-Requested-With"
   ],
   exposedHeaders: [],
