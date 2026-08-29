@@ -245,6 +245,7 @@ export default function AdminDashboard({ active, onChange }) {
   const [pendingCustomerDelete, setPendingCustomerDelete] = useState(null);
   const mountedRef = useRef(true);
   const refreshTimerRef = useRef(null);
+  const orderRequestGuardsRef = useRef(new Set());
 
   const optionValues = useMemo(() => ({
     brands: optionNames(apparelOptions.brands, fallbackApparelOptions.brands),
@@ -611,10 +612,15 @@ export default function AdminDashboard({ active, onChange }) {
 
   async function updateOrder(id, status) {
     const actionKey = `order-${id}-${status}`;
-    if (busyAction === actionKey) return;
+    if (busyAction === actionKey || orderRequestGuardsRef.current.has(actionKey)) return;
+    orderRequestGuardsRef.current.add(actionKey);
     setBusyAction(actionKey);
     try {
-      const { data } = await api.patch(`/orders/${id}/status`, { status });
+      const { data } = await api.patch(
+        `/orders/${id}/status`,
+        { status },
+        { headers: { "Idempotency-Key": actionKey } }
+      );
       const updatedOrder = data?.order || (data?.id ? data : { id: Number(id), status });
       if (updatedOrder?.id) {
         setOrders((current) => current.map((order) => Number(order.id) === Number(updatedOrder.id) ? { ...order, ...updatedOrder } : order));
@@ -624,12 +630,19 @@ export default function AdminDashboard({ active, onChange }) {
       loadSummaryData({ force: true }).catch((refreshError) => {
         console.error("[orders] summary refresh after status update failed", refreshError);
       });
-      showProductToast(status === "rejected" ? "Order rejected." : "Order updated successfully.", "success", "top-right");
+      showProductToast(
+        status === "rejected"
+          ? `Order #${updatedOrder?.id || id} was rejected because payment could not be verified.`
+          : "Order updated successfully.",
+        "success",
+        "top-right"
+      );
       return { ...data, order: updatedOrder };
     } catch (error) {
       showProductToast(getApiErrorMessage(error, "Could not update order."), "error", "top-right");
       throw error;
     } finally {
+      orderRequestGuardsRef.current.delete(actionKey);
       setBusyAction("");
     }
   }
@@ -4620,12 +4633,12 @@ function isCodPaymentMethod(orderOrMethod) {
 }
 
 function compactPaymentStatusKey(value) {
-  return String(value || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
+  return String(value || "").trim().toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ");
 }
 
 function hasFailedOnlinePayment(order) {
   if (!order || isCodPaymentMethod(order)) return false;
-  return ["failed", "paymentfailed", "unpaid", "cancelled", "canceled", "expired"].includes(compactPaymentStatusKey(order.payment_status ?? order.paymentStatus));
+  return ["failed", "payment failed", "unpaid", "cancelled", "canceled", "expired"].includes(compactPaymentStatusKey(order.payment_status ?? order.paymentStatus));
 }
 
 function finiteNonNegativeNumber(value) {
@@ -4718,6 +4731,7 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
   const [displayedRouteDistanceKm, setDisplayedRouteDistanceKm] = useState(null);
   const [actionStatus, setActionStatus] = useState("");
   const [rejectConfirmOpen, setRejectConfirmOpen] = useState(false);
+  const modalActionGuardsRef = useRef(new Set());
   const customerPhone = orderCustomerPhone(source);
   const customerEmail = String(source?.customer_email || source?.customerEmail || source?.email || "").trim();
   const customerName = String(source?.customer_name || source?.display_name || source?.username || "Walk-in Customer").trim() || "Walk-in Customer";
@@ -4730,16 +4744,17 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
   const isDeliveryOrder = meetupEligibility.deliveryOrder;
   const showMeetupDetails = meetupEligibility.eligible;
   const showMeetupEditor = showMeetupDetails;
-  const fulfillmentStatus = displayFulfillmentStatus(source);
-  const paymentFailed = hasFailedOnlinePayment(source) || fulfillmentStatus === "payment_failed";
+  const fulfillmentStatus = displayStoredFulfillmentStatus(source);
+  const paymentFailed = hasFailedOnlinePayment(source);
   const rejected = fulfillmentStatus === "rejected";
+  const showStatusBadge = !(paymentFailed && fulfillmentStatus === "payment_failed");
   const terminalPaymentBlock = paymentFailed || rejected;
   const localMeetupGateActive = Boolean(meetupAreaEligible && ["approved", "processing"].includes(fulfillmentStatus));
   const meetupNeedsSchedule = Boolean(localMeetupGateActive && !meetupScheduleSaved);
   const meetupNeedsConfirmation = Boolean(localMeetupGateActive && meetupScheduleSaved && source?.meetup_confirmation_status !== "agreed");
   const canSendOutForDelivery = !terminalPaymentBlock && ["approved", "processing"].includes(fulfillmentStatus) && !meetupNeedsSchedule && !meetupNeedsConfirmation;
   const canCompleteOrder = !terminalPaymentBlock && fulfillmentStatus === "ready";
-  const canRejectOrder = !rejected && (paymentFailed || ["pending", "approved", "processing", "ready"].includes(fulfillmentStatus));
+  const canRejectOrder = !rejected && (paymentFailed || ["pending", "awaiting_payment", "approved", "processing", "ready"].includes(fulfillmentStatus));
   const meetupConfirmation = String(source?.meetup_confirmation_status || "pending").toLowerCase();
   const phoneHref = customerPhone ? customerPhone.replace(/[^\d+]/g, "") : "";
   const todayManila = manilaDateInputValue();
@@ -4797,10 +4812,13 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
   }, [meetupScrollToken, showMeetupDetails, source?.id]);
 
   async function updateStatus(status) {
-    if (!source?.id || actionStatus) return;
+    const actionKey = source?.id ? `${source.id}-${status}` : "";
+    if (!source?.id || actionStatus || modalActionGuardsRef.current.has(actionKey)) return;
+    modalActionGuardsRef.current.add(actionKey);
     setActionStatus(status);
     try {
       const data = await updateOrder(source.id, status);
+      if (!data) return;
       const orderPatch = data?.order || data || { id: source.id, status };
       const shouldScrollToMeetup = statusIsAccepted(status);
       onStatusChanged?.({ id: source.id, status, ...orderPatch }, { scrollToMeetup: shouldScrollToMeetup, skipReload: true });
@@ -4809,12 +4827,13 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
     } catch (error) {
       console.error("[orders] status update failed", error);
     } finally {
+      modalActionGuardsRef.current.delete(actionKey);
       setActionStatus("");
     }
   }
 
   function rejectOrder() {
-    if (!canRejectOrder || actionStatus) return;
+    if (!canRejectOrder || actionStatus || rejected) return;
     if (paymentFailed) {
       setRejectConfirmOpen(true);
       return;
@@ -4823,7 +4842,7 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
   }
 
   async function confirmPaymentFailedReject() {
-    if (!paymentFailed || actionStatus) return;
+    if (!paymentFailed || actionStatus || rejected) return;
     setRejectConfirmOpen(false);
     await updateStatus("rejected");
   }
@@ -4884,7 +4903,7 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
                 </div>
                 <div className="admin-order-status-stack">
                   {paymentFailed ? <span className="admin-payment-failed-badge">Payment Failed</span> : null}
-                  <span className={`rounded-full px-3 py-2 text-xs font-bold ${orderBadgeClass(fulfillmentStatus)}`}>{orderStatusLabel(fulfillmentStatus)}</span>
+                  {showStatusBadge ? <span className={`rounded-full px-3 py-2 text-xs font-bold ${orderBadgeClass(fulfillmentStatus)}`}>{orderStatusLabel(fulfillmentStatus)}</span> : null}
                 </div>
               </div>
               <div className="retela-modal-body grid gap-4">
@@ -4896,7 +4915,7 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
               </div>
               {paymentFailed ? (
                 <section className="admin-payment-failed-note">
-                  <strong>{rejected ? "Rejected" : "Payment Failed"}</strong>
+                  <strong>Payment could not be verified</strong>
                   <span>{source.rejection_reason || "The payment for this order was unsuccessful or could not be verified."}</span>
                 </section>
               ) : null}
@@ -5323,6 +5342,14 @@ function displayFulfillmentStatus(order) {
   if (status !== "rejected" && hasFailedOnlinePayment(order)) return "payment_failed";
   // Older PayMongo orders stored `paid` in the fulfillment status. They are
   // still pending fulfillment once payment is confirmed.
+  if (status === "paid" && order?.payment_status === "paid") return "pending";
+  if (status === "accepted") return "approved";
+  if (status === "out_for_delivery") return "ready";
+  return status || "pending";
+}
+
+function displayStoredFulfillmentStatus(order) {
+  const status = normalizeOrderStatusKey(order?.status);
   if (status === "paid" && order?.payment_status === "paid") return "pending";
   if (status === "accepted") return "approved";
   if (status === "out_for_delivery") return "ready";

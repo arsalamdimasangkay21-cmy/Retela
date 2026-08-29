@@ -36,6 +36,7 @@ const failedOnlinePaymentStatuses = new Set(["failed", "paymentfailed", "unpaid"
 const failedOnlinePaymentStatusSql = "'failed','paymentfailed','unpaid','cancelled','canceled','expired'";
 const codPaymentMethodSql = "'cod','cash','cashondelivery','cashupondelivery','payondelivery','paymentondelivery'";
 const paymentFailedRejectionReason = "Payment failed or could not be verified.";
+const paymentFailedBlockedAdminTargets = new Set(["approved", "processing", "ready", "completed"]);
 const transientOrderLockCodes = new Set(["ER_LOCK_WAIT_TIMEOUT", "ER_LOCK_DEADLOCK"]);
 const maxOrderCreateAttempts = 3;
 const codMunicipalityError = "Cash on Delivery is only available for nearby delivery areas. Please select an online payment method.";
@@ -87,9 +88,7 @@ function orderHasFailedOnlinePayment(order) {
 }
 
 function isPaymentFailedOrder(order) {
-  if (!order) return false;
-  const status = orderStatusForStorage(order.status);
-  return status === "payment_failed" || orderHasFailedOnlinePayment(order);
+  return orderHasFailedOnlinePayment(order);
 }
 
 function compactSql(columnSql) {
@@ -972,7 +971,7 @@ async function rejectPaymentFailedOrder(orderId) {
   try {
     await conn.beginTransaction();
     const [orders] = await conn.execute(
-      `SELECT id, user_id, status, payment_status, payment_method, inventory_deducted_at
+      `SELECT id, user_id, status, payment_status, payment_method, inventory_deducted_at, rejection_reason
        FROM orders
        WHERE id = ?
        FOR UPDATE`,
@@ -995,6 +994,7 @@ async function rejectPaymentFailedOrder(orderId) {
     const inventoryUpdates = order.inventory_deducted_at
       ? await restoreDeductedOrderInventoryForConnection(conn, orderId, lowStockThreshold)
       : [];
+    const noticeBody = paymentFailedCustomerNotice(orderId);
     await conn.execute(
       `UPDATE orders
        SET status = 'rejected',
@@ -1010,10 +1010,18 @@ async function rejectPaymentFailedOrder(orderId) {
        WHERE id = ?`,
       [paymentFailedRejectionReason, orderId]
     );
-    await conn.execute(
-      "INSERT INTO notifications (user_id, type, title, body) VALUES (?, 'order', 'Order rejected', ?)",
-      [order.user_id, paymentFailedCustomerNotice(orderId)]
-    );
+    if (order.user_id) {
+      const [existingNotifications] = await conn.execute(
+        "SELECT id FROM notifications WHERE user_id = ? AND type = 'order' AND title = 'Order rejected' AND body = ? LIMIT 1",
+        [order.user_id, noticeBody]
+      );
+      if (!existingNotifications.length) {
+        await conn.execute(
+          "INSERT INTO notifications (user_id, type, title, body) VALUES (?, 'order', 'Order rejected', ?)",
+          [order.user_id, noticeBody]
+        );
+      }
+    }
     await conn.commit();
     return { updated: true, userId: order.user_id, inventoryUpdates };
   } catch (error) {
@@ -1134,13 +1142,8 @@ router.patch("/:id/status", requireAuth, requireRole("admin"), asyncHandler(asyn
   const order = await loadDecoratedOrder(req.params.id, { role: "admin" });
   if (!order) throw new HttpError(404, "Order not found");
   const currentStatus = orderStatusForStorage(order.status);
-  if (currentStatus !== status && !allowedAdminStatusTransitions[currentStatus]?.has(status)) {
-    throw new HttpError(409, "This order status cannot be changed that way.");
-  }
   const isCod = isCodPaymentMethod(order.payment_method ?? order.paymentMethod);
-  if (status === "approved" && !isCod && order.payment_status !== "paid") {
-    throw new HttpError(409, "This online order must be paid before it can be accepted.");
-  }
+  const hasFailedOnlinePayment = orderHasFailedOnlinePayment(order);
   if (status === "rejected") {
     const result = await rejectPaymentFailedOrder(req.params.id);
     const updatedOrder = await loadDecoratedOrder(req.params.id, { role: "admin" });
@@ -1170,6 +1173,15 @@ router.patch("/:id/status", requireAuth, requireRole("admin"), asyncHandler(asyn
       message: result.updated ? "Order rejected" : "Order was already rejected",
       order: updatePayload
     });
+  }
+  if (hasFailedOnlinePayment && paymentFailedBlockedAdminTargets.has(status)) {
+    throw new HttpError(409, "Payment-failed online orders cannot be accepted, sent out for delivery, or completed.");
+  }
+  if (currentStatus !== status && !allowedAdminStatusTransitions[currentStatus]?.has(status)) {
+    throw new HttpError(409, "This order status cannot be changed that way.");
+  }
+  if (status === "approved" && !isCod && order.payment_status !== "paid") {
+    throw new HttpError(409, "This online order must be paid before it can be accepted.");
   }
   if (status === "ready") {
     if (order.meetup_area_eligible) {
