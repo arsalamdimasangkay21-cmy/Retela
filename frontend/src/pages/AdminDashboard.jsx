@@ -3609,6 +3609,24 @@ function formatMeetupTime(value) {
   return date.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
 }
 
+function manilaDateInputValue(value = new Date()) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Manila",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).format(value);
+}
+
+function manilaTimeInputValue(value = new Date()) {
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Manila",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false
+  }).format(value);
+}
+
 function OrdersResponsiveView({ rows, onViewDetails }) {
   if (!rows.length) {
     return (
@@ -3804,6 +3822,7 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
   const [meetingPlaceDraft, setMeetingPlaceDraft] = useState("");
   const [meetupDateDraft, setMeetupDateDraft] = useState("");
   const [meetupTimeDraft, setMeetupTimeDraft] = useState("");
+  const [meetupNoteDraft, setMeetupNoteDraft] = useState("");
   const [meetingPlaceSaving, setMeetingPlaceSaving] = useState(false);
   const [meetingPlaceError, setMeetingPlaceError] = useState("");
   const [deliverySafetyPolicy, setDeliverySafetyPolicy] = useState(defaultDeliverySafetyPolicy);
@@ -3822,20 +3841,25 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
   const acceptedForMeetup = displayFulfillmentStatus(source) === "approved";
   const activeMeetupStatus = ["approved", "processing", "ready", "completed"].includes(displayFulfillmentStatus(source));
   const meetupScheduleSaved = Boolean(source?.meeting_place && source?.meetup_date && source?.meetup_time);
-  const showMeetupDetails = Boolean(source?.meetup_area_eligible && activeMeetupStatus && (acceptedForMeetup || hasMeetupData));
-  const showMeetupEditor = Boolean(source?.meetup_eligible && acceptedForMeetup);
-  const meetupNeedsSchedule = Boolean(source?.meetup_area_eligible && ["approved", "processing"].includes(displayFulfillmentStatus(source)) && !meetupScheduleSaved);
-  const meetupNeedsConfirmation = Boolean(source?.meetup_area_eligible && meetupScheduleSaved && source?.meetup_confirmation_status !== "agreed");
+  const codOrder = ["cod", "cash", "cash_on_delivery"].includes(String(source?.payment_method || "").trim().toLowerCase());
+  const meetupAreaEligible = Boolean(codOrder && source?.meetup_area_eligible);
+  const showMeetupDetails = Boolean(meetupAreaEligible && activeMeetupStatus && (acceptedForMeetup || hasMeetupData));
+  const showMeetupEditor = Boolean(codOrder && source?.meetup_eligible && acceptedForMeetup);
+  const meetupNeedsSchedule = Boolean(meetupAreaEligible && ["approved", "processing"].includes(displayFulfillmentStatus(source)) && !meetupScheduleSaved);
+  const meetupNeedsConfirmation = Boolean(meetupAreaEligible && meetupScheduleSaved && source?.meetup_confirmation_status !== "agreed");
   const canSendOutForDelivery = ["approved", "processing"].includes(displayFulfillmentStatus(source)) && !meetupNeedsSchedule && !meetupNeedsConfirmation;
   const meetupConfirmation = String(source?.meetup_confirmation_status || "pending").toLowerCase();
   const phoneHref = customerPhone ? customerPhone.replace(/[^\d+]/g, "") : "";
+  const todayManila = manilaDateInputValue();
+  const currentManilaTime = manilaTimeInputValue();
 
   useEffect(() => {
     setMeetingPlaceDraft(source?.meeting_place || "");
     setMeetupDateDraft(source?.meetup_date ? String(source.meetup_date).slice(0, 10) : "");
     setMeetupTimeDraft(source?.meetup_time ? String(source.meetup_time).slice(0, 5) : "");
+    setMeetupNoteDraft(source?.meetup_admin_note || "");
     setMeetingPlaceError("");
-  }, [source?.id, source?.meeting_place, source?.meetup_date, source?.meetup_time]);
+  }, [source?.id, source?.meeting_place, source?.meetup_date, source?.meetup_time, source?.meetup_admin_note]);
 
   useEffect(() => {
     let active = true;
@@ -3859,7 +3883,7 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
       setMeetingPlaceError("Meeting place, date, and time are required.");
       return;
     }
-    const meetupDateTime = new Date(`${meetupDateDraft}T${meetupTimeDraft}`);
+    const meetupDateTime = new Date(`${meetupDateDraft}T${meetupTimeDraft}:00+08:00`);
     if (Number.isNaN(meetupDateTime.getTime()) || meetupDateTime.getTime() <= Date.now()) {
       setMeetingPlaceError("Choose a future meetup date and time.");
       return;
@@ -3870,7 +3894,8 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
       const { data } = await api.patch(`/orders/${source.id}/meeting-place`, {
         meetingPlace: meetingPlaceDraft,
         meetupDate: meetupDateDraft,
-        meetupTime: meetupTimeDraft
+        meetupTime: meetupTimeDraft,
+        meetupNote: meetupNoteDraft
       });
       onMeetingPlaceSaved?.({
         meeting_place: data.meeting_place || null,
@@ -3878,7 +3903,8 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
         meetup_time: data.meetup_time || null,
         meetup_confirmation_status: data.meetup_confirmation_status || "pending",
         meetup_confirmed_at: data.meetup_confirmed_at || null,
-        meetup_customer_note: data.meetup_customer_note || null
+        meetup_customer_note: data.meetup_customer_note || null,
+        meetup_admin_note: data.meetup_admin_note || null
       });
     } catch (error) {
       setMeetingPlaceError(getApiErrorMessage(error, "Could not save meeting place."));
@@ -3961,14 +3987,18 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
                 <div className="grid gap-3 sm:grid-cols-2">
                   <label className="grid gap-1 text-sm font-bold text-slate-700">
                     <span>Meetup Date</span>
-                    <input type="date" value={meetupDateDraft} onChange={(event) => setMeetupDateDraft(event.target.value)} className="min-h-11 rounded-xl border border-[#dfe9e3] bg-white px-3 py-2 text-sm font-semibold text-[#111827] outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100" />
+                     <input type="date" min={todayManila} value={meetupDateDraft} onChange={(event) => setMeetupDateDraft(event.target.value)} className="min-h-11 rounded-xl border border-[#dfe9e3] bg-white px-3 py-2 text-sm font-semibold text-[#111827] outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100" />
                   </label>
                   <label className="grid gap-1 text-sm font-bold text-slate-700">
                     <span>Meetup Time</span>
-                    <input type="time" value={meetupTimeDraft} onChange={(event) => setMeetupTimeDraft(event.target.value)} className="min-h-11 rounded-xl border border-[#dfe9e3] bg-white px-3 py-2 text-sm font-semibold text-[#111827] outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100" />
+                     <input type="time" min={meetupDateDraft === todayManila ? currentManilaTime : undefined} value={meetupTimeDraft} onChange={(event) => setMeetupTimeDraft(event.target.value)} className="min-h-11 rounded-xl border border-[#dfe9e3] bg-white px-3 py-2 text-sm font-semibold text-[#111827] outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100" />
                   </label>
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
+                 </div>
+                 <label className="grid gap-1 text-sm font-bold text-slate-700">
+                   <span>Meetup Note <span className="font-medium text-slate-500">(optional)</span></span>
+                   <textarea value={meetupNoteDraft} onChange={(event) => setMeetupNoteDraft(event.target.value)} maxLength={500} rows={2} placeholder="Add an optional note for the customer" className="min-h-16 w-full resize-y rounded-xl border border-[#dfe9e3] bg-white px-3 py-2 text-sm font-semibold text-[#111827] outline-none placeholder:text-slate-400 focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100" />
+                 </label>
+                 <div className="flex flex-wrap items-center gap-2">
                   <button type="button" disabled={meetingPlaceSaving} onClick={saveMeetingPlace} className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60">
                     {meetingPlaceSaving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
                     Save Meetup Details
@@ -3978,11 +4008,12 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
                 </> : <div className="grid gap-2 rounded-xl border border-emerald-100 bg-emerald-50/50 p-3 text-sm text-slate-700">
                   <strong className="text-slate-900">Meetup schedule saved</strong>
                   <span>{source.meeting_place}</span>
-                  <span>{formatMeetupDate(source.meetup_date)} · {formatMeetupTime(source.meetup_time)}</span>
+                   <span>{formatMeetupDate(source.meetup_date)} · {formatMeetupTime(source.meetup_time)}</span>
+                   {source.meetup_admin_note ? <span className="break-words text-slate-600">Note: {source.meetup_admin_note}</span> : null}
                 </div>}
                 <div className="retela-admin-meetup-response">
                   <p className="text-xs font-bold uppercase tracking-[0.16em] text-emerald-700">Customer Confirmation</p>
-                  <p className="mt-1 text-sm font-bold text-slate-700">{meetupConfirmation === "agreed" ? "✓ Agreed" : meetupConfirmation === "disagreed" ? "Disagreed" : "Waiting for customer response"}</p>
+                   <p className="mt-1 text-sm font-bold text-slate-700">{meetupConfirmation === "agreed" ? "Customer confirmed" : meetupConfirmation === "disagreed" ? "Customer did not confirm" : "Awaiting customer confirmation"}</p>
                   {source.meetup_customer_note ? <p className="mt-1 break-words text-sm text-slate-600">Customer note: {source.meetup_customer_note}</p> : null}
                   {meetupConfirmation === "agreed" ? <div className="mt-2 grid gap-1 text-xs font-semibold text-slate-600 sm:grid-cols-2">
                     <span>24-hour reminder: {source.meetup_24h_reminder_sent_at ? `Sent ${new Date(source.meetup_24h_reminder_sent_at).toLocaleString()}` : "Scheduled"}</span>
@@ -3991,7 +4022,7 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
                 </div>
                 {meetingPlaceError ? <p className="text-xs font-bold text-rose-600">{meetingPlaceError}</p> : null}
               </section> : null}
-              {source.meetup_area_eligible ? <section className="admin-delivery-safety-card">
+              {showMeetupDetails ? <section className="admin-delivery-safety-card">
                 <p className="text-xs font-bold uppercase tracking-[0.16em] text-emerald-700">Delivery &amp; Meetup Safety</p>
                 <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-slate-600">{deliverySafetyPolicy}</p>
               </section> : null}

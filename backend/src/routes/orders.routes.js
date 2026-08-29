@@ -52,6 +52,24 @@ function addressMatchesMunicipality(address, municipality) {
   return new RegExp(`(?:^|\\s)${escaped}(?:$|\\s)`, "i").test(source);
 }
 
+// Meetup times are entered as Philippine local time. Parse them explicitly in
+// Asia/Manila rather than relying on the server's timezone (which may differ
+// between development and production deployments).
+function parseMeetupDateTimeManila(dateValue, timeValue) {
+  const dateMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dateValue || "").trim());
+  const timeMatch = /^(\d{2}):(\d{2})$/.exec(String(timeValue || "").trim());
+  if (!dateMatch || !timeMatch) return null;
+  const year = Number(dateMatch[1]);
+  const month = Number(dateMatch[2]);
+  const day = Number(dateMatch[3]);
+  const hours = Number(timeMatch[1]);
+  const minutes = Number(timeMatch[2]);
+  if (month < 1 || month > 12 || day < 1 || day > 31 || hours > 23 || minutes > 59) return null;
+  const calendarDate = new Date(Date.UTC(year, month - 1, day));
+  if (calendarDate.getUTCFullYear() !== year || calendarDate.getUTCMonth() !== month - 1 || calendarDate.getUTCDate() !== day) return null;
+  return new Date(Date.UTC(year, month - 1, day, hours - 8, minutes));
+}
+
 async function decorateMeetupEligibility(orders) {
   if (!orders.length) return orders;
   const [{ config }, shippingPolicy] = await Promise.all([loadSystemSettings(), getShippingPolicy()]);
@@ -77,8 +95,11 @@ async function decorateMeetupEligibility(orders) {
       longitude: order.delivery_longitude
     }) : null;
     const distanceKm = distance === null ? null : Math.round(distance * 100) / 100;
+    const paymentMethod = String(order.payment_method || "").trim().toLowerCase();
+    const isCod = paymentMethod === "cod" || paymentMethod === "cash" || paymentMethod === "cash_on_delivery";
     const localInRange = Boolean(
-      order.fulfillment_method === "delivery"
+      isCod
+        && order.fulfillment_method === "delivery"
         && sameMunicipality
         && distanceKm !== null
         && distanceKm <= meetupRangeKm
@@ -148,7 +169,7 @@ async function ensureOrderColumns() {
        FROM INFORMATION_SCHEMA.COLUMNS
        WHERE TABLE_SCHEMA = DATABASE()
          AND TABLE_NAME = 'orders'
-         AND COLUMN_NAME IN ('tracking_number', 'fulfillment_method', 'delivery_address', 'delivery_latitude', 'delivery_longitude', 'delivery_municipality', 'delivery_province', 'delivery_region', 'delivery_postal_code', 'delivery_place_id', 'delivery_landmark', 'delivery_notes', 'meeting_place', 'meeting_latitude', 'meeting_longitude', 'meetup_date', 'meetup_time', 'meetup_confirmation_status', 'meetup_confirmed_at', 'meetup_customer_note', 'meetup_24h_reminder_sent_at', 'meetup_1h_reminder_sent_at', 'subtotal_amount', 'coupon_discount', 'sale_discount', 'shipping_fee', 'shipping_zone', 'shipping_distance_km', 'shipping_rule', 'coupon_code', 'payment_status', 'payment_reference', 'transaction_id', 'paid_at', 'payment_provider', 'checkout_session_id', 'checkout_url', 'order_channel', 'cash_received', 'change_amount', 'pos_cashier_id')`
+         AND COLUMN_NAME IN ('tracking_number', 'fulfillment_method', 'delivery_address', 'delivery_latitude', 'delivery_longitude', 'delivery_municipality', 'delivery_province', 'delivery_region', 'delivery_postal_code', 'delivery_place_id', 'delivery_landmark', 'delivery_notes', 'meeting_place', 'meeting_latitude', 'meeting_longitude', 'meetup_date', 'meetup_time', 'meetup_confirmation_status', 'meetup_confirmed_at', 'meetup_customer_note', 'meetup_admin_note', 'meetup_24h_reminder_sent_at', 'meetup_1h_reminder_sent_at', 'subtotal_amount', 'coupon_discount', 'sale_discount', 'shipping_fee', 'shipping_zone', 'shipping_distance_km', 'shipping_rule', 'coupon_code', 'payment_status', 'payment_reference', 'transaction_id', 'paid_at', 'payment_provider', 'checkout_session_id', 'checkout_url', 'order_channel', 'cash_received', 'change_amount', 'pos_cashier_id')`
     );
     const columns = new Set(rows.map((row) => row.COLUMN_NAME));
     await safeModifyColumn("orders", "status", "status enum update", "ALTER TABLE orders MODIFY status ENUM('pending','awaiting_payment','paid','approved','processing','ready','completed','cancelled','payment_failed') NOT NULL DEFAULT 'pending'");
@@ -179,7 +200,8 @@ async function ensureOrderColumns() {
     if (!columns.has("meetup_confirmation_status")) await query("ALTER TABLE orders ADD COLUMN meetup_confirmation_status ENUM('pending','agreed','disagreed') NOT NULL DEFAULT 'pending' AFTER meetup_time");
     if (!columns.has("meetup_confirmed_at")) await query("ALTER TABLE orders ADD COLUMN meetup_confirmed_at DATETIME NULL AFTER meetup_confirmation_status");
     if (!columns.has("meetup_customer_note")) await query("ALTER TABLE orders ADD COLUMN meetup_customer_note VARCHAR(500) NULL AFTER meetup_confirmed_at");
-    if (!columns.has("meetup_24h_reminder_sent_at")) await query("ALTER TABLE orders ADD COLUMN meetup_24h_reminder_sent_at DATETIME NULL AFTER meetup_customer_note");
+    if (!columns.has("meetup_admin_note")) await query("ALTER TABLE orders ADD COLUMN meetup_admin_note VARCHAR(500) NULL AFTER meetup_customer_note");
+    if (!columns.has("meetup_24h_reminder_sent_at")) await query("ALTER TABLE orders ADD COLUMN meetup_24h_reminder_sent_at DATETIME NULL AFTER meetup_admin_note");
     if (!columns.has("meetup_1h_reminder_sent_at")) await query("ALTER TABLE orders ADD COLUMN meetup_1h_reminder_sent_at DATETIME NULL AFTER meetup_24h_reminder_sent_at");
     if (!columns.has("subtotal_amount")) await query("ALTER TABLE orders ADD COLUMN subtotal_amount DECIMAL(10,2) NOT NULL DEFAULT 0 AFTER fulfillment_method");
     if (!columns.has("coupon_discount")) await query("ALTER TABLE orders ADD COLUMN coupon_discount DECIMAL(10,2) NOT NULL DEFAULT 0 AFTER subtotal_amount");
@@ -242,6 +264,7 @@ router.get("/", requireAuth, requireApproved, asyncHandler(async (req, res) => {
     o.meetup_confirmation_status,
     o.meetup_confirmed_at,
     o.meetup_customer_note,
+    o.meetup_admin_note,
     o.meetup_24h_reminder_sent_at,
     o.meetup_1h_reminder_sent_at,
     o.subtotal_amount,
@@ -322,6 +345,7 @@ GROUP BY
     o.meetup_confirmation_status,
     o.meetup_confirmed_at,
     o.meetup_customer_note,
+    o.meetup_admin_note,
     o.meetup_24h_reminder_sent_at,
     o.meetup_1h_reminder_sent_at,
     o.subtotal_amount,
@@ -353,7 +377,7 @@ router.get("/:id/items", requireAuth, requireApproved, asyncHandler(async (req, 
        o.delivery_longitude, o.delivery_municipality, o.delivery_province, o.delivery_region,
        o.delivery_postal_code, o.delivery_place_id, o.delivery_landmark, o.delivery_notes,
        o.meeting_place, o.meeting_latitude, o.meeting_longitude, o.meetup_date, o.meetup_time,
-       o.meetup_confirmation_status, o.meetup_confirmed_at, o.meetup_customer_note,
+       o.meetup_confirmation_status, o.meetup_confirmed_at, o.meetup_customer_note, o.meetup_admin_note,
        o.meetup_24h_reminder_sent_at, o.meetup_1h_reminder_sent_at, o.subtotal_amount, o.coupon_discount,
        o.sale_discount, o.shipping_fee, o.shipping_zone, o.shipping_distance_km, o.shipping_rule,
        o.coupon_code, o.total_amount, o.checkout_url, o.created_at,
@@ -859,21 +883,17 @@ router.patch("/:id/meeting-place", requireAuth, requireRole("admin"), asyncHandl
     meetingLatitude: nullableCoordinate(-90, 90),
     meetingLongitude: nullableCoordinate(-180, 180),
     meetupDate: z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/, "Meetup date is required."),
-    meetupTime: z.string().trim().regex(/^\d{2}:\d{2}$/, "Meetup time is required.")
+    meetupTime: z.string().trim().regex(/^\d{2}:\d{2}$/, "Meetup time is required."),
+    meetupNote: z.string().trim().max(500).optional().default("")
   });
   const input = schema.parse(req.body);
-  if (Number.isNaN(new Date(`${input.meetupDate}T00:00:00Z`).getTime())) {
-    throw new HttpError(400, "Meetup date is invalid.");
-  }
-  const [hours, minutes] = input.meetupTime.split(":").map(Number);
-  if (hours > 23 || minutes > 59) throw new HttpError(400, "Meetup time is invalid.");
-  const meetupDateTime = new Date(`${input.meetupDate}T${input.meetupTime}:00`);
-  if (Number.isNaN(meetupDateTime.getTime()) || meetupDateTime.getTime() <= Date.now()) {
+  const meetupDateTime = parseMeetupDateTimeManila(input.meetupDate, input.meetupTime);
+  if (!meetupDateTime || meetupDateTime.getTime() <= Date.now()) {
     throw new HttpError(400, "Meetup date and time must be in the future.");
   }
   const orderId = Number(req.params.id);
   if (!Number.isInteger(orderId) || orderId <= 0) throw new HttpError(400, "A valid order ID is required");
-  const orders = await query("SELECT orders.id, orders.user_id, orders.status, orders.order_channel, orders.fulfillment_method, orders.delivery_address, orders.delivery_latitude, orders.delivery_longitude, orders.delivery_municipality, orders.meeting_latitude, orders.meeting_longitude, users.location FROM orders LEFT JOIN users ON users.id = orders.user_id WHERE orders.id = :id", { id: orderId });
+  const orders = await query("SELECT orders.id, orders.user_id, orders.status, orders.order_channel, orders.payment_method, orders.fulfillment_method, orders.delivery_address, orders.delivery_latitude, orders.delivery_longitude, orders.delivery_municipality, orders.meeting_latitude, orders.meeting_longitude, users.location FROM orders LEFT JOIN users ON users.id = orders.user_id WHERE orders.id = :id", { id: orderId });
   if (!orders.length) throw new HttpError(404, "Order not found");
   const [decoratedOrder] = await decorateMeetupEligibility(orders);
   if (normalizeOrderStatus(orders[0].status) !== "approved") {
@@ -887,23 +907,24 @@ router.patch("/:id/meeting-place", requireAuth, requireRole("admin"), asyncHandl
   const meetingLongitude = input.meetingLongitude === undefined ? orders[0].meeting_longitude ?? null : input.meetingLongitude;
   const meetupDate = input.meetupDate;
   const meetupTime = input.meetupTime;
-  await query("UPDATE orders SET meeting_place = :meetingPlace, meeting_latitude = :meetingLatitude, meeting_longitude = :meetingLongitude, meetup_date = :meetupDate, meetup_time = :meetupTime, meetup_confirmation_status = 'pending', meetup_confirmed_at = NULL, meetup_customer_note = NULL, meetup_24h_reminder_sent_at = NULL, meetup_1h_reminder_sent_at = NULL WHERE id = :id", { id: orderId, meetingPlace, meetingLatitude, meetingLongitude, meetupDate, meetupTime });
+  const meetupAdminNote = input.meetupNote || null;
+  await query("UPDATE orders SET meeting_place = :meetingPlace, meeting_latitude = :meetingLatitude, meeting_longitude = :meetingLongitude, meetup_date = :meetupDate, meetup_time = :meetupTime, meetup_admin_note = :meetupAdminNote, meetup_confirmation_status = 'pending', meetup_confirmed_at = NULL, meetup_customer_note = NULL, meetup_24h_reminder_sent_at = NULL, meetup_1h_reminder_sent_at = NULL WHERE id = :id", { id: orderId, meetingPlace, meetingLatitude, meetingLongitude, meetupDate, meetupTime, meetupAdminNote });
   if (orders[0].user_id) {
     await query(
       "INSERT INTO notifications (user_id, type, title, body) VALUES (:userId, 'order', 'Meetup schedule proposed', :body)",
       {
         userId: orders[0].user_id,
-        body: `Please review the meetup schedule for Order #${orderId}: ${meetingPlace} on ${meetupDate} at ${meetupTime}.`
+        body: `Please review the meetup schedule for Order #${orderId}: ${meetingPlace} on ${meetupDate} at ${meetupTime}.${meetupAdminNote ? ` Note: ${meetupAdminNote}` : ""}`
       }
     );
-    req.app.get("io")?.to(`user:${orders[0].user_id}`).emit("order:update", { id: orderId, meeting_place: meetingPlace, meeting_latitude: meetingLatitude, meeting_longitude: meetingLongitude, meetup_date: meetupDate, meetup_time: meetupTime, meetup_confirmation_status: "pending", meetup_confirmed_at: null, meetup_customer_note: null, meetup_24h_reminder_sent_at: null, meetup_1h_reminder_sent_at: null });
+    req.app.get("io")?.to(`user:${orders[0].user_id}`).emit("order:update", { id: orderId, meeting_place: meetingPlace, meeting_latitude: meetingLatitude, meeting_longitude: meetingLongitude, meetup_date: meetupDate, meetup_time: meetupTime, meetup_admin_note: meetupAdminNote, meetup_confirmation_status: "pending", meetup_confirmed_at: null, meetup_customer_note: null, meetup_24h_reminder_sent_at: null, meetup_1h_reminder_sent_at: null });
     req.app.get("io")?.to(`user:${orders[0].user_id}`).emit("notification:new", {
       type: "order",
       title: "Meetup schedule proposed",
-      body: `Please review the meetup schedule for Order #${orderId}: ${meetingPlace} on ${meetupDate} at ${meetupTime}.`
+      body: `Please review the meetup schedule for Order #${orderId}: ${meetingPlace} on ${meetupDate} at ${meetupTime}.${meetupAdminNote ? ` Note: ${meetupAdminNote}` : ""}`
     });
   }
-  const meetupPayload = { id: orderId, meeting_place: meetingPlace, meeting_latitude: meetingLatitude, meeting_longitude: meetingLongitude, meetup_date: meetupDate, meetup_time: meetupTime, meetup_confirmation_status: "pending", meetup_confirmed_at: null, meetup_customer_note: null, meetup_24h_reminder_sent_at: null, meetup_1h_reminder_sent_at: null };
+  const meetupPayload = { id: orderId, meeting_place: meetingPlace, meeting_latitude: meetingLatitude, meeting_longitude: meetingLongitude, meetup_date: meetupDate, meetup_time: meetupTime, meetup_admin_note: meetupAdminNote, meetup_confirmation_status: "pending", meetup_confirmed_at: null, meetup_customer_note: null, meetup_24h_reminder_sent_at: null, meetup_1h_reminder_sent_at: null };
   req.app.get("io")?.to("admin").emit("order:update", meetupPayload);
   res.json({ message: "Meetup details saved", ...meetupPayload });
 }));
@@ -914,7 +935,7 @@ router.patch("/:id/meetup-confirmation", requireAuth, requireApproved, asyncHand
   const orderId = Number(req.params.id);
   if (!Number.isInteger(orderId) || orderId <= 0) throw new HttpError(400, "A valid order ID is required");
   const orders = await query(
-    `SELECT o.id, o.user_id, o.status, o.fulfillment_method, o.delivery_address, o.delivery_latitude, o.delivery_longitude, o.delivery_municipality, o.meeting_place, o.meetup_date, o.meetup_time,
+    `SELECT o.id, o.user_id, o.status, o.payment_method, o.fulfillment_method, o.delivery_address, o.delivery_latitude, o.delivery_longitude, o.delivery_municipality, o.meeting_place, o.meetup_date, o.meetup_time,
             o.meetup_confirmation_status, o.meetup_confirmed_at, o.meetup_customer_note, u.location
      FROM orders o LEFT JOIN users u ON u.id = o.user_id
      WHERE o.id = :id AND o.user_id = :userId LIMIT 1`,
@@ -932,7 +953,9 @@ router.patch("/:id/meetup-confirmation", requireAuth, requireApproved, asyncHand
   const confirmedAt = input.decision === "agreed" ? new Date() : null;
   await query("UPDATE orders SET meetup_confirmation_status = :status, meetup_confirmed_at = :confirmedAt, meetup_customer_note = :note WHERE id = :id AND user_id = :userId", { id: orderId, userId: req.user.id, status: input.decision, confirmedAt, note });
   const title = input.decision === "agreed" ? "Meetup schedule confirmed" : "Meetup schedule declined";
-  const body = input.decision === "agreed" ? `Customer confirmed the meetup schedule for Order #${orderId}.` : `Customer declined the meetup schedule for Order #${orderId}.`;
+  const body = input.decision === "agreed"
+    ? `Customer confirmed the meetup schedule for Order #${orderId}.`
+    : `Customer declined the meetup schedule for Order #${orderId}.${note ? ` Reason: ${note}` : ""}`;
   await query("INSERT INTO notifications (type, title, body) VALUES ('order', :title, :body)", { title, body });
   const payload = { id: orderId, meetup_confirmation_status: input.decision, meetup_confirmed_at: confirmedAt, meetup_customer_note: note };
   req.app.get("io")?.to("admin").emit("order:update", payload);

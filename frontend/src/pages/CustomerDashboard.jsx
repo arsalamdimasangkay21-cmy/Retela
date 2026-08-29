@@ -48,6 +48,7 @@ const defaultReturnShippingFee = 50;
 const customerShopPageSize = 8;
 const defaultCustomerFilters = { search: "", brand: "all", category: "all", size: "all", stock: "all", minPrice: "", maxPrice: "", sortBy: "latest" };
 const defaultDeliverySafetyPolicy = "For everyone's safety, customers and delivery personnel should meet only at the confirmed delivery or meeting location shown in the order. Verify the order and customer/delivery identity before handing over or accepting an item. Avoid changing the meetup location through unofficial messages. Keep communication inside RETELA whenever possible. Do not share OTPs, passwords, or sensitive account information. If the location feels unsafe, contact the other party through RETELA and arrange a safer public meeting point before completing the order.";
+const meetupCashOnDeliveryPolicy = "For your safety and convenience, please review the meeting place, date, and time selected by RETELA. Confirm the schedule only if you are available and comfortable with the location.\n\nPlease prepare the correct payment amount and verify your order before completing the transaction. Meet only at the location displayed in your official RETELA order details. If you cannot attend or have concerns about the location, select ‘Cannot Confirm’ so the administrator can arrange another schedule. Never share your password, OTP, or sensitive account information.";
 const onlinePaymentOrderPolicy = "To protect both the customer and RETELA, orders using online payment will be reviewed only after successful payment has been verified. Please confirm your selected items, delivery address, contact details, and total amount before completing your payment. Order acceptance is subject to payment verification and product availability. If payment cannot be verified or an item becomes unavailable, RETELA will contact you and provide the appropriate assistance or refund option. Please keep your official payment receipt for reference.";
 const codOrderPolicy = "Cash on Delivery orders are subject to product availability and delivery-area verification. Please prepare the exact payment amount and ensure that someone is available at the confirmed delivery address to receive and pay for the order. RETELA may contact you to verify your order before acceptance. Repeated refusal, failure to receive an order, or providing incorrect delivery information may affect future COD availability.";
 const paymentNumberLabels = {
@@ -1214,7 +1215,6 @@ export default function CustomerDashboard({ active, onChange }) {
       profile={profile}
       reviews={reviews}
       returnRequests={returnRequests}
-      deliverySafetyPolicy={deliverySafetyPolicyFromShop(shopInfo)}
       onNavigate={onChange}
       onPaymentUpdated={applyPaymentOrderUpdate}
         onMeetupConfirmation={confirmMeetup}
@@ -1439,7 +1439,7 @@ function CartPage({
             <button type="button" className="rounded-xl border border-amber-300 bg-white px-3 py-1.5 text-xs" onClick={retryShippingQuote}>Retry</button>
           </div>
         ) : null}
-        {deliverySafetyEligible ? <DeliverySafetyPolicyCard policy={deliverySafetyPolicy} compact /> : null}
+        {deliverySafetyEligible && paymentMethod === "cod" ? <DeliverySafetyPolicyCard policy={deliverySafetyPolicy} compact /> : null}
         <PaymentOrderConfirmationPolicy
           paymentMethod={paymentMethod}
           accepted={policyAccepted}
@@ -1454,13 +1454,13 @@ function CartPage({
   );
 }
 
-function DeliverySafetyPolicyCard({ policy, compact = false }) {
+function DeliverySafetyPolicyCard({ policy, compact = false, title = "Delivery & Meetup Safety" }) {
   return (
     <section className={`retela-delivery-safety-card ${compact ? "is-compact" : ""}`}>
       <div className="flex items-start gap-3">
         <span className="retela-delivery-safety-icon"><ShieldCheck size={17} /></span>
         <div className="min-w-0">
-          <p className="retela-modal-eyebrow">Delivery & Meetup Safety</p>
+          <p className="retela-modal-eyebrow">{title}</p>
           <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6">{policy || defaultDeliverySafetyPolicy}</p>
         </div>
       </div>
@@ -2254,7 +2254,7 @@ function CheckoutSummaryModal({ items, pricing, paymentMethod, paymentDetails, p
           {deliveryAreaText(shippingQuote) ? <p className="mt-1 text-xs font-bold text-neonbrand">Delivery Area: {deliveryAreaText(shippingQuote)}</p> : null}
           {shippingQuote?.reason ? <p className="mt-1 text-xs font-semibold text-white/70">Reason: {shippingQuote.reason}</p> : null}
         </div>
-        {deliverySafetyEligible ? <DeliverySafetyPolicyCard policy={deliverySafetyPolicy} compact /> : null}
+        {deliverySafetyEligible && paymentMethod === "cod" ? <DeliverySafetyPolicyCard policy={deliverySafetyPolicy} compact /> : null}
 
         <div className="mt-5 rounded-2xl border border-neonbrand/15 bg-neonbrand/5 p-4">
           <p className="text-xs font-bold uppercase tracking-[0.16em] text-neonbrand/75">Selected Payment Method</p>
@@ -2731,7 +2731,7 @@ function formatNotificationDate(value) {
   return date.toLocaleString(undefined, { month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
-function Orders({ rows, profile, reviews = [], returnRequests = [], deliverySafetyPolicy, onNavigate, onOrderCancelled, onMeetupConfirmation, onQrPayment, onPaymentUpdated }) {
+function Orders({ rows, profile, reviews = [], returnRequests = [], onNavigate, onOrderCancelled, onMeetupConfirmation, onQrPayment, onPaymentUpdated }) {
   const flow = ["pending", "awaiting_payment", "paid", "processing", "completed"];
   const [selectedOrderId, setSelectedOrderId] = useState(null);
   const [selectedOrder, setSelectedOrder] = useState(null);
@@ -2956,7 +2956,7 @@ function Orders({ rows, profile, reviews = [], returnRequests = [], deliverySafe
         </div>
       );})}
       <AnimatePresence>
-        {selectedOrderId ? <CustomerOrderModal loading={loading} selectedOrder={selectedOrder} displayNumber={rows.length - rows.findIndex((item) => item.id === selectedOrderId)} deliverySafetyPolicy={deliverySafetyPolicy} onPay={payOrder} payingOrderId={payingOrderId} onMeetupConfirmation={async (...args) => { const data = await onMeetupConfirmation?.(...args); if (data) setSelectedOrder((current) => current?.order ? { ...current, order: { ...current.order, ...data } } : current); return data; }} onClose={() => setSelectedOrderId(null)} /> : null}
+        {selectedOrderId ? <CustomerOrderModal loading={loading} selectedOrder={selectedOrder} onPay={payOrder} payingOrderId={payingOrderId} onMeetupConfirmation={async (...args) => { const data = await onMeetupConfirmation?.(...args); if (data) setSelectedOrder((current) => current?.order ? { ...current, order: { ...current.order, ...data } } : current); return data; }} onClose={() => setSelectedOrderId(null)} /> : null}
         {cancelDialogOrder ? (
           <CancelOrderDialog
             order={cancelDialogOrder}
@@ -2971,13 +2971,14 @@ function Orders({ rows, profile, reviews = [], returnRequests = [], deliverySafe
   );
 }
 
-function CustomerOrderModal({ loading, selectedOrder, displayNumber, deliverySafetyPolicy, onPay, payingOrderId, onMeetupConfirmation, onClose }) {
+function CustomerOrderModal({ loading, selectedOrder, onPay, payingOrderId, onMeetupConfirmation, onClose }) {
   const order = selectedOrder?.order;
   const cancelled = isOrderCancelled(order);
   const meetingPlace = String(order?.meeting_place || "").trim();
   const meetupHasSchedule = Boolean(meetingPlace || order?.meetup_date || order?.meetup_time);
   const activeMeetupStatus = ["approved", "processing", "ready", "completed"].includes(normalizeOrderStatus(order?.status));
-  const showMeetupDetails = Boolean(order?.meetup_area_eligible && activeMeetupStatus && (order?.meetup_eligible || meetupHasSchedule));
+  const codOrder = ["cod", "cash", "cash_on_delivery"].includes(String(order?.payment_method || "").trim().toLowerCase());
+  const showMeetupDetails = Boolean(codOrder && order?.meetup_area_eligible && activeMeetupStatus && meetupHasSchedule);
   const confirmationStatus = String(order?.meetup_confirmation_status || "pending").toLowerCase();
   const [confirmationStep, setConfirmationStep] = useState(null);
   const [meetupNote, setMeetupNote] = useState("");
@@ -3018,7 +3019,7 @@ function CustomerOrderModal({ loading, selectedOrder, displayNumber, deliverySaf
               <div className="retela-modal-header">
                 <div>
                   <p className="retela-modal-eyebrow">Order Details</p>
-                  <h3 id="customer-order-details-title" className="retela-modal-title">My Order #{displayNumber}</h3>
+                  <h3 id="customer-order-details-title" className="retela-modal-title">My Order {orderNumber(order)}</h3>
                   <p className="retela-modal-subtitle">Created {new Date(order.created_at).toLocaleString()}</p>
                 </div>
                 <span className={`rounded-full border px-4 py-2 text-sm font-bold ${customerOrderStatusClass(order.status)}`}>{customerOrderStatus(order.status)}</span>
@@ -3044,17 +3045,29 @@ function CustomerOrderModal({ loading, selectedOrder, displayNumber, deliverySaf
                     <p>Meeting place will be provided by the shop.</p>
                   )}
                   <div className="mt-3 border-t border-emerald-100 pt-3">
-                    <p className="retela-modal-eyebrow">Meetup Date &amp; Time</p>
-                    <p>{order.meetup_date ? formatMeetupDate(order.meetup_date) : "Meetup date will be provided by the shop."}{order.meetup_time ? ` • ${formatMeetupTime(order.meetup_time)}` : ""}</p>
+                   <p className="retela-modal-eyebrow">Meetup Date &amp; Time</p>
+                   <p>{order.meetup_date ? formatMeetupDate(order.meetup_date) : "Meetup date will be provided by the shop."}{order.meetup_time ? ` • ${formatMeetupTime(order.meetup_time)}` : ""}</p>
+                   {order.meetup_admin_note ? <p className="mt-2 whitespace-pre-wrap break-words text-sm text-slate-600">Note from RETELA: {order.meetup_admin_note}</p> : null}
                   </div>
                   {meetingPlace || order.meetup_date || order.meetup_time ? (
-                    <div className="retela-meetup-confirmation">
+                    <div className="retela-meetup-confirmation retela-meetup-confirmation-legacy" aria-hidden="true">
                       <p className="retela-modal-eyebrow">Customer Confirmation</p>
                       {confirmationStatus === "agreed" ? <p className="retela-meetup-confirmed">✓ Meetup Confirmed</p> : confirmationStatus === "disagreed" ? <><p className="retela-meetup-declined">Schedule declined</p><p>The shop will need to propose another meetup schedule.</p><button type="button" onClick={messageShop} className="retela-meeting-place-action"><MessageCircle size={15} /> Message Shop</button></> : confirmationStep === "agree" ? <div className="grid gap-2"><p>The shop proposed this meetup schedule.</p><p className="font-bold text-slate-800">Confirm this meetup schedule?</p><div className="flex flex-wrap gap-2"><button type="button" disabled={confirmationSaving} onClick={() => submitMeetupConfirmation("agreed")} className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-bold text-white">{confirmationSaving ? "Saving..." : "Confirm"}</button><button type="button" onClick={() => setConfirmationStep(null)} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-bold text-slate-700">Cancel</button></div></div> : confirmationStep === "disagree" ? <div className="grid gap-2"><p>Tell the shop why this schedule does not work (optional).</p><textarea value={meetupNote} onChange={(event) => setMeetupNote(event.target.value)} maxLength={500} rows={2} placeholder="I am not available at this time." className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900" /><div className="flex flex-wrap gap-2"><button type="button" disabled={confirmationSaving} onClick={() => submitMeetupConfirmation("disagreed")} className="rounded-xl bg-rose-600 px-3 py-2 text-xs font-bold text-white">{confirmationSaving ? "Saving..." : "Decline Schedule"}</button><button type="button" onClick={() => setConfirmationStep(null)} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-bold text-slate-700">Cancel</button></div></div> : <><p>The shop proposed this meetup schedule.</p><div className="flex flex-wrap gap-2"><button type="button" onClick={() => setConfirmationStep("agree")} className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-bold text-white">Agree</button><button type="button" onClick={() => setConfirmationStep("disagree")} className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700">Disagree</button></div></>}
                     </div>
                   ) : null}
+                  {meetingPlace || order.meetup_date || order.meetup_time ? <p className="retela-modal-eyebrow">Customer Confirmation</p> : null}
+                  {meetingPlace || order.meetup_date || order.meetup_time ? <MeetupConfirmationPanel
+                    status={confirmationStatus}
+                    step={confirmationStep}
+                    setStep={setConfirmationStep}
+                    meetupNote={meetupNote}
+                    setMeetupNote={setMeetupNote}
+                    saving={confirmationSaving}
+                    onSubmit={submitMeetupConfirmation}
+                    onMessageShop={messageShop}
+                  /> : null}
                 </section> : null}
-                {order.meetup_area_eligible ? <DeliverySafetyPolicyCard policy={deliverySafetyPolicy} /> : null}
+                {showMeetupDetails ? <DeliverySafetyPolicyCard policy={meetupCashOnDeliveryPolicy} title="Meetup and Cash on Delivery Policy" /> : null}
                 <div className="grid gap-2">
                   <p className="retela-modal-eyebrow">Items</p>
                   {selectedOrder.items.map((item) => (
@@ -3113,6 +3126,51 @@ function CancelOrderDialog({ order, cancelling, onClose, onConfirm }) {
         </div>
       </motion.div>
     </motion.div>
+  );
+}
+
+function MeetupConfirmationPanel({ status, step, setStep, meetupNote, setMeetupNote, saving, onSubmit, onMessageShop }) {
+  if (status === "agreed") {
+    return <p className="retela-meetup-confirmed">✓ You confirmed this meetup schedule.</p>;
+  }
+  if (status === "disagreed") {
+    return (
+      <div className="retela-meetup-response-message">
+        <p className="retela-meetup-declined">Your response was sent.</p>
+        <p>RETELA will contact you to arrange another schedule.</p>
+        <button type="button" onClick={onMessageShop} className="retela-meeting-place-action"><MessageCircle size={15} /> Message Shop</button>
+      </div>
+    );
+  }
+  if (step === "agree") {
+    return (
+      <div className="grid gap-2">
+        <p>The shop proposed this meetup schedule.</p>
+        <p className="font-bold text-slate-800">Confirm this meetup schedule?</p>
+        <div className="flex flex-wrap gap-2">
+          <button type="button" disabled={saving} onClick={() => onSubmit("agreed")} className="retela-meetup-confirm-button">{saving ? "Saving..." : "Confirm Meetup"}</button>
+          <button type="button" onClick={() => setStep(null)} className="retela-meetup-cancel-button">Cancel</button>
+        </div>
+      </div>
+    );
+  }
+  if (step === "disagree") {
+    return (
+      <div className="grid gap-2">
+        <p>Tell the shop why this schedule does not work (optional).</p>
+        <textarea value={meetupNote} onChange={(event) => setMeetupNote(event.target.value)} maxLength={500} rows={2} placeholder="I am not available at this time." className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900" />
+        <div className="flex flex-wrap gap-2">
+          <button type="button" disabled={saving} onClick={() => onSubmit("disagreed")} className="retela-meetup-decline-button">{saving ? "Saving..." : "Send Cannot Confirm"}</button>
+          <button type="button" onClick={() => setStep(null)} className="retela-meetup-cancel-button">Cancel</button>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="flex flex-wrap gap-2">
+      <button type="button" onClick={() => setStep("agree")} className="retela-meetup-confirm-button">Confirm Meetup</button>
+      <button type="button" onClick={() => setStep("disagree")} className="retela-meetup-decline-outline">Cannot Confirm</button>
+    </div>
   );
 }
 

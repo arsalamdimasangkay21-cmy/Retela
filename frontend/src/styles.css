@@ -7528,6 +7528,43 @@ button {
 
 .retela-meetup-confirmed { color: #08764d; font-weight: 850; }
 .retela-meetup-declined { color: #b42318; font-weight: 850; }
+.retela-meetup-confirmation-legacy { display: none !important; }
+.retela-meetup-response-message { display: grid; gap: 6px; color: #52645a; font-size: 0.9rem; line-height: 1.5; }
+.retela-meetup-confirm-button,
+.retela-meetup-decline-button,
+.retela-meetup-cancel-button,
+.retela-meetup-decline-outline {
+  display: inline-flex;
+  min-height: 42px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  padding: 9px 14px;
+  font-size: 0.82rem;
+  font-weight: 850;
+  white-space: nowrap;
+  transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease, transform 160ms ease;
+}
+.retela-meetup-confirm-button {
+  border: 1px solid #0b8f59;
+  background: #08764d;
+  color: #ffffff;
+}
+.retela-meetup-confirm-button:hover { background: #065f46; }
+.retela-meetup-decline-outline,
+.retela-meetup-decline-button {
+  border: 1px solid #e7b5b0;
+  background: #fff8f7;
+  color: #a32920;
+}
+.retela-meetup-decline-outline:hover,
+.retela-meetup-decline-button:hover { border-color: #d9776c; background: #fff1ef; }
+.retela-meetup-cancel-button {
+  border: 1px solid #d5e1da;
+  background: #ffffff;
+  color: #355449;
+}
+.retela-meetup-cancel-button:hover { background: #effaf3; }
 
 .retela-inline-route {
   display: grid;
@@ -11141,6 +11178,44 @@ button {
   border-color: rgba(52, 211, 153, 0.28);
   background: rgba(22, 163, 106, 0.12);
   color: var(--retela-text-dark);
+}
+
+.retela-dark .retela-meetup-response-message,
+.premium-shell.retela-dark-shell .retela-meetup-response-message {
+  color: var(--retela-text-muted-dark) !important;
+}
+
+.retela-dark .retela-meetup-confirmed,
+.premium-shell.retela-dark-shell .retela-meetup-confirmed {
+  color: #86efac !important;
+}
+
+.retela-dark .retela-meetup-declined,
+.premium-shell.retela-dark-shell .retela-meetup-declined {
+  color: #fda4af !important;
+}
+
+.retela-dark .retela-meetup-confirm-button,
+.premium-shell.retela-dark-shell .retela-meetup-confirm-button {
+  border-color: rgba(134, 239, 172, 0.52) !important;
+  background: #159b63 !important;
+  color: #ffffff !important;
+}
+
+.retela-dark .retela-meetup-decline-outline,
+.retela-dark .retela-meetup-decline-button,
+.premium-shell.retela-dark-shell .retela-meetup-decline-outline,
+.premium-shell.retela-dark-shell .retela-meetup-decline-button {
+  border-color: rgba(251, 113, 133, 0.5) !important;
+  background: rgba(190, 24, 93, 0.16) !important;
+  color: #fecdd3 !important;
+}
+
+.retela-dark .retela-meetup-cancel-button,
+.premium-shell.retela-dark-shell .retela-meetup-cancel-button {
+  border-color: var(--retela-border-dark) !important;
+  background: rgba(255, 255, 255, 0.05) !important;
+  color: var(--retela-text-dark) !important;
 }
 
 .retela-dark .retela-route-marker.is-customer,

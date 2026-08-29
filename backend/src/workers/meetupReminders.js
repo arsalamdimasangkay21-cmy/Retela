@@ -1,9 +1,33 @@
 import { query } from "../config/db.js";
 import { loadSystemSettings } from "../utils/systemSettings.js";
+import { getShippingPolicy } from "../utils/shippingSettings.js";
+import { haversineDistanceKm, normalizeMunicipality, validCoordinates } from "../utils/shippingCalculator.js";
 
 const TIME_ZONE = "Asia/Manila";
 const CHECK_INTERVAL_MS = 5 * 60 * 1000;
 let columnsReady;
+
+function addressMatchesMunicipality(address, municipality) {
+  const target = normalizeMunicipality(municipality);
+  const source = normalizeMunicipality(address);
+  if (!target || !source) return false;
+  const segments = source.split(/\s*,\s*/).map((part) => part.trim()).filter(Boolean);
+  if (segments.includes(target)) return true;
+  const escaped = target.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(?:^|\\s)${escaped}(?:$|\\s)`, "i").test(source);
+}
+
+function isEligibleLocalCodMeetup(order, shopMunicipality, shopCoordinates, meetupRangeKm) {
+  const method = String(order.payment_method || "").trim().toLowerCase();
+  if (!(method === "cod" || method === "cash" || method === "cash_on_delivery") || order.fulfillment_method !== "delivery") return false;
+  const municipality = normalizeMunicipality(order.delivery_municipality);
+  const sameMunicipality = municipality
+    ? municipality === normalizeMunicipality(shopMunicipality)
+    : addressMatchesMunicipality(order.delivery_address, shopMunicipality);
+  if (!sameMunicipality || !validCoordinates(order.delivery_latitude, order.delivery_longitude) || !validCoordinates(shopCoordinates.latitude, shopCoordinates.longitude)) return false;
+  const distance = haversineDistanceKm(shopCoordinates, { latitude: order.delivery_latitude, longitude: order.delivery_longitude });
+  return distance !== null && distance <= meetupRangeKm;
+}
 
 async function ensureReminderColumns() {
   columnsReady ||= (async () => {
@@ -77,11 +101,20 @@ async function sendReminder(order, kind, meetupAt, io) {
 
 export async function runMeetupReminderCheck(io) {
   await ensureReminderColumns();
-  const { config } = await loadSystemSettings();
+  const [{ config }, shippingPolicy] = await Promise.all([loadSystemSettings(), getShippingPolicy()]);
   const settings = config.notifications || {};
+  const shopMunicipality = shippingPolicy.shopMunicipality || config.general.shopMunicipality;
+  const shopCoordinates = {
+    latitude: shippingPolicy.shopLatitude ?? config.general.shopLatitude,
+    longitude: shippingPolicy.shopLongitude ?? config.general.shopLongitude
+  };
+  const configuredRange = Number(shippingPolicy.freeDeliveryRadiusKm ?? config.payment.freeDeliveryRadiusKm ?? 15);
+  const meetupRangeKm = Number.isFinite(configuredRange) ? Math.max(0, configuredRange) : 15;
   const now = new Date();
   const orders = await query(
-    `SELECT o.id, o.user_id, o.status, o.meeting_place,
+    `SELECT o.id, o.user_id, o.status, o.payment_method, o.fulfillment_method,
+            o.delivery_address, o.delivery_latitude, o.delivery_longitude, o.delivery_municipality,
+            o.meeting_place,
             DATE_FORMAT(o.meetup_date, '%Y-%m-%d') AS meetup_date,
             TIME_FORMAT(o.meetup_time, '%H:%i') AS meetup_time,
             o.meetup_confirmation_status, o.meetup_24h_reminder_sent_at, o.meetup_1h_reminder_sent_at,
@@ -92,6 +125,7 @@ export async function runMeetupReminderCheck(io) {
        AND o.status NOT IN ('completed', 'cancelled', 'payment_failed', 'returned', 'rejected')`
   );
   for (const order of orders) {
+    if (!isEligibleLocalCodMeetup(order, shopMunicipality, shopCoordinates, meetupRangeKm)) continue;
     const meetupAt = meetupDateInManila(order.meetup_date, order.meetup_time);
     if (!meetupAt || meetupAt <= now) continue;
     if (settings.meetup24HourReminder !== false && !order.meetup_24h_reminder_sent_at && now >= new Date(meetupAt.getTime() - 24 * 60 * 60 * 1000)) {

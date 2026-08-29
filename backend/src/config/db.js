@@ -763,6 +763,17 @@ async function ensureCoreTables() {
       delivery_place_id VARCHAR(255) NULL,
       delivery_landmark VARCHAR(255) NULL,
       delivery_notes TEXT NULL,
+      meeting_place VARCHAR(500) NULL,
+      meeting_latitude DECIMAL(10,7) NULL,
+      meeting_longitude DECIMAL(10,7) NULL,
+      meetup_date DATE NULL,
+      meetup_time TIME NULL,
+      meetup_confirmation_status ENUM('pending','agreed','disagreed') NOT NULL DEFAULT 'pending',
+      meetup_confirmed_at DATETIME NULL,
+      meetup_customer_note VARCHAR(500) NULL,
+      meetup_admin_note VARCHAR(500) NULL,
+      meetup_24h_reminder_sent_at DATETIME NULL,
+      meetup_1h_reminder_sent_at DATETIME NULL,
       subtotal_amount DECIMAL(10,2) NOT NULL DEFAULT 0,
       coupon_discount DECIMAL(10,2) NOT NULL DEFAULT 0,
       sale_discount DECIMAL(10,2) NOT NULL DEFAULT 0,
@@ -809,6 +820,17 @@ async function ensureCoreTables() {
   await ensureColumn("orders", "delivery_place_id", "delivery_place_id VARCHAR(255) NULL AFTER delivery_postal_code");
   await ensureColumn("orders", "delivery_landmark", "delivery_landmark VARCHAR(255) NULL AFTER delivery_longitude");
   await ensureColumn("orders", "delivery_notes", "delivery_notes TEXT NULL AFTER delivery_landmark");
+  await ensureColumn("orders", "meeting_place", "meeting_place VARCHAR(500) NULL AFTER delivery_notes");
+  await ensureColumn("orders", "meeting_latitude", "meeting_latitude DECIMAL(10,7) NULL AFTER meeting_place");
+  await ensureColumn("orders", "meeting_longitude", "meeting_longitude DECIMAL(10,7) NULL AFTER meeting_latitude");
+  await ensureColumn("orders", "meetup_date", "meetup_date DATE NULL AFTER meeting_longitude");
+  await ensureColumn("orders", "meetup_time", "meetup_time TIME NULL AFTER meetup_date");
+  await ensureColumn("orders", "meetup_confirmation_status", "meetup_confirmation_status ENUM('pending','agreed','disagreed') NOT NULL DEFAULT 'pending' AFTER meetup_time");
+  await ensureColumn("orders", "meetup_confirmed_at", "meetup_confirmed_at DATETIME NULL AFTER meetup_confirmation_status");
+  await ensureColumn("orders", "meetup_customer_note", "meetup_customer_note VARCHAR(500) NULL AFTER meetup_confirmed_at");
+  await ensureColumn("orders", "meetup_admin_note", "meetup_admin_note VARCHAR(500) NULL AFTER meetup_customer_note");
+  await ensureColumn("orders", "meetup_24h_reminder_sent_at", "meetup_24h_reminder_sent_at DATETIME NULL AFTER meetup_admin_note");
+  await ensureColumn("orders", "meetup_1h_reminder_sent_at", "meetup_1h_reminder_sent_at DATETIME NULL AFTER meetup_24h_reminder_sent_at");
   await ensureColumn("orders", "subtotal_amount", "subtotal_amount DECIMAL(10,2) NOT NULL DEFAULT 0 AFTER fulfillment_method");
   await ensureColumn("orders", "coupon_discount", "coupon_discount DECIMAL(10,2) NOT NULL DEFAULT 0 AFTER subtotal_amount");
   await ensureColumn("orders", "sale_discount", "sale_discount DECIMAL(10,2) NOT NULL DEFAULT 0 AFTER coupon_discount");
