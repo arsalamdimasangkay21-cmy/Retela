@@ -3819,7 +3819,14 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
       || source?.meetup_24h_reminder_sent_at
       || source?.meetup_1h_reminder_sent_at
   );
-  const showMeetupDetails = Boolean(source?.meetup_eligible || hasMeetupData);
+  const acceptedForMeetup = displayFulfillmentStatus(source) === "approved";
+  const activeMeetupStatus = ["approved", "processing", "ready", "completed"].includes(displayFulfillmentStatus(source));
+  const meetupScheduleSaved = Boolean(source?.meeting_place && source?.meetup_date && source?.meetup_time);
+  const showMeetupDetails = Boolean(source?.meetup_area_eligible && activeMeetupStatus && (acceptedForMeetup || hasMeetupData));
+  const showMeetupEditor = Boolean(source?.meetup_eligible && acceptedForMeetup);
+  const meetupNeedsSchedule = Boolean(source?.meetup_area_eligible && ["approved", "processing"].includes(displayFulfillmentStatus(source)) && !meetupScheduleSaved);
+  const meetupNeedsConfirmation = Boolean(source?.meetup_area_eligible && meetupScheduleSaved && source?.meetup_confirmation_status !== "agreed");
+  const canSendOutForDelivery = ["approved", "processing"].includes(displayFulfillmentStatus(source)) && !meetupNeedsSchedule && !meetupNeedsConfirmation;
   const meetupConfirmation = String(source?.meetup_confirmation_status || "pending").toLowerCase();
   const phoneHref = customerPhone ? customerPhone.replace(/[^\d+]/g, "") : "";
 
@@ -3848,6 +3855,15 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
 
   async function saveMeetingPlace() {
     if (!source?.id || meetingPlaceSaving) return;
+    if (!meetingPlaceDraft.trim() || !meetupDateDraft || !meetupTimeDraft) {
+      setMeetingPlaceError("Meeting place, date, and time are required.");
+      return;
+    }
+    const meetupDateTime = new Date(`${meetupDateDraft}T${meetupTimeDraft}`);
+    if (Number.isNaN(meetupDateTime.getTime()) || meetupDateTime.getTime() <= Date.now()) {
+      setMeetingPlaceError("Choose a future meetup date and time.");
+      return;
+    }
     setMeetingPlaceSaving(true);
     setMeetingPlaceError("");
     try {
@@ -3930,6 +3946,7 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
                   <p className="text-xs font-bold uppercase tracking-[0.16em] text-emerald-700">Meetup Details</p>
                   <h4 className="mt-1 font-display text-lg font-bold text-[#111827]">Admin-selected meeting place and schedule</h4>
                 </div>
+                {showMeetupEditor ? <>
                 <label className="grid gap-1 text-sm font-bold text-slate-700">
                   <span>Meeting Place</span>
                   <textarea
@@ -3956,8 +3973,13 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
                     {meetingPlaceSaving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
                     Save Meetup Details
                   </button>
-                  {source.meeting_place || source.meetup_date || source.meetup_time ? <span className="break-words text-xs font-semibold text-slate-500">Saved: {source.meeting_place || "No meeting place"}{source.meetup_date ? ` · ${formatMeetupDate(source.meetup_date)}` : ""}{source.meetup_time ? ` · ${formatMeetupTime(source.meetup_time)}` : ""}</span> : <span className="text-xs font-semibold text-slate-500">Meeting place and meetup schedule will be provided by the shop.</span>}
+                  {meetupScheduleSaved ? <span className="break-words text-xs font-semibold text-slate-500">Saved: {source.meeting_place}{` · ${formatMeetupDate(source.meetup_date)}`}{` · ${formatMeetupTime(source.meetup_time)}`}</span> : <span className="text-xs font-semibold text-slate-500">Meeting place and meetup schedule will be provided by the shop.</span>}
                 </div>
+                </> : <div className="grid gap-2 rounded-xl border border-emerald-100 bg-emerald-50/50 p-3 text-sm text-slate-700">
+                  <strong className="text-slate-900">Meetup schedule saved</strong>
+                  <span>{source.meeting_place}</span>
+                  <span>{formatMeetupDate(source.meetup_date)} · {formatMeetupTime(source.meetup_time)}</span>
+                </div>}
                 <div className="retela-admin-meetup-response">
                   <p className="text-xs font-bold uppercase tracking-[0.16em] text-emerald-700">Customer Confirmation</p>
                   <p className="mt-1 text-sm font-bold text-slate-700">{meetupConfirmation === "agreed" ? "✓ Agreed" : meetupConfirmation === "disagreed" ? "Disagreed" : "Waiting for customer response"}</p>
@@ -3993,7 +4015,7 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
                 {source.user_id ? <button type="button" onClick={() => onMessageCustomer?.(source)} className="inline-flex items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-xs font-bold text-emerald-800 transition hover:bg-emerald-100"><MessageSquare size={15} /> Message Customer</button> : null}
                 <button disabled={!canAcceptOrder(source)} onClick={() => updateStatus("approved")} className={`rounded-xl px-4 py-2 text-xs font-bold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-55 ${canAcceptOrder(source) ? orderButtonClass("approved") : "bg-slate-100 text-slate-500"}`}>Accept</button>
                 <button disabled={!["pending", "approved", "processing", "ready"].includes(displayFulfillmentStatus(source))} onClick={() => updateStatus("cancelled")} className={`rounded-xl px-4 py-2 text-xs font-bold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-55 ${["pending", "approved", "processing", "ready"].includes(displayFulfillmentStatus(source)) ? orderButtonClass("cancelled") : "bg-slate-100 text-slate-500"}`}>Reject</button>
-                <button disabled={!["approved", "processing"].includes(displayFulfillmentStatus(source))} onClick={() => updateStatus("ready")} className={`rounded-xl px-4 py-2 text-xs font-bold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-55 ${["approved", "processing"].includes(displayFulfillmentStatus(source)) ? orderButtonClass("ready") : "bg-slate-100 text-slate-500"}`}>Out for Delivery</button>
+                <button disabled={!canSendOutForDelivery} onClick={() => updateStatus("ready")} className={`rounded-xl px-4 py-2 text-xs font-bold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-55 ${canSendOutForDelivery ? orderButtonClass("ready") : "bg-slate-100 text-slate-500"}`}>Out for Delivery</button>
                 <button disabled={displayFulfillmentStatus(source) !== "ready"} onClick={() => updateStatus("completed")} className={`rounded-xl px-4 py-2 text-xs font-bold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-55 ${displayFulfillmentStatus(source) === "ready" ? orderButtonClass("completed") : "bg-slate-100 text-slate-500"}`}>Completed</button>
                 <button type="button" onClick={onClose} className="ml-auto rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-700 transition hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700">Close</button>
                 </div>

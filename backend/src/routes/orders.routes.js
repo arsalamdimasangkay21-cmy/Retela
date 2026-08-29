@@ -6,11 +6,12 @@ import { requireApproved, requireAuth, requireRole } from "../middleware/auth.js
 import { ensureProductInventoryColumns } from "../utils/productInventory.js";
 import { productImageExpression } from "../utils/productImages.js";
 import { calculateCheckoutPricing } from "../utils/promotions.js";
-import { calculateShippingQuote } from "../utils/shippingSettings.js";
+import { calculateShippingQuote, getShippingPolicy } from "../utils/shippingSettings.js";
 import { createAdminNotification } from "../utils/adminNotifications.js";
 import { ensureCartTable } from "./cart.routes.js";
 import { loadSystemSettings } from "../utils/systemSettings.js";
 import { loadCustomerDeliveryLocation } from "../utils/customerLocation.js";
+import { haversineDistanceKm, normalizeMunicipality, validCoordinates } from "../utils/shippingCalculator.js";
 
 const router = Router();
 const statuses = ["pending", "awaiting_payment", "paid", "approved", "processing", "ready", "completed", "cancelled", "payment_failed"];
@@ -33,7 +34,7 @@ const maxOrderCreateAttempts = 3;
 const codMunicipalityError = "Cash on Delivery is only available for nearby delivery areas. Please select an online payment method.";
 let orderColumnsReady;
 
-function normalizeMunicipality(value) {
+function normalizeAddressMunicipality(value) {
   return String(value || "")
     .toLowerCase()
     .trim()
@@ -42,8 +43,8 @@ function normalizeMunicipality(value) {
 }
 
 function addressMatchesMunicipality(address, municipality) {
-  const target = normalizeMunicipality(municipality);
-  const source = normalizeMunicipality(address);
+  const target = normalizeAddressMunicipality(municipality);
+  const source = normalizeAddressMunicipality(address);
   if (!target || !source) return false;
   const segments = source.split(/\s*,\s*/).map((segment) => segment.trim()).filter(Boolean);
   if (segments.includes(target)) return true;
@@ -53,13 +54,44 @@ function addressMatchesMunicipality(address, municipality) {
 
 async function decorateMeetupEligibility(orders) {
   if (!orders.length) return orders;
-  const { config } = await loadSystemSettings();
-  const shopMunicipality = config.general.shopMunicipality;
-  return orders.map((order) => ({
-    ...order,
-    meetup_eligible: Boolean(order.fulfillment_method === "delivery" && addressMatchesMunicipality(order.delivery_address || order.location, shopMunicipality)),
-    shop_municipality: shopMunicipality || null
-  }));
+  const [{ config }, shippingPolicy] = await Promise.all([loadSystemSettings(), getShippingPolicy()]);
+  const shopMunicipality = config.general.shopMunicipality || shippingPolicy.shopMunicipality;
+  const shopCoordinates = {
+    latitude: shippingPolicy.shopLatitude ?? config.general.shopLatitude,
+    longitude: shippingPolicy.shopLongitude ?? config.general.shopLongitude
+  };
+  const configuredMeetupRange = Number(shippingPolicy.freeDeliveryRadiusKm ?? config.payment.freeDeliveryRadiusKm ?? 15);
+  const meetupRangeKm = Number.isFinite(configuredMeetupRange) ? Math.max(0, configuredMeetupRange) : 15;
+  const acceptedStatuses = new Set(["approved", "processing", "ready", "completed"]);
+  return orders.map((order) => {
+    const status = normalizeOrderStatus(order.status);
+    const configuredShopMunicipality = normalizeMunicipality(shopMunicipality);
+    const addressMunicipality = normalizeMunicipality(order.delivery_municipality);
+    const sameMunicipality = addressMunicipality
+      ? addressMunicipality === configuredShopMunicipality
+      : addressMatchesMunicipality(order.delivery_address || order.location, shopMunicipality);
+    const hasCoordinates = validCoordinates(order.delivery_latitude, order.delivery_longitude)
+      && validCoordinates(shopCoordinates.latitude, shopCoordinates.longitude);
+    const distance = hasCoordinates ? haversineDistanceKm(shopCoordinates, {
+      latitude: order.delivery_latitude,
+      longitude: order.delivery_longitude
+    }) : null;
+    const distanceKm = distance === null ? null : Math.round(distance * 100) / 100;
+    const localInRange = Boolean(
+      order.fulfillment_method === "delivery"
+        && sameMunicipality
+        && distanceKm !== null
+        && distanceKm <= meetupRangeKm
+    );
+    return {
+      ...order,
+      meetup_area_eligible: localInRange,
+      meetup_eligible: localInRange && acceptedStatuses.has(status) && status === "approved",
+      meetup_distance_km: distanceKm,
+      meetup_range_km: meetupRangeKm,
+      shop_municipality: shopMunicipality || null
+    };
+  });
 }
 
 function normalizeOrderStatus(status) {
@@ -733,7 +765,7 @@ router.patch("/:id/status", requireAuth, requireRole("admin"), asyncHandler(asyn
   await ensureOrderColumns();
   const schema = z.object({ status: z.enum(statuses) });
   const { status } = schema.parse(req.body);
-  const orders = await query("SELECT user_id, status, payment_method, payment_status, fulfillment_method, delivery_address, meetup_confirmation_status FROM orders WHERE id = :id", { id: req.params.id });
+  const orders = await query("SELECT user_id, status, payment_method, payment_status, fulfillment_method, delivery_address, delivery_latitude, delivery_longitude, delivery_municipality, meetup_confirmation_status, meeting_place, meetup_date, meetup_time FROM orders WHERE id = :id", { id: req.params.id });
   if (!orders.length) throw new HttpError(404, "Order not found");
   const currentStatus = normalizeOrderStatus(orders[0].status);
   if (currentStatus !== status && !allowedAdminStatusTransitions[currentStatus]?.has(status)) {
@@ -745,8 +777,14 @@ router.patch("/:id/status", requireAuth, requireRole("admin"), asyncHandler(asyn
   }
   if (status === "ready") {
     const [decoratedOrder] = await decorateMeetupEligibility(orders);
-    if (decoratedOrder.meetup_eligible && orders[0].meetup_confirmation_status !== "agreed") {
-      throw new HttpError(409, "The customer must agree to the proposed meetup schedule before this order can go out for delivery.");
+    if (decoratedOrder.meetup_area_eligible) {
+      const scheduleSaved = Boolean(orders[0].meeting_place && orders[0].meetup_date && orders[0].meetup_time);
+      if (!scheduleSaved) {
+        throw new HttpError(409, "Save the meetup place, date, and time before sending this local order out for delivery.");
+      }
+      if (orders[0].meetup_confirmation_status !== "agreed") {
+        throw new HttpError(409, "The customer must agree to the proposed meetup schedule before this order can go out for delivery.");
+      }
     }
   }
   await query("UPDATE orders SET status = :status WHERE id = :id", { id: req.params.id, status });
@@ -817,49 +855,52 @@ router.patch("/:id/tracking", requireAuth, requireRole("admin"), asyncHandler(as
 router.patch("/:id/meeting-place", requireAuth, requireRole("admin"), asyncHandler(async (req, res) => {
   await ensureOrderColumns();
   const schema = z.object({
-    meetingPlace: z.string().trim().max(500).optional().default(""),
+    meetingPlace: z.string().trim().min(1, "Meeting place is required.").max(500),
     meetingLatitude: nullableCoordinate(-90, 90),
     meetingLongitude: nullableCoordinate(-180, 180),
-    meetupDate: z.string().trim().regex(/^$|^\d{4}-\d{2}-\d{2}$/).optional().default(""),
-    meetupTime: z.string().trim().regex(/^$|^\d{2}:\d{2}$/).optional().default("")
+    meetupDate: z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/, "Meetup date is required."),
+    meetupTime: z.string().trim().regex(/^\d{2}:\d{2}$/, "Meetup time is required.")
   });
   const input = schema.parse(req.body);
-  if (input.meetupDate && Number.isNaN(new Date(`${input.meetupDate}T00:00:00Z`).getTime())) {
+  if (Number.isNaN(new Date(`${input.meetupDate}T00:00:00Z`).getTime())) {
     throw new HttpError(400, "Meetup date is invalid.");
   }
-  if (input.meetupTime) {
-    const [hours, minutes] = input.meetupTime.split(":").map(Number);
-    if (hours > 23 || minutes > 59) throw new HttpError(400, "Meetup time is invalid.");
+  const [hours, minutes] = input.meetupTime.split(":").map(Number);
+  if (hours > 23 || minutes > 59) throw new HttpError(400, "Meetup time is invalid.");
+  const meetupDateTime = new Date(`${input.meetupDate}T${input.meetupTime}:00`);
+  if (Number.isNaN(meetupDateTime.getTime()) || meetupDateTime.getTime() <= Date.now()) {
+    throw new HttpError(400, "Meetup date and time must be in the future.");
   }
   const orderId = Number(req.params.id);
   if (!Number.isInteger(orderId) || orderId <= 0) throw new HttpError(400, "A valid order ID is required");
-  const orders = await query("SELECT orders.id, orders.user_id, orders.order_channel, orders.fulfillment_method, orders.delivery_address, orders.meeting_latitude, orders.meeting_longitude, users.location FROM orders LEFT JOIN users ON users.id = orders.user_id WHERE orders.id = :id", { id: orderId });
+  const orders = await query("SELECT orders.id, orders.user_id, orders.status, orders.order_channel, orders.fulfillment_method, orders.delivery_address, orders.delivery_latitude, orders.delivery_longitude, orders.delivery_municipality, orders.meeting_latitude, orders.meeting_longitude, users.location FROM orders LEFT JOIN users ON users.id = orders.user_id WHERE orders.id = :id", { id: orderId });
   if (!orders.length) throw new HttpError(404, "Order not found");
-  const { config } = await loadSystemSettings();
-  if (orders[0].fulfillment_method !== "delivery" || !addressMatchesMunicipality(orders[0].delivery_address || orders[0].location, config.general.shopMunicipality)) {
-    throw new HttpError(403, "Meeting place and meetup schedule are only available for customers within the shop municipality.");
+  const [decoratedOrder] = await decorateMeetupEligibility(orders);
+  if (normalizeOrderStatus(orders[0].status) !== "approved") {
+    throw new HttpError(409, "Meetup details can only be scheduled after the order is accepted.");
   }
-  const meetingPlace = input.meetingPlace || null;
+  if (!decoratedOrder?.meetup_area_eligible) {
+    throw new HttpError(403, "Meetup details are only available for verified local customers within the configured delivery range.");
+  }
+  const meetingPlace = input.meetingPlace;
   const meetingLatitude = input.meetingLatitude === undefined ? orders[0].meeting_latitude ?? null : input.meetingLatitude;
   const meetingLongitude = input.meetingLongitude === undefined ? orders[0].meeting_longitude ?? null : input.meetingLongitude;
-  const meetupDate = input.meetupDate || null;
-  const meetupTime = input.meetupTime || null;
+  const meetupDate = input.meetupDate;
+  const meetupTime = input.meetupTime;
   await query("UPDATE orders SET meeting_place = :meetingPlace, meeting_latitude = :meetingLatitude, meeting_longitude = :meetingLongitude, meetup_date = :meetupDate, meetup_time = :meetupTime, meetup_confirmation_status = 'pending', meetup_confirmed_at = NULL, meetup_customer_note = NULL, meetup_24h_reminder_sent_at = NULL, meetup_1h_reminder_sent_at = NULL WHERE id = :id", { id: orderId, meetingPlace, meetingLatitude, meetingLongitude, meetupDate, meetupTime });
   if (orders[0].user_id) {
     await query(
       "INSERT INTO notifications (user_id, type, title, body) VALUES (:userId, 'order', 'Meetup schedule proposed', :body)",
       {
         userId: orders[0].user_id,
-        body: meetingPlace
-          ? `Please review the meeting place, date, and time for Order #${orderId}: ${meetingPlace}`
-          : `The meetup schedule for Order #${orderId} was cleared.`
+        body: `Please review the meetup schedule for Order #${orderId}: ${meetingPlace} on ${meetupDate} at ${meetupTime}.`
       }
     );
     req.app.get("io")?.to(`user:${orders[0].user_id}`).emit("order:update", { id: orderId, meeting_place: meetingPlace, meeting_latitude: meetingLatitude, meeting_longitude: meetingLongitude, meetup_date: meetupDate, meetup_time: meetupTime, meetup_confirmation_status: "pending", meetup_confirmed_at: null, meetup_customer_note: null, meetup_24h_reminder_sent_at: null, meetup_1h_reminder_sent_at: null });
     req.app.get("io")?.to(`user:${orders[0].user_id}`).emit("notification:new", {
       type: "order",
       title: "Meetup schedule proposed",
-      body: meetingPlace ? `Please review the meeting place, date, and time for Order #${orderId}: ${meetingPlace}` : `The meetup schedule for Order #${orderId} was cleared.`
+      body: `Please review the meetup schedule for Order #${orderId}: ${meetingPlace} on ${meetupDate} at ${meetupTime}.`
     });
   }
   const meetupPayload = { id: orderId, meeting_place: meetingPlace, meeting_latitude: meetingLatitude, meeting_longitude: meetingLongitude, meetup_date: meetupDate, meetup_time: meetupTime, meetup_confirmation_status: "pending", meetup_confirmed_at: null, meetup_customer_note: null, meetup_24h_reminder_sent_at: null, meetup_1h_reminder_sent_at: null };
@@ -873,7 +914,7 @@ router.patch("/:id/meetup-confirmation", requireAuth, requireApproved, asyncHand
   const orderId = Number(req.params.id);
   if (!Number.isInteger(orderId) || orderId <= 0) throw new HttpError(400, "A valid order ID is required");
   const orders = await query(
-    `SELECT o.id, o.user_id, o.fulfillment_method, o.delivery_address, o.meeting_place, o.meetup_date, o.meetup_time,
+    `SELECT o.id, o.user_id, o.status, o.fulfillment_method, o.delivery_address, o.delivery_latitude, o.delivery_longitude, o.delivery_municipality, o.meeting_place, o.meetup_date, o.meetup_time,
             o.meetup_confirmation_status, o.meetup_confirmed_at, o.meetup_customer_note, u.location
      FROM orders o LEFT JOIN users u ON u.id = o.user_id
      WHERE o.id = :id AND o.user_id = :userId LIMIT 1`,

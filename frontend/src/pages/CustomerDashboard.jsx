@@ -2884,6 +2884,9 @@ function CustomerOrderModal({ loading, selectedOrder, displayNumber, deliverySaf
   const order = selectedOrder?.order;
   const cancelled = isOrderCancelled(order);
   const meetingPlace = String(order?.meeting_place || "").trim();
+  const meetupHasSchedule = Boolean(meetingPlace || order?.meetup_date || order?.meetup_time);
+  const activeMeetupStatus = ["approved", "processing", "ready", "completed"].includes(normalizeOrderStatus(order?.status));
+  const showMeetupDetails = Boolean(order?.meetup_area_eligible && activeMeetupStatus && (order?.meetup_eligible || meetupHasSchedule));
   const confirmationStatus = String(order?.meetup_confirmation_status || "pending").toLowerCase();
   const [confirmationStep, setConfirmationStep] = useState(null);
   const [meetupNote, setMeetupNote] = useState("");
@@ -2937,7 +2940,7 @@ function CustomerOrderModal({ loading, selectedOrder, displayNumber, deliverySaf
                   <ModalInfo label="Payment Status" value={customerOrderStatus(order.payment_status || "unpaid")} />
                 </div>
                 {order.fulfillment_method === "delivery" ? <OrderDeliveryInfo order={order} title="Delivery Information" mapLabel="View Location" /> : null}
-                {order.meetup_eligible ? <section className="retela-meeting-place-card">
+                {showMeetupDetails ? <section className="retela-meeting-place-card">
                   <div>
                     <p className="retela-modal-eyebrow">Meeting Place</p>
                     <h4>Admin-selected meetup location</h4>
