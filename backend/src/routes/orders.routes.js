@@ -1150,6 +1150,56 @@ router.post("/", requireAuth, requireApproved, asyncHandler(async (req, res) => 
   res.status(201).json(result.response);
 }));
 
+router.patch("/:id/reject", requireAuth, requireRole("admin"), asyncHandler(async (req, res) => {
+  await ensureOrderColumns();
+  await ensureProductInventoryColumns();
+  const orderId = Number(req.params.id);
+  if (!Number.isInteger(orderId) || orderId <= 0) throw new HttpError(400, "A valid order ID is required");
+  const input = z.object({
+    reason: z.string().trim().max(255).optional()
+  }).parse(req.body);
+  const order = await loadDecoratedOrder(orderId, { role: "admin" });
+  if (!order) throw new HttpError(404, "Order not found");
+  const currentStatus = orderStatusForStorage(order.status);
+  console.info("POST/REJECT ORDER RECEIVED", {
+    orderId,
+    currentStatus,
+    paymentMethod: order.payment_method ?? order.paymentMethod ?? null,
+    paymentStatus: order.payment_status ?? order.paymentStatus ?? null,
+    requestedStatus: "rejected"
+  });
+
+  const rejectionReason = input.reason || paymentFailedRejectionReason;
+  const result = await rejectPaymentFailedOrder(orderId, rejectionReason);
+  const updatedOrder = await loadDecoratedOrder(orderId, { role: "admin" });
+  const updatePayload = updatedOrder || {
+    id: orderId,
+    status: "rejected",
+    payment_status: "failed",
+    rejection_reason: rejectionReason,
+    rejected_at: new Date().toISOString()
+  };
+  const io = req.app.get("io");
+  if (order.user_id) io?.to(`user:${order.user_id}`).emit("order:update", updatePayload);
+  io?.to("admin").emit("order:update", updatePayload);
+  result.inventoryUpdates.forEach((update) => {
+    io?.emit("inventory:update", { type: "inventory", action: "payment-failed-rejected-restock", ...update });
+  });
+  if (result.updated && result.userId) {
+    io?.to(`user:${result.userId}`).emit("notification:new", {
+      type: "order",
+      title: "Order rejected",
+      body: paymentFailedCustomerNotice(orderId),
+      order_id: orderId,
+      created_at: new Date().toISOString()
+    });
+  }
+  return res.status(200).json({
+    message: result.updated ? "Order rejected" : "Order was already rejected",
+    order: updatePayload
+  });
+}));
+
 router.patch("/:id/status", requireAuth, requireRole("admin"), asyncHandler(async (req, res) => {
   await ensureOrderColumns();
   const input = z.object({

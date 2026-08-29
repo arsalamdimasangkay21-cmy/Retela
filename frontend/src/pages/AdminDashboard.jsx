@@ -631,12 +631,17 @@ export default function AdminDashboard({ active, onChange }) {
     if (busyAction === actionKey || orderRequestGuardsRef.current.has(actionKey)) return;
     orderRequestGuardsRef.current.add(actionKey);
     setBusyAction(actionKey);
-    const requestBody = { status, ...(options.reason ? { reason: options.reason } : {}) };
+    const requestPath = status === "rejected"
+      ? `/orders/${orderId}/reject`
+      : `/orders/${orderId}/status`;
+    const requestBody = status === "rejected"
+      ? { reason: options.reason || paymentFailedRejectionReason }
+      : { status, ...(options.reason ? { reason: options.reason } : {}) };
     const controller = new AbortController();
     const timeoutId = window.setTimeout(() => controller.abort(), orderStatusRequestTimeoutMs);
     try {
       const response = await api.patch(
-        `/orders/${orderId}/status`,
+        requestPath,
         requestBody,
         {
           headers: { "Idempotency-Key": actionKey },
@@ -653,7 +658,7 @@ export default function AdminDashboard({ active, onChange }) {
           requestedStatus: status,
           responseStatus: response.status,
           responseBody: data,
-          apiUrl: API_URL
+          requestUrl: `${API_URL}${requestPath}`
         });
       }
       if (updatedOrder?.id) {
@@ -666,7 +671,7 @@ export default function AdminDashboard({ active, onChange }) {
       });
       showProductToast(
         status === "rejected"
-          ? `Order #${updatedOrder?.id || orderId} was rejected because payment could not be verified.`
+          ? `Order #${updatedOrder?.id || orderId} was rejected successfully.`
           : "Order updated successfully.",
         "success",
         "top-right"
@@ -684,7 +689,7 @@ export default function AdminDashboard({ active, onChange }) {
           requestedStatus: status,
           responseStatus: error?.response?.status || null,
           responseBody: error?.response?.data || null,
-          apiUrl: API_URL,
+          requestUrl: `${API_URL}${requestPath}`,
           message: error?.message
         });
       }
@@ -4348,8 +4353,10 @@ function OrderManagement({ rows, updateOrder, onNavigate, showToast }) {
             ["pending", "Pending"],
             ["approved", "Accepted"],
             ["awaiting_payment", "Awaiting Payment"],
+            ["payment_failed", "Payment Failed"],
             ["completed", "Completed"],
-            ["cancelled", "Cancelled"]
+            ["cancelled", "Cancelled"],
+            ["rejected", "Rejected"]
           ]} />
           <OrderFilterSelect label="Payment" value={orderFilters.payment} onChange={(value) => updateOrderFilter("payment", value)} options={[
             ["all", "All"],
