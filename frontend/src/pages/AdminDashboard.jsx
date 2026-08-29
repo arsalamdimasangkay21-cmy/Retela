@@ -612,13 +612,21 @@ export default function AdminDashboard({ active, onChange }) {
     if (busyAction === actionKey) return;
     setBusyAction(actionKey);
     try {
-      await api.patch(`/orders/${id}/status`, { status });
+      const { data } = await api.patch(`/orders/${id}/status`, { status });
+      const updatedOrder = data?.order || (data?.id ? data : { id: Number(id), status });
+      if (updatedOrder?.id) {
+        setOrders((current) => current.map((order) => Number(order.id) === Number(updatedOrder.id) ? { ...order, ...updatedOrder } : order));
+      }
       clearGetCache("/orders");
       clearGetCache("/reports/summary");
-      await Promise.all([loadOrdersData({ force: true }), loadSummaryData({ force: true })]);
+      Promise.all([loadOrdersData({ force: true }), loadSummaryData({ force: true })]).catch((refreshError) => {
+        console.error("[orders] refresh after status update failed", refreshError);
+      });
       showProductToast("Order updated successfully.");
+      return { ...data, order: updatedOrder };
     } catch (error) {
       showProductToast(getApiErrorMessage(error, "Could not update order."), "error");
+      throw error;
     } finally {
       setBusyAction("");
     }
@@ -813,7 +821,7 @@ export default function AdminDashboard({ active, onChange }) {
   }
 
   if (active === "Orders") {
-    return <OrderManagement rows={orders} updateOrder={updateOrder} onNavigate={onChange} />;
+    return <OrderManagement rows={orders} updateOrder={updateOrder} onNavigate={onChange} showToast={showProductToast} />;
   }
 
   if (active === "POS") {
@@ -3400,11 +3408,12 @@ function paymentLabel(method) {
   return "COD";
 }
 
-function OrderManagement({ rows, updateOrder, onNavigate }) {
+function OrderManagement({ rows, updateOrder, onNavigate, showToast }) {
   const [selectedOrderId, setSelectedOrderId] = useState(null);
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [loadingOrderId, setLoadingOrderId] = useState(null);
   const [reloadToken, setReloadToken] = useState(0);
+  const [meetupScrollToken, setMeetupScrollToken] = useState(0);
   const [trackingNumber, setTrackingNumber] = useState("");
   const [orderSearch, setOrderSearch] = useState("");
   const [orderFilters, setOrderFilters] = useState({ status: "all", payment: "all", fulfillment: "all", date: "all" });
@@ -3574,10 +3583,25 @@ function OrderManagement({ rows, updateOrder, onNavigate }) {
             setTrackingNumber={setTrackingNumber}
             saveTracking={saveTracking}
             updateOrder={updateOrder}
-            onStatusChanged={() => setReloadToken((value) => value + 1)}
+            meetupScrollToken={meetupScrollToken}
+            onStatusChanged={(updatedOrder, options = {}) => {
+              if (updatedOrder?.order && Array.isArray(updatedOrder?.items)) {
+                setSelectedOrder(updatedOrder);
+                setTrackingNumber(updatedOrder.order.tracking_number || "");
+              } else {
+                const orderPatch = updatedOrder?.order || updatedOrder;
+                if (orderPatch?.id) {
+                  setSelectedOrder((current) => current?.order ? { ...current, order: { ...current.order, ...orderPatch } } : current);
+                }
+              }
+              if (options.scrollToMeetup) setMeetupScrollToken((value) => value + 1);
+              if (!options.skipReload) setReloadToken((value) => value + 1);
+            }}
             onMeetingPlaceSaved={(details) => {
-              setSelectedOrder((current) => current?.order ? { ...current, order: { ...current.order, ...details } } : current);
+              const orderPatch = details?.order || details;
+              setSelectedOrder((current) => current?.order ? { ...current, order: { ...current.order, ...orderPatch } } : current);
               setReloadToken((value) => value + 1);
+              showToast?.("Meetup details saved successfully.", "success", "top-right");
             }}
             onMessageCustomer={(order) => {
               localStorage.setItem("retela_admin_chat_context", JSON.stringify({
@@ -3804,20 +3828,134 @@ function orderCustomerPhone(order) {
 }
 
 function orderPaymentStatusLabel(order) {
-  const method = String(order?.payment_method || "").trim().toLowerCase();
+  const method = String(order?.payment_method || order?.paymentMethod || "").trim().toLowerCase();
   const status = String(order?.payment_status || "").trim().toLowerCase();
-  if ((method === "cod" || method === "cash" || method === "cash_on_delivery") && (status === "awaiting_payment" || status === "unpaid" || status === "pending" || !status)) {
+  if (isCodPaymentMethod(method) && (status === "awaiting_payment" || status === "unpaid" || status === "pending" || !status)) {
     return "Pending Collection";
   }
   return paymentStatusLabel(status);
 }
 
 function orderPaymentMethodLabel(order) {
-  const method = String(order?.payment_method || "").trim().toLowerCase();
-  return method === "cod" || method === "cash" || method === "cash_on_delivery" ? "Cash on Delivery" : paymentLabel(method);
+  const method = String(order?.payment_method || order?.paymentMethod || "").trim().toLowerCase();
+  return isCodPaymentMethod(method) ? "Cash on Delivery" : paymentLabel(method);
 }
 
-function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTrackingNumber, saveTracking, updateOrder, onStatusChanged, onMeetingPlaceSaved, onMessageCustomer, onClose }) {
+function normalizeOrderStatusKey(status) {
+  return String(status || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+}
+
+function statusIsAccepted(status) {
+  const normalized = normalizeOrderStatusKey(status);
+  return normalized === "accepted" || normalized === "approved";
+}
+
+function normalizedMeetupStatus(status) {
+  return statusIsAccepted(status) ? "accepted" : normalizeOrderStatusKey(status);
+}
+
+function normalizePaymentMethodKey(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ");
+}
+
+function isCodPaymentMethod(orderOrMethod) {
+  const rawMethod = orderOrMethod && typeof orderOrMethod === "object"
+    ? orderOrMethod.payment_method
+      ?? orderOrMethod.paymentMethod
+      ?? orderOrMethod.payment_label
+      ?? orderOrMethod.paymentLabel
+      ?? orderOrMethod.payment
+      ?? ""
+    : orderOrMethod;
+  const normalized = normalizePaymentMethodKey(rawMethod);
+  const compact = normalized.replace(/[^a-z0-9]/g, "");
+  return ["cod", "cash", "cashondelivery", "cashupondelivery", "payondelivery", "paymentondelivery"].includes(compact)
+    || (normalized.includes("cash") && normalized.includes("delivery"));
+}
+
+function finiteNonNegativeNumber(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? number : null;
+}
+
+function firstFiniteOrderNumber(order, fields) {
+  for (const field of fields) {
+    const value = finiteNonNegativeNumber(order?.[field]);
+    if (value !== null) return value;
+  }
+  return null;
+}
+
+function normalizeMeetupMunicipality(value) {
+  return String(value || "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim()
+    .replace(/^(?:municipality|city)\s+of\s+/, "")
+    .replace(/\s+(?:municipality|city)$/, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+function orderMeetupEligibility(order, fallback = {}) {
+  const status = normalizedMeetupStatus(order?.status);
+  const accepted = status === "accepted";
+  const codOrder = isCodPaymentMethod(order);
+  const fulfillmentMethod = normalizeOrderStatusKey(order?.fulfillment_method ?? order?.fulfillmentMethod ?? "delivery");
+  const deliveryOrder = fulfillmentMethod === "delivery";
+  const customerMunicipality = normalizeMeetupMunicipality(
+    order?.customerMunicipality
+      ?? order?.customer_municipality
+      ?? order?.delivery_municipality
+      ?? order?.deliveryMunicipality
+      ?? order?.municipality
+      ?? ""
+  );
+  const shopMunicipality = normalizeMeetupMunicipality(order?.shopMunicipality ?? order?.shop_municipality ?? "");
+  const explicitMunicipalityMismatch = Boolean(customerMunicipality && shopMunicipality && customerMunicipality !== shopMunicipality);
+  const backendAreaEligible = order?.meetup_area_eligible === true || order?.meetupAreaEligible === true;
+  const backendMeetupEligible = order?.meetup_eligible === true || order?.meetupEligible === true;
+  const savedDistanceKm = firstFiniteOrderNumber(order, ["distanceKm", "distance_km", "meetupDistanceKm", "meetup_distance_km", "shippingDistanceKm", "shipping_distance_km"]);
+  const fallbackDistanceKm = finiteNonNegativeNumber(fallback.displayedDistanceKm);
+  const distanceKm = savedDistanceKm ?? fallbackDistanceKm;
+  const meetupRangeKm = firstFiniteOrderNumber(order, ["meetupRangeKm", "meetup_range_km", "freeDeliveryRadiusKm", "free_delivery_radius_km"]) ?? 15;
+  const distanceInRange = distanceKm !== null && distanceKm <= meetupRangeKm;
+  const rangeEligible = distanceKm === null ? (backendAreaEligible || backendMeetupEligible) : distanceInRange;
+  const sameMunicipality = explicitMunicipalityMismatch
+    ? false
+    : Boolean((customerMunicipality && shopMunicipality) || backendAreaEligible || backendMeetupEligible || distanceInRange);
+  const areaEligible = Boolean(codOrder && deliveryOrder && sameMunicipality && rangeEligible);
+  const reasons = [];
+
+  if (!accepted) reasons.push(`status=${status || "missing"}`);
+  if (!codOrder) reasons.push(`paymentMethod=${normalizePaymentMethodKey(order?.payment_method ?? order?.paymentMethod ?? order?.payment ?? "missing") || "missing"}`);
+  if (!deliveryOrder) reasons.push(`fulfillmentMethod=${fulfillmentMethod || "missing"}`);
+  if (explicitMunicipalityMismatch) reasons.push(`municipality=${customerMunicipality} shop=${shopMunicipality}`);
+  if (!explicitMunicipalityMismatch && !sameMunicipality) reasons.push("municipality=missing-or-unmatched");
+  if (distanceKm === null && !backendAreaEligible && !backendMeetupEligible) reasons.push("distanceKm=missing");
+  else if (distanceKm !== null && !distanceInRange) reasons.push(`distanceKm=${distanceKm} rangeKm=${meetupRangeKm}`);
+
+  return {
+    accepted,
+    codOrder,
+    deliveryOrder,
+    areaEligible,
+    eligible: accepted && areaEligible,
+    distanceKm,
+    meetupRangeKm,
+    usedDisplayedDistance: savedDistanceKm === null && fallbackDistanceKm !== null,
+    reason: reasons.join("; ") || "eligible"
+  };
+}
+
+function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTrackingNumber, saveTracking, updateOrder, meetupScrollToken = 0, onStatusChanged, onMeetingPlaceSaved, onMessageCustomer, onClose }) {
   const source = selectedOrder?.order;
   const [meetingPlaceDraft, setMeetingPlaceDraft] = useState("");
   const [meetupDateDraft, setMeetupDateDraft] = useState("");
@@ -3826,16 +3964,19 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
   const [meetingPlaceSaving, setMeetingPlaceSaving] = useState(false);
   const [meetingPlaceError, setMeetingPlaceError] = useState("");
   const [deliverySafetyPolicy, setDeliverySafetyPolicy] = useState(defaultDeliverySafetyPolicy);
+  const [displayedRouteDistanceKm, setDisplayedRouteDistanceKm] = useState(null);
   const customerPhone = orderCustomerPhone(source);
   const customerEmail = String(source?.customer_email || source?.customerEmail || source?.email || "").trim();
   const customerName = String(source?.customer_name || source?.display_name || source?.username || "Walk-in Customer").trim() || "Walk-in Customer";
   const completeDeliveryAddress = orderCompleteDeliveryAddress(source);
-  const acceptedForMeetup = displayFulfillmentStatus(source) === "approved";
+  const meetupSectionRef = useRef(null);
+  const meetupEligibility = useMemo(() => orderMeetupEligibility(source, { displayedDistanceKm: displayedRouteDistanceKm }), [displayedRouteDistanceKm, source]);
+  const acceptedForMeetup = meetupEligibility.accepted;
   const meetupScheduleSaved = Boolean(source?.meeting_place && source?.meetup_date && source?.meetup_time);
-  const codOrder = ["cod", "cash", "cash_on_delivery"].includes(String(source?.payment_method || "").trim().toLowerCase());
-  const meetupAreaEligible = Boolean(codOrder && source?.meetup_area_eligible);
-  const showMeetupDetails = Boolean(meetupAreaEligible && acceptedForMeetup);
-  const showMeetupEditor = Boolean(codOrder && source?.meetup_eligible && acceptedForMeetup);
+  const meetupAreaEligible = meetupEligibility.areaEligible;
+  const isDeliveryOrder = meetupEligibility.deliveryOrder;
+  const showMeetupDetails = meetupEligibility.eligible;
+  const showMeetupEditor = showMeetupDetails;
   const localMeetupGateActive = Boolean(meetupAreaEligible && ["approved", "processing"].includes(displayFulfillmentStatus(source)));
   const meetupNeedsSchedule = Boolean(localMeetupGateActive && !meetupScheduleSaved);
   const meetupNeedsConfirmation = Boolean(localMeetupGateActive && meetupScheduleSaved && source?.meetup_confirmation_status !== "agreed");
@@ -3844,6 +3985,14 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
   const phoneHref = customerPhone ? customerPhone.replace(/[^\d+]/g, "") : "";
   const todayManila = manilaDateInputValue();
   const currentManilaTime = manilaTimeInputValue();
+
+  const handleRouteMetrics = useCallback((metrics) => {
+    setDisplayedRouteDistanceKm(finiteNonNegativeNumber(metrics?.distanceKm));
+  }, []);
+
+  useEffect(() => {
+    setDisplayedRouteDistanceKm(null);
+  }, [source?.id]);
 
   useEffect(() => {
     setMeetingPlaceDraft(source?.meeting_place || "");
@@ -3863,10 +4012,45 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
     return () => { active = false; };
   }, []);
 
+  useEffect(() => {
+    if (!import.meta.env.DEV || !source?.id || !acceptedForMeetup || showMeetupDetails) return;
+    console.info("[meetup-eligibility] accepted order hidden", {
+      orderId: source.id,
+      reason: meetupEligibility.reason,
+      status: source.status,
+      paymentMethod: source.payment_method ?? source.paymentMethod ?? null,
+      customerMunicipality: source.customerMunicipality ?? source.delivery_municipality ?? null,
+      shopMunicipality: source.shopMunicipality ?? source.shop_municipality ?? null,
+      distanceKm: meetupEligibility.distanceKm,
+      meetupRangeKm: meetupEligibility.meetupRangeKm,
+      usedDisplayedDistance: meetupEligibility.usedDisplayedDistance,
+      meetupEligible: source.meetupEligible ?? source.meetup_eligible ?? null,
+      meetupAreaEligible: source.meetupAreaEligible ?? source.meetup_area_eligible ?? null
+    });
+  }, [acceptedForMeetup, meetupEligibility, showMeetupDetails, source]);
+
+  useEffect(() => {
+    if (!meetupScrollToken || !showMeetupDetails) return undefined;
+    const frame = window.requestAnimationFrame(() => {
+      meetupSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [meetupScrollToken, showMeetupDetails, source?.id]);
+
   async function updateStatus(status) {
     if (!source?.id) return;
-    await updateOrder(source.id, status);
-    onStatusChanged();
+    const data = await updateOrder(source.id, status);
+    const orderPatch = data?.order || data || { id: source.id, status };
+    const shouldScrollToMeetup = statusIsAccepted(status);
+    onStatusChanged?.({ id: source.id, status, ...orderPatch }, { scrollToMeetup: shouldScrollToMeetup, skipReload: shouldScrollToMeetup });
+    if (!shouldScrollToMeetup) return;
+    try {
+      const { data: latestOrderDetails } = await api.get(`/orders/${source.id}/items`);
+      onStatusChanged?.(latestOrderDetails, { scrollToMeetup: true, skipReload: true });
+    } catch (error) {
+      console.error("[orders] failed to fetch accepted order details", error);
+      onStatusChanged?.(null, { scrollToMeetup: true });
+    }
   }
 
   async function saveMeetingPlace() {
@@ -3889,7 +4073,7 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
         meetupTime: meetupTimeDraft,
         meetupNote: meetupNoteDraft
       });
-      onMeetingPlaceSaved?.({
+      onMeetingPlaceSaved?.(data?.order || {
         meeting_place: data.meeting_place || null,
         meetup_date: data.meetup_date || null,
         meetup_time: data.meetup_time || null,
@@ -3958,11 +4142,11 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
                   <button type="button" onClick={saveTracking} className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-emerald-700">Save</button>
                 </div>
               </div>
-              {source.fulfillment_method === "delivery" ? <OrderDeliveryInfo order={source} title="Delivery Location" mapLabel="View Delivery Route" routeEnabled /> : null}
-              {showMeetupDetails ? <section className="admin-meeting-place-card">
+              {isDeliveryOrder ? <OrderDeliveryInfo order={source} title="Delivery Location" mapLabel="View Delivery Route" routeEnabled onRouteMetrics={handleRouteMetrics} /> : null}
+              {showMeetupDetails ? <section ref={meetupSectionRef} className="admin-meeting-place-card">
                 <div>
-                  <p className="text-xs font-bold uppercase tracking-[0.16em] text-emerald-700">Meetup Details</p>
-                  <h4 className="mt-1 font-display text-lg font-bold text-[#111827]">Admin-selected meeting place and schedule</h4>
+                  <p className="text-xs font-bold uppercase tracking-[0.16em] text-emerald-700">COD meetup</p>
+                  <h4 className="mt-1 font-display text-lg font-bold text-[#111827]">Meeting Setup</h4>
                 </div>
                 {showMeetupEditor ? <>
                 <label className="grid gap-1 text-sm font-bold text-slate-700">
@@ -3987,7 +4171,7 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
                   </label>
                  </div>
                  <label className="grid gap-1 text-sm font-bold text-slate-700">
-                   <span>Meetup Note <span className="font-medium text-slate-500">(optional)</span></span>
+                   <span>Optional Note</span>
                    <textarea value={meetupNoteDraft} onChange={(event) => setMeetupNoteDraft(event.target.value)} maxLength={500} rows={2} placeholder="Add an optional note for the customer" className="min-h-16 w-full resize-y rounded-xl border border-[#dfe9e3] bg-white px-3 py-2 text-sm font-semibold text-[#111827] outline-none placeholder:text-slate-400 focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100" />
                  </label>
                  <div className="flex flex-wrap items-center gap-2">
@@ -3995,12 +4179,12 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
                     {meetingPlaceSaving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
                     Save Meetup Details
                   </button>
-                  {meetupScheduleSaved ? <span className="break-words text-xs font-semibold text-slate-500">Saved: {source.meeting_place}{` · ${formatMeetupDate(source.meetup_date)}`}{` · ${formatMeetupTime(source.meetup_time)}`}</span> : <span className="text-xs font-semibold text-slate-500">Meeting place and meetup schedule will be provided by the shop.</span>}
+                  {meetupScheduleSaved ? <span className="break-words text-xs font-semibold text-slate-500">Saved: {source.meeting_place}{` - ${formatMeetupDate(source.meetup_date)}`}{` - ${formatMeetupTime(source.meetup_time)}`}</span> : <span className="text-xs font-semibold text-slate-500">Meeting place and meetup schedule will be provided by the shop.</span>}
                 </div>
                 </> : <div className="grid gap-2 rounded-xl border border-emerald-100 bg-emerald-50/50 p-3 text-sm text-slate-700">
                   <strong className="text-slate-900">Meetup schedule saved</strong>
                   <span>{source.meeting_place}</span>
-                   <span>{formatMeetupDate(source.meetup_date)} · {formatMeetupTime(source.meetup_time)}</span>
+                   <span>{formatMeetupDate(source.meetup_date)} - {formatMeetupTime(source.meetup_time)}</span>
                    {source.meetup_admin_note ? <span className="break-words text-slate-600">Note: {source.meetup_admin_note}</span> : null}
                 </div>}
                 <div className="retela-admin-meetup-response">
@@ -4325,18 +4509,20 @@ function formatCell(key, value) {
 }
 
 function displayFulfillmentStatus(order) {
+  const status = normalizeOrderStatusKey(order?.status);
   // Older PayMongo orders stored `paid` in the fulfillment status. They are
   // still pending fulfillment once payment is confirmed.
-  if (order?.status === "paid" && order?.payment_status === "paid") return "pending";
-  return order?.status || "pending";
+  if (status === "paid" && order?.payment_status === "paid") return "pending";
+  if (status === "accepted") return "approved";
+  if (status === "out_for_delivery") return "ready";
+  return status || "pending";
 }
 
 function canAcceptOrder(order) {
   if (!order) return false;
   const fulfillmentStatus = displayFulfillmentStatus(order);
   if (fulfillmentStatus !== "pending") return false;
-  const paymentMethod = String(order.payment_method || "").toLowerCase();
-  return paymentMethod === "cod" || paymentMethod === "cash" || order.payment_status === "paid" || order.status === "paid";
+  return isCodPaymentMethod(order) || order.payment_status === "paid" || normalizeOrderStatusKey(order.status) === "paid";
 }
 
 function paymentStatusLabel(status) {

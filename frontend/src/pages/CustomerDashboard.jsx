@@ -2981,9 +2981,9 @@ function CustomerOrderModal({ loading, selectedOrder, onPay, payingOrderId, onMe
   const cancelled = isOrderCancelled(order);
   const meetingPlace = String(order?.meeting_place || "").trim();
   const meetupScheduleSaved = Boolean(meetingPlace && order?.meetup_date && order?.meetup_time);
-  const acceptedForMeetup = normalizeOrderStatus(order?.status) === "approved";
-  const codOrder = ["cod", "cash", "cash_on_delivery"].includes(String(order?.payment_method || "").trim().toLowerCase());
-  const meetupAreaEligible = Boolean(codOrder && order?.meetup_area_eligible);
+  const meetupEligibility = orderMeetupEligibility(order);
+  const acceptedForMeetup = meetupEligibility.accepted;
+  const meetupAreaEligible = meetupEligibility.areaEligible;
   const showMeetupDetails = Boolean(meetupAreaEligible && acceptedForMeetup && meetupScheduleSaved);
   const showMeetupWaiting = Boolean(meetupAreaEligible && acceptedForMeetup && !meetupScheduleSaved);
   const confirmationStatus = String(order?.meetup_confirmation_status || "pending").toLowerCase();
@@ -3098,42 +3098,6 @@ function CustomerOrderModal({ loading, selectedOrder, onPay, payingOrderId, onMe
                     </div>
                   </section>
                 ) : null}
-                {false && showMeetupDetails ? <section className="retela-meeting-place-card">
-                  <div>
-                    <p className="retela-modal-eyebrow">Meeting Place</p>
-                    <h4>Admin-selected meetup location</h4>
-                  </div>
-                  {meetingPlace ? (
-                    <>
-                      <p>{meetingPlace}</p>
-                    </>
-                  ) : (
-                    <p>Meeting place will be provided by the shop.</p>
-                  )}
-                  <div className="mt-3 border-t border-emerald-100 pt-3">
-                   <p className="retela-modal-eyebrow">Meetup Date &amp; Time</p>
-                   <p>{order.meetup_date ? formatMeetupDate(order.meetup_date) : "Meetup date will be provided by the shop."}{order.meetup_time ? ` • ${formatMeetupTime(order.meetup_time)}` : ""}</p>
-                   {order.meetup_admin_note ? <p className="mt-2 whitespace-pre-wrap break-words text-sm text-slate-600">Note from RETELA: {order.meetup_admin_note}</p> : null}
-                  </div>
-                  {meetingPlace || order.meetup_date || order.meetup_time ? (
-                    <div className="retela-meetup-confirmation retela-meetup-confirmation-legacy" aria-hidden="true">
-                      <p className="retela-modal-eyebrow">Customer Confirmation</p>
-                      {confirmationStatus === "agreed" ? <p className="retela-meetup-confirmed">✓ Meetup Confirmed</p> : confirmationStatus === "disagreed" ? <><p className="retela-meetup-declined">Schedule declined</p><p>The shop will need to propose another meetup schedule.</p><button type="button" onClick={messageShop} className="retela-meeting-place-action"><MessageCircle size={15} /> Message Shop</button></> : confirmationStep === "agree" ? <div className="grid gap-2"><p>The shop proposed this meetup schedule.</p><p className="font-bold text-slate-800">Confirm this meetup schedule?</p><div className="flex flex-wrap gap-2"><button type="button" disabled={confirmationSaving} onClick={() => submitMeetupConfirmation("agreed")} className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-bold text-white">{confirmationSaving ? "Saving..." : "Confirm"}</button><button type="button" onClick={() => setConfirmationStep(null)} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-bold text-slate-700">Cancel</button></div></div> : confirmationStep === "disagree" ? <div className="grid gap-2"><p>Tell the shop why this schedule does not work (optional).</p><textarea value={meetupNote} onChange={(event) => setMeetupNote(event.target.value)} maxLength={500} rows={2} placeholder="I am not available at this time." className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900" /><div className="flex flex-wrap gap-2"><button type="button" disabled={confirmationSaving} onClick={() => submitMeetupConfirmation("disagreed")} className="rounded-xl bg-rose-600 px-3 py-2 text-xs font-bold text-white">{confirmationSaving ? "Saving..." : "Decline Schedule"}</button><button type="button" onClick={() => setConfirmationStep(null)} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-bold text-slate-700">Cancel</button></div></div> : <><p>The shop proposed this meetup schedule.</p><div className="flex flex-wrap gap-2"><button type="button" onClick={() => setConfirmationStep("agree")} className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-bold text-white">Agree</button><button type="button" onClick={() => setConfirmationStep("disagree")} className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700">Disagree</button></div></>}
-                    </div>
-                  ) : null}
-                  {meetingPlace || order.meetup_date || order.meetup_time ? <p className="retela-modal-eyebrow">Customer Confirmation</p> : null}
-                  {meetingPlace || order.meetup_date || order.meetup_time ? <MeetupConfirmationPanel
-                    status={confirmationStatus}
-                    step={confirmationStep}
-                    setStep={setConfirmationStep}
-                    meetupNote={meetupNote}
-                    setMeetupNote={setMeetupNote}
-                    saving={confirmationSaving}
-                    onSubmit={submitMeetupConfirmation}
-                    onMessageShop={messageShop}
-                  /> : null}
-                </section> : null}
-                {false && showMeetupDetails ? <DeliverySafetyPolicyCard policy={meetupCashOnDeliveryPolicy} title="Meetup and Cash on Delivery Policy" /> : null}
                 <div className="grid gap-2">
                   <p className="retela-modal-eyebrow">Items</p>
                   {selectedOrder.items.map((item) => (
@@ -4124,7 +4088,95 @@ function customerOrderStatus(status) {
 }
 
 function normalizeOrderStatus(status) {
-  return String(status || "").trim().toLowerCase().replace(/\s+/g, "_");
+  return String(status || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+}
+
+function isAcceptedOrderStatus(status) {
+  const normalized = normalizeOrderStatus(status);
+  return normalized === "accepted" || normalized === "approved";
+}
+
+function normalizePaymentMethodKey(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ");
+}
+
+function isCodPaymentMethod(orderOrMethod) {
+  const rawMethod = orderOrMethod && typeof orderOrMethod === "object"
+    ? orderOrMethod.payment_method
+      ?? orderOrMethod.paymentMethod
+      ?? orderOrMethod.payment_label
+      ?? orderOrMethod.paymentLabel
+      ?? orderOrMethod.payment
+      ?? ""
+    : orderOrMethod;
+  const normalized = normalizePaymentMethodKey(rawMethod);
+  const compact = normalized.replace(/[^a-z0-9]/g, "");
+  return ["cod", "cash", "cashondelivery", "cashupondelivery", "payondelivery", "paymentondelivery"].includes(compact)
+    || (normalized.includes("cash") && normalized.includes("delivery"));
+}
+
+function finiteNonNegativeNumber(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? number : null;
+}
+
+function firstFiniteOrderNumber(order, fields) {
+  for (const field of fields) {
+    const value = finiteNonNegativeNumber(order?.[field]);
+    if (value !== null) return value;
+  }
+  return null;
+}
+
+function normalizeMeetupMunicipality(value) {
+  return String(value || "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim()
+    .replace(/^(?:municipality|city)\s+of\s+/, "")
+    .replace(/\s+(?:municipality|city)$/, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+function orderMeetupEligibility(order) {
+  const accepted = isAcceptedOrderStatus(order?.status);
+  const codOrder = isCodPaymentMethod(order);
+  const fulfillmentMethod = normalizeOrderStatus(order?.fulfillment_method ?? order?.fulfillmentMethod ?? "delivery");
+  const deliveryOrder = fulfillmentMethod === "delivery";
+  const customerMunicipality = normalizeMeetupMunicipality(
+    order?.customerMunicipality
+      ?? order?.customer_municipality
+      ?? order?.delivery_municipality
+      ?? order?.deliveryMunicipality
+      ?? order?.municipality
+      ?? ""
+  );
+  const shopMunicipality = normalizeMeetupMunicipality(order?.shopMunicipality ?? order?.shop_municipality ?? "");
+  const explicitMunicipalityMismatch = Boolean(customerMunicipality && shopMunicipality && customerMunicipality !== shopMunicipality);
+  const backendAreaEligible = order?.meetup_area_eligible === true || order?.meetupAreaEligible === true;
+  const backendMeetupEligible = order?.meetup_eligible === true || order?.meetupEligible === true;
+  const distanceKm = firstFiniteOrderNumber(order, ["distanceKm", "distance_km", "meetupDistanceKm", "meetup_distance_km", "shippingDistanceKm", "shipping_distance_km"]);
+  const meetupRangeKm = firstFiniteOrderNumber(order, ["meetupRangeKm", "meetup_range_km", "freeDeliveryRadiusKm", "free_delivery_radius_km"]) ?? 15;
+  const distanceInRange = distanceKm !== null && distanceKm <= meetupRangeKm;
+  const rangeEligible = distanceKm === null ? (backendAreaEligible || backendMeetupEligible) : distanceInRange;
+  const sameMunicipality = explicitMunicipalityMismatch
+    ? false
+    : Boolean((customerMunicipality && shopMunicipality) || backendAreaEligible || backendMeetupEligible || distanceInRange);
+  const areaEligible = Boolean(codOrder && deliveryOrder && sameMunicipality && rangeEligible);
+
+  return {
+    accepted,
+    areaEligible,
+    eligible: accepted && areaEligible
+  };
 }
 
 function isOrderCancelled(orderOrStatus) {

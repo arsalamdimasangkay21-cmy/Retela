@@ -47,7 +47,7 @@ function normalizeShopLocation(settings = {}) {
   };
 }
 
-export default function OrderDeliveryInfo({ order, title = "Delivery Information", mapLabel = "View Location", routeEnabled = true }) {
+export default function OrderDeliveryInfo({ order, title = "Delivery Information", mapLabel = "View Location", routeEnabled = true, onRouteMetrics }) {
   const snapshot = orderDeliverySnapshot(order);
   const mapUrl = deliveryMapUrl(snapshot);
   return (
@@ -77,7 +77,7 @@ export default function OrderDeliveryInfo({ order, title = "Delivery Information
           </div>
         ) : null}
       </div>
-      {routeEnabled ? <InlineDeliveryRoute order={order} snapshot={snapshot} /> : mapUrl ? (
+      {routeEnabled ? <InlineDeliveryRoute order={order} snapshot={snapshot} onRouteMetrics={onRouteMetrics} /> : mapUrl ? (
         <a className="order-delivery-map-button" href={mapUrl} target="_blank" rel="noreferrer">
           <MapPin size={15} /> {mapLabel}
         </a>
@@ -86,7 +86,7 @@ export default function OrderDeliveryInfo({ order, title = "Delivery Information
   );
 }
 
-function InlineDeliveryRoute({ order, snapshot }) {
+function InlineDeliveryRoute({ order, snapshot, onRouteMetrics }) {
   const [destinationSnapshot, setDestinationSnapshot] = useState(snapshot);
   const [settings, setSettings] = useState(null);
   const [route, setRoute] = useState(null);
@@ -142,6 +142,7 @@ function InlineDeliveryRoute({ order, snapshot }) {
   useEffect(() => {
     if (loadingSettings || !hasShopCoordinates || !hasDestinationCoordinates) return undefined;
     const controller = new AbortController();
+    setRoute(null);
     setLoadingRoute(true);
     setError("");
     if (import.meta.env.DEV) console.info("[route] request", { origin: { latitude: shop.latitude, longitude: shop.longitude }, destination: { latitude: destinationSnapshot.latitude, longitude: destinationSnapshot.longitude } });
@@ -174,6 +175,13 @@ function InlineDeliveryRoute({ order, snapshot }) {
       });
     return () => controller.abort();
   }, [destinationSnapshot.latitude, destinationSnapshot.longitude, hasDestinationCoordinates, hasShopCoordinates, loadingSettings, shop.latitude, shop.longitude]);
+
+  useEffect(() => {
+    if (!route || typeof onRouteMetrics !== "function") return;
+    const distanceKm = Number.isFinite(route.distanceMeters) ? Math.round((route.distanceMeters / 1000) * 10) / 10 : null;
+    const durationMinutes = Number.isFinite(route.durationSeconds) ? Math.max(1, Math.round(route.durationSeconds / 60)) : null;
+    onRouteMetrics({ distanceKm, durationMinutes });
+  }, [onRouteMetrics, route]);
 
   return <div className="retela-inline-route">
         <div className="retela-route-summary">
