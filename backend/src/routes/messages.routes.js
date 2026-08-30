@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
-import { ensureAutoIncrementId, query, requireUsableAutoIncrementId } from "../config/db.js";
+import { ensureAutoIncrementId, pool, query, requireUsableAutoIncrementId } from "../config/db.js";
 import { asyncHandler, HttpError } from "../utils/errors.js";
 import { requireApproved, requireAuth } from "../middleware/auth.js";
 import { loadSystemSettings } from "../utils/systemSettings.js";
@@ -609,6 +609,79 @@ router.get("/:conversationId/suggestions", requireAuth, asyncHandler(async (req,
 router.delete("/:conversationId", requireAuth, asyncHandler(async (req, res) => {
   if (req.user.role !== "admin") return res.status(403).json({ message: "Forbidden" });
   res.status(405).json({ message: "Messages are stored permanently and cannot be deleted." });
+}));
+
+async function releaseAllAdminTakeovers() {
+  await ensureConversationLifecycleColumns();
+  await ensureMessageStatusColumns();
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const [activeConversations] = await conn.execute(
+      `SELECT id, customer_id
+       FROM conversations
+       WHERE admin_takeover = TRUE
+         AND is_deleted = FALSE
+       FOR UPDATE`
+    );
+    if (!activeConversations.length) {
+      await conn.commit();
+      return [];
+    }
+
+    await conn.execute(
+      `UPDATE conversations
+       SET admin_takeover = FALSE,
+           updated_at = NOW()
+       WHERE admin_takeover = TRUE
+         AND is_deleted = FALSE`
+    );
+
+    for (const conversation of activeConversations) {
+      await conn.execute(
+        `INSERT INTO messages
+          (conversation_id, sender_id, sender_type, body, delivery_status, delivered_at, mode, ai_provider)
+         VALUES (?, NULL, 'ai', 'Assistant is back online', 'delivered', NOW(), 'admin', 'Admin')`,
+        [conversation.id]
+      );
+      if (conversation.customer_id) {
+        await conn.execute(
+          `INSERT INTO notifications (user_id, type, title, body)
+           VALUES (?, 'message', 'Assistant resumed', 'Assistant is back online')`,
+          [conversation.customer_id]
+        );
+      }
+    }
+    await conn.commit();
+    return activeConversations;
+  } catch (error) {
+    await conn.rollback().catch(() => {});
+    throw error;
+  } finally {
+    conn.release();
+  }
+}
+
+router.patch("/release-takeovers", requireAuth, asyncHandler(async (req, res) => {
+  if (req.user.role !== "admin") return res.status(403).json({ message: "Forbidden" });
+  const releasedConversations = await releaseAllAdminTakeovers();
+  const io = req.app.get("io");
+  for (const conversation of releasedConversations) {
+    const payload = {
+      conversation_id: Number(conversation.id),
+      admin_takeover: false,
+      message: "Assistant is back online"
+    };
+    io?.to(`conversation:${conversation.id}`).emit("chat:control", payload);
+    if (conversation.customer_id) {
+      io?.to(`user:${conversation.customer_id}`).emit("notification:new", {
+        type: "message",
+        title: "Assistant resumed",
+        body: "Assistant is back online"
+      });
+    }
+  }
+  res.json({ released: releasedConversations.length });
 }));
 
 router.patch("/:conversationId/takeover", requireAuth, asyncHandler(async (req, res) => {

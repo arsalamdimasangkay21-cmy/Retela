@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { api, clearGetCache } from "../api/client";
+import { api, clearGetCache, getStoredAuthToken } from "../api/client";
 import { disconnectSocket } from "../api/socket";
 
 const AuthContext = createContext(null);
@@ -132,6 +132,26 @@ export function AuthProvider({ children }) {
   }
 
   function logout() {
+    if (user?.role === "admin") {
+      const authToken = getStoredAuthToken();
+      if (authToken) {
+        void api.patch(
+          "/messages/release-takeovers",
+          {},
+          {
+            timeout: 5000,
+            headers: { Authorization: `Bearer ${authToken}` }
+          }
+        ).then(({ data }) => {
+          console.info("[auth] released admin chat takeovers on logout", data);
+        }).catch((error) => {
+          console.warn("[auth] could not release admin chat takeovers on logout", {
+            status: error?.response?.status || null,
+            message: error?.message || "Release request failed"
+          });
+        });
+      }
+    }
     disconnectSocket("logout");
     localStorage.removeItem("retela_token");
     localStorage.removeItem("retela_user");
