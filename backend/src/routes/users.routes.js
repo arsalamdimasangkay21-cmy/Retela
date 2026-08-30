@@ -9,6 +9,12 @@ import { upload } from "../middleware/upload.js";
 const router = Router();
 let userColumnsReady;
 
+function setCustomerDataHeaders(res) {
+  res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+  res.set("Pragma", "no-cache");
+  res.set("Expires", "0");
+}
+
 const SAFE_USER_SELECT = `
   SELECT id, username, display_name, email, phone_number, location,
     formatted_address, delivery_barangay, delivery_municipality, delivery_province,
@@ -92,7 +98,7 @@ async function ensureUserColumns() {
        FROM INFORMATION_SCHEMA.COLUMNS
        WHERE TABLE_SCHEMA = DATABASE()
          AND TABLE_NAME = 'users'
-         AND COLUMN_NAME IN ('display_name', 'phone_number', 'location', 'formatted_address', 'delivery_barangay', 'delivery_municipality', 'delivery_province', 'delivery_region', 'delivery_postal_code', 'delivery_place_id', 'delivery_location_source', 'delivery_latitude', 'delivery_longitude', 'delivery_landmark', 'delivery_notes', 'delivery_area_override', 'birthday', 'gender', 'shop_description', 'profile_photo_url', 'gcash_number', 'debit_account_name', 'debit_account_number', 'preferences', 'last_active_at', 'is_verified')`
+         AND COLUMN_NAME IN ('display_name', 'phone_number', 'location', 'formatted_address', 'delivery_barangay', 'delivery_municipality', 'delivery_province', 'delivery_region', 'delivery_postal_code', 'delivery_place_id', 'delivery_location_source', 'delivery_latitude', 'delivery_longitude', 'delivery_landmark', 'delivery_notes', 'delivery_area_override', 'birthday', 'gender', 'shop_description', 'profile_photo_url', 'gcash_number', 'debit_account_name', 'debit_account_number', 'preferences', 'last_active_at', 'is_verified', 'suspended_at', 'suspension_reason', 'suspended_by')`
     );
     const columns = new Set(rows.map((row) => row.COLUMN_NAME));
     if (!columns.has("display_name")) {
@@ -158,6 +164,9 @@ async function ensureUserColumns() {
       await query("ALTER TABLE users ADD COLUMN is_verified BOOLEAN NOT NULL DEFAULT false AFTER status");
       await query("UPDATE users SET is_verified = true WHERE role IN ('admin','staff') OR status = 'approved'");
     }
+    if (!columns.has("suspended_at")) await query("ALTER TABLE users ADD COLUMN suspended_at DATETIME NULL AFTER status");
+    if (!columns.has("suspension_reason")) await query("ALTER TABLE users ADD COLUMN suspension_reason VARCHAR(500) NULL AFTER suspended_at");
+    if (!columns.has("suspended_by")) await query("ALTER TABLE users ADD COLUMN suspended_by INT NULL AFTER suspension_reason");
     await safeModifyColumn("users", "role", "role enum update", "ALTER TABLE users MODIFY role ENUM('admin','staff','customer') NOT NULL DEFAULT 'customer'");
     await safeModifyColumn("users", "email", "email nullable update", "ALTER TABLE users MODIFY email VARCHAR(160) NULL");
     await safeModifyColumn("users", "status", "status enum update", "ALTER TABLE users MODIFY status ENUM('pending_otp','pending','approved','rejected','suspended') NOT NULL DEFAULT 'pending_otp'");
@@ -446,8 +455,50 @@ router.get("/", asyncHandler(async (req, res) => {
       , last_active_at, created_at
      FROM users
      WHERE role = 'customer'
-     ORDER BY FIELD(status, 'pending', 'approved', 'rejected', 'suspended'), created_at DESC`
+       AND LOWER(TRIM(status)) = 'approved'
+     ORDER BY created_at DESC`
   );
+  setCustomerDataHeaders(res);
+  res.json(users);
+}));
+
+router.get("/summary", asyncHandler(async (req, res) => {
+  if (req.user.role !== "admin") return res.status(403).json({ message: "Forbidden" });
+  await ensureUserColumns();
+  const rows = await query(
+    `SELECT
+       SUM(CASE WHEN LOWER(TRIM(status)) = 'approved' THEN 1 ELSE 0 END) AS approved,
+       SUM(CASE WHEN LOWER(TRIM(status)) = 'suspended' THEN 1 ELSE 0 END) AS suspended
+     FROM users
+     WHERE role = 'customer'`
+  );
+  const approved = Number(rows[0]?.approved || 0);
+  setCustomerDataHeaders(res);
+  res.json({
+    allCustomers: approved,
+    approved,
+    suspended: Number(rows[0]?.suspended || 0)
+  });
+}));
+
+router.get("/suspended", asyncHandler(async (req, res) => {
+  if (req.user.role !== "admin") return res.status(403).json({ message: "Forbidden" });
+  await ensureUserColumns();
+  const users = await query(
+    `SELECT u.id, u.username, u.display_name, u.email, u.phone_number, u.location,
+       u.formatted_address, u.status, u.suspended_at, u.suspension_reason,
+       u.suspended_by, u.created_at,
+       CASE
+         WHEN u.suspended_by IS NULL THEN 'Customer self-deactivated'
+         ELSE COALESCE(NULLIF(TRIM(admin.display_name), ''), NULLIF(TRIM(admin.username), ''), 'Administrator')
+       END AS suspended_by_name
+     FROM users u
+     LEFT JOIN users admin ON admin.id = u.suspended_by
+     WHERE u.role = 'customer'
+       AND LOWER(TRIM(u.status)) = 'suspended'
+     ORDER BY u.suspended_at DESC, u.updated_at DESC`
+  );
+  setCustomerDataHeaders(res);
   res.json(users);
 }));
 
@@ -457,6 +508,9 @@ router.patch("/me/deactivate", asyncHandler(async (req, res) => {
   await query(
     `UPDATE users
      SET status = 'suspended',
+         suspended_at = NOW(),
+         suspension_reason = 'Customer deactivated their account.',
+         suspended_by = NULL,
          otp_code = NULL,
          otp_expires_at = NULL,
          password_reset_otp_code = NULL,
@@ -480,45 +534,81 @@ router.patch("/me/deactivate", asyncHandler(async (req, res) => {
 router.patch("/:id/status", asyncHandler(async (req, res) => {
   if (req.user.role !== "admin") return res.status(403).json({ message: "Forbidden" });
   await ensureUserColumns();
-  const schema = z.object({ status: z.enum(["pending", "approved", "rejected", "suspended"]) });
-  const { status } = schema.parse(req.body);
+  const schema = z.object({
+    status: z.preprocess((value) => String(value || "").trim().toLowerCase(), z.enum(["pending", "approved", "rejected", "suspended"])),
+    reason: z.preprocess((value) => {
+      const normalized = String(value ?? "").trim();
+      return normalized || undefined;
+    }, z.string().max(500).optional()).default("Suspended by administrator.")
+  });
+  const { status, reason } = schema.parse(req.body || {});
   const users = await query("SELECT id, username, status FROM users WHERE id = :id AND role = 'customer'", {
     id: req.params.id
   });
   if (!users.length) throw new HttpError(404, "Customer account not found");
-  const currentStatus = users[0].status;
+  const currentStatus = String(users[0].status || "").trim().toLowerCase();
   const lockedStatuses = new Set(["approved", "rejected"]);
-  if (lockedStatuses.has(currentStatus)) {
-    if (currentStatus !== status) {
-      throw new HttpError(409, `Customer status is already ${currentStatus} and cannot be changed.`);
-    }
+  if (currentStatus === status && status !== "suspended") {
     const updatedUsers = await query(
-      "SELECT id, username, email, phone_number, location, status, created_at FROM users WHERE id = :id",
+      "SELECT id, username, email, phone_number, location, status, suspended_at, suspension_reason, suspended_by, created_at FROM users WHERE id = :id",
       { id: req.params.id }
     );
     return res.json({ message: `Customer status is already ${currentStatus}`, user: updatedUsers[0] });
   }
 
-  const result = await query("UPDATE users SET status = :status WHERE id = :id AND role = 'customer'", {
-    id: req.params.id,
-    status
-  });
+  if (currentStatus === "approved" && !["approved", "suspended"].includes(status)) {
+    throw new HttpError(409, `Customer status is already ${currentStatus} and cannot be changed.`);
+  }
+  if (currentStatus === "suspended" && !["approved", "suspended"].includes(status)) {
+    throw new HttpError(409, `Customer status is already ${currentStatus} and can only be restored to approved.`);
+  }
+  if (lockedStatuses.has(currentStatus) && currentStatus !== "approved") {
+    throw new HttpError(409, `Customer status is already ${currentStatus} and cannot be changed.`);
+  }
+
+  const suspensionFields = status === "suspended"
+    ? `suspended_at = NOW(),
+       suspension_reason = :reason,
+       suspended_by = :adminId,
+       otp_code = NULL,
+       otp_expires_at = NULL,
+       password_reset_otp_code = NULL,
+       password_reset_otp_expires_at = NULL,
+       password_reset_verified_until = NULL,`
+    : `suspended_at = NULL,
+       suspension_reason = NULL,
+       suspended_by = NULL,`;
+
+  const result = await query(
+    `UPDATE users
+     SET status = :status,
+         ${suspensionFields}
+         updated_at = NOW()
+     WHERE id = :id AND role = 'customer'`,
+    {
+      id: req.params.id,
+      status,
+      reason,
+      adminId: req.user.id
+    }
+  );
   if (Number(result.affectedRows || 0) === 0) throw new HttpError(404, "Customer account not found");
   await query(
     "INSERT INTO notifications (user_id, type, title, body) VALUES (:id, 'approval', 'Account update', :body)",
-    { id: req.params.id, body: `Your account status is now ${status}.` }
+    { id: req.params.id, body: status === "suspended" ? `Your account has been suspended. Reason: ${reason}` : "Your customer account has been restored and is ready to use again." }
   );
-  req.app.get("io")?.to(`user:${req.params.id}`).emit("notification:new", { type: "approval", title: "Account update", body: `Your account status is now ${status}.` });
+  const notificationBody = status === "suspended" ? `Your account has been suspended. Reason: ${reason}` : "Your customer account has been restored and is ready to use again.";
+  req.app.get("io")?.to(`user:${req.params.id}`).emit("notification:new", { type: "approval", title: "Account update", body: notificationBody });
   req.app.get("io")?.to("admin").emit("user:status", {
     userId: Number(req.params.id),
     status,
     last_active_at: new Date().toISOString()
   });
   const updatedUsers = await query(
-    "SELECT id, username, email, phone_number, location, status, created_at FROM users WHERE id = :id",
+    "SELECT id, username, email, phone_number, location, status, suspended_at, suspension_reason, suspended_by, created_at FROM users WHERE id = :id",
     { id: req.params.id }
   );
-  res.json({ message: "Customer status updated", user: updatedUsers[0] });
+  res.json({ message: status === "suspended" ? "Customer suspended successfully." : "Customer restored successfully.", user: updatedUsers[0] });
 }));
 
 router.delete("/:id", asyncHandler(async (req, res) => {
@@ -529,9 +619,21 @@ router.delete("/:id", asyncHandler(async (req, res) => {
   });
   if (!users.length) throw new HttpError(404, "Customer account not found");
 
+  const currentStatus = String(users[0].status || "").trim().toLowerCase();
+  if (currentStatus === "suspended") {
+    return res.json({
+      message: "Customer is already suspended. Historical data was preserved.",
+      id: Number(req.params.id),
+      status: "suspended"
+    });
+  }
+
   const result = await query(
     `UPDATE users
      SET status = 'suspended',
+         suspended_at = NOW(),
+         suspension_reason = :reason,
+         suspended_by = :adminId,
          otp_code = NULL,
          otp_expires_at = NULL,
          password_reset_otp_code = NULL,
@@ -539,7 +641,7 @@ router.delete("/:id", asyncHandler(async (req, res) => {
          password_reset_verified_until = NULL
      WHERE id = :id
        AND role = 'customer'`,
-    { id: req.params.id }
+    { id: req.params.id, reason: "Suspended by administrator.", adminId: req.user.id }
   );
   if (Number(result.affectedRows || 0) === 0) throw new HttpError(404, "Customer account not found");
   await query(

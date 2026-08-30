@@ -325,7 +325,7 @@ export async function ensureVerificationTables() {
        FROM INFORMATION_SCHEMA.COLUMNS
        WHERE TABLE_SCHEMA = DATABASE()
          AND TABLE_NAME = 'users'
-         AND COLUMN_NAME IN ('display_name','phone_number','location','formatted_address','delivery_barangay','delivery_municipality','delivery_province','delivery_region','delivery_postal_code','delivery_place_id','delivery_location_source','delivery_latitude','delivery_longitude','birthday','gender','is_verified')`
+         AND COLUMN_NAME IN ('display_name','phone_number','location','formatted_address','delivery_barangay','delivery_municipality','delivery_province','delivery_region','delivery_postal_code','delivery_place_id','delivery_location_source','delivery_latitude','delivery_longitude','birthday','gender','is_verified','suspended_at','suspension_reason','suspended_by')`
     );
     const userColumns = new Set(userRows.map((row) => row.COLUMN_NAME));
     if (!userColumns.has("display_name")) await query("ALTER TABLE users ADD COLUMN display_name VARCHAR(120) NULL AFTER username");
@@ -347,6 +347,9 @@ export async function ensureVerificationTables() {
       await query("ALTER TABLE users ADD COLUMN is_verified BOOLEAN NOT NULL DEFAULT false AFTER status");
       await query("UPDATE users SET is_verified = true WHERE role IN ('admin','staff') OR status = 'approved'");
     }
+    if (!userColumns.has("suspended_at")) await query("ALTER TABLE users ADD COLUMN suspended_at DATETIME NULL AFTER status");
+    if (!userColumns.has("suspension_reason")) await query("ALTER TABLE users ADD COLUMN suspension_reason VARCHAR(500) NULL AFTER suspended_at");
+    if (!userColumns.has("suspended_by")) await query("ALTER TABLE users ADD COLUMN suspended_by INT NULL AFTER suspension_reason");
 
     await query(
       `CREATE TABLE IF NOT EXISTS identity_verifications (

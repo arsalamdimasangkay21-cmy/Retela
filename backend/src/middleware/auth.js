@@ -12,7 +12,7 @@ async function ensureAuthUserColumns() {
        FROM INFORMATION_SCHEMA.COLUMNS
        WHERE TABLE_SCHEMA = DATABASE()
          AND TABLE_NAME = 'users'
-         AND COLUMN_NAME IN ('display_name', 'is_verified')`
+         AND COLUMN_NAME IN ('display_name', 'is_verified', 'suspended_at', 'suspension_reason', 'suspended_by')`
     );
     const columns = new Set(rows.map((row) => row.COLUMN_NAME));
     if (!columns.has("display_name")) {
@@ -22,6 +22,9 @@ async function ensureAuthUserColumns() {
       await query("ALTER TABLE users ADD COLUMN is_verified BOOLEAN NOT NULL DEFAULT false AFTER status");
       await query("UPDATE users SET is_verified = true WHERE role IN ('admin','staff') OR status = 'approved'");
     }
+    if (!columns.has("suspended_at")) await query("ALTER TABLE users ADD COLUMN suspended_at DATETIME NULL AFTER status");
+    if (!columns.has("suspension_reason")) await query("ALTER TABLE users ADD COLUMN suspension_reason VARCHAR(500) NULL AFTER suspended_at");
+    if (!columns.has("suspended_by")) await query("ALTER TABLE users ADD COLUMN suspended_by INT NULL AFTER suspension_reason");
     await safeModifyColumn("users", "role", "role enum update", "ALTER TABLE users MODIFY role ENUM('admin','staff','customer') NOT NULL DEFAULT 'customer'");
   })();
   return authUserColumnsReady;

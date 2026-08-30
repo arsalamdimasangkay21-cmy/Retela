@@ -79,7 +79,7 @@ const fallbackApparelOptions = {
   colors: ["Black", "White", "Gray", "Red", "Blue", "Green", "Yellow", "Brown", "Pink", "Purple", "Orange", "Other"]
 };
 const blankProduct = { name: "", brand: "", category: "", gender: "", size: "", color: "", price: "", stock: "1", condition: "", description: "", image_url: "" };
-const defaultCustomerFilters = { search: "", status: "all", approval: "all", sort: "newest" };
+const defaultCustomerFilters = { search: "", status: "all", customerStatus: "all", sort: "newest" };
 const SHOP_LOCATION = "Tela to Pera Thrift Shop, Midsayap, Cotabato, Philippines";
 const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || "";
 const commonCustomerLocations = ["Davao", "Cotabato", "Midsayap", "Kidapawan", "General Santos"];
@@ -228,6 +228,8 @@ export default function AdminDashboard({ active, onChange }) {
   const [inventoryProducts, setInventoryProducts] = useState([]);
   const [orders, setOrders] = useState([]);
   const [users, setUsers] = useState([]);
+  const [customerCounts, setCustomerCounts] = useState({ allCustomers: 0, approved: 0, suspended: 0 });
+  const [customersLoading, setCustomersLoading] = useState(false);
   const [notifications, setNotifications] = useState([]);
   const [notificationsLoading, setNotificationsLoading] = useState(false);
   const [returns, setReturns] = useState([]);
@@ -253,7 +255,9 @@ export default function AdminDashboard({ active, onChange }) {
   const [lowStockThreshold, setLowStockThreshold] = useState(3);
   const [busyAction, setBusyAction] = useState("");
   const [pendingProductDelete, setPendingProductDelete] = useState(null);
-  const [pendingCustomerDelete, setPendingCustomerDelete] = useState(null);
+  const [pendingCustomerSuspension, setPendingCustomerSuspension] = useState(null);
+  const [suspensionReason, setSuspensionReason] = useState("");
+  const [customerActionIds, setCustomerActionIds] = useState([]);
   const mountedRef = useRef(true);
   const refreshTimerRef = useRef(null);
   const orderRequestGuardsRef = useRef(new Set());
@@ -368,8 +372,25 @@ export default function AdminDashboard({ active, onChange }) {
   }, [canUpdate, getShared]);
 
   const loadCustomersData = useCallback(async ({ cancelled, force = false } = {}) => {
-    const { data } = await getShared("/users", {}, { force });
-    if (canUpdate(cancelled)) setUsers(data);
+    if (canUpdate(cancelled)) setCustomersLoading(true);
+    try {
+      const [userRes, summaryRes] = await Promise.all([
+        getShared("/users", {}, { force }),
+        getShared("/users/summary", {}, { force })
+      ]);
+      if (!canUpdate(cancelled)) return;
+      const activeCustomers = (Array.isArray(userRes.data) ? userRes.data : []).filter((row) => (
+        String(row.status || "").trim().toLowerCase() === "approved"
+      ));
+      setUsers(activeCustomers);
+      setCustomerCounts({
+        allCustomers: Number(summaryRes.data?.allCustomers || 0),
+        approved: Number(summaryRes.data?.approved || 0),
+        suspended: Number(summaryRes.data?.suspended || 0)
+      });
+    } finally {
+      if (canUpdate(cancelled)) setCustomersLoading(false);
+    }
   }, [canUpdate, getShared]);
 
   const loadNotificationsData = useCallback(async ({ cancelled, force = false } = {}) => {
@@ -721,31 +742,45 @@ export default function AdminDashboard({ active, onChange }) {
     }
   }
 
-  async function removeCustomer(id) {
+  async function openCustomerSuspension(id) {
     const customerId = Number(id);
     if (!Number.isInteger(customerId) || customerId <= 0) {
       showProductToast("Cannot remove customer because the customer ID is invalid.", "error");
       return;
     }
     const customer = users.find((row) => Number(row.id) === customerId);
-    setPendingCustomerDelete({ id: customerId, name: customer?.username || customer?.display_name || `Customer #${customerId}` });
+    setSuspensionReason("");
+    setPendingCustomerSuspension({ id: customerId, name: customer?.username || customer?.display_name || `Customer #${customerId}` });
   }
 
-  async function confirmRemoveCustomer() {
-    const pending = pendingCustomerDelete;
+  async function confirmSuspendCustomer() {
+    const pending = pendingCustomerSuspension;
     if (!pending?.id) return;
     const customerId = pending.id;
-    setRejectingUserIds((ids) => ids.includes(customerId) ? ids : [...ids, customerId]);
+    const reason = suspensionReason.trim() || "Suspended by administrator.";
+    setCustomerActionIds((ids) => ids.includes(customerId) ? ids : [...ids, customerId]);
     try {
-      await api.delete(`/users/${customerId}`);
+      await api.patch(`/users/${customerId}/status`, { status: "suspended", reason });
+      setUsers((current) => current.filter((row) => Number(row.id) !== customerId));
+      setCustomerCounts((current) => ({
+        allCustomers: Math.max(0, Number(current.allCustomers || 0) - 1),
+        approved: Math.max(0, Number(current.approved || 0) - 1),
+        suspended: Number(current.suspended || 0) + 1
+      }));
       clearGetCache("/users");
-      await loadCustomersData({ force: true });
-      setPendingCustomerDelete(null);
-      showProductToast("Customer removed successfully.");
+      clearGetCache("/users/summary");
+      clearGetCache("/users/suspended");
+      setPendingCustomerSuspension(null);
+      setSuspensionReason("");
+      window.dispatchEvent(new CustomEvent("retela:user-status", { detail: { userId: customerId, status: "suspended" } }));
+      showProductToast("Customer suspended and moved to Suspended Customers.");
+      loadCustomersData({ force: true }).catch((refreshError) => {
+        console.error("[customers] refresh after suspension failed", refreshError);
+      });
     } catch (error) {
-      showProductToast(getApiErrorMessage(error, "Could not remove customer."), "error");
+      showProductToast(getApiErrorMessage(error, "Could not suspend customer."), "error");
     } finally {
-      setRejectingUserIds((ids) => ids.filter((userId) => userId !== customerId));
+      setCustomerActionIds((ids) => ids.filter((userId) => userId !== customerId));
     }
   }
 
@@ -904,7 +939,9 @@ export default function AdminDashboard({ active, onChange }) {
   }
 
   if (active === "Customers") {
-    const allCustomers = users.filter((row) => row.role !== "admin");
+    const allCustomers = users.filter((row) => (
+      row.role !== "admin" && String(row.status || "").trim().toLowerCase() === "approved"
+    ));
     const normalizedSearch = customerFilters.search.trim().toLowerCase();
     const filteredCustomers = allCustomers
       .filter((customer) => {
@@ -912,11 +949,8 @@ export default function AdminDashboard({ active, onChange }) {
         const matchesStatus = customerFilters.status === "all"
           || (customerFilters.status === "active" && isCustomerActive(customer))
           || (customerFilters.status === "offline" && !isCustomerActive(customer));
-        const approval = String(customer.status || "pending").toLowerCase();
-        const matchesApproval = customerFilters.approval === "all"
-          || (customerFilters.approval === "pending" && !["approved", "rejected", "suspended"].includes(approval))
-          || approval === customerFilters.approval;
-        return matchesSearch && matchesStatus && matchesApproval;
+        const matchesCustomerStatus = customerFilters.customerStatus === "all" || customerFilters.customerStatus === "approved";
+        return matchesSearch && matchesStatus && matchesCustomerStatus;
       })
       .sort((a, b) => {
         if (customerFilters.sort === "oldest") return customerSortValue(a) - customerSortValue(b);
@@ -925,11 +959,19 @@ export default function AdminDashboard({ active, onChange }) {
         return customerSortValue(b) - customerSortValue(a);
       });
     const customerOverview = {
-      active: allCustomers.filter(isCustomerActive).length,
-      offline: allCustomers.filter((customer) => !isCustomerActive(customer)).length,
-      approved: allCustomers.filter((customer) => customer.status === "approved").length
+      allCustomers: Number(customerCounts.allCustomers || 0),
+      approved: Number(customerCounts.approved || 0),
+      suspended: Number(customerCounts.suspended || 0)
     };
     const updateCustomerFilter = (key, value) => setCustomerFilters((current) => ({ ...current, [key]: value }));
+    const handleCustomerStatusFilter = (value) => {
+      if (value === "suspended") {
+        updateCustomerFilter("customerStatus", "all");
+        onChange("Suspended Customers");
+        return;
+      }
+      updateCustomerFilter("customerStatus", value);
+    };
     const clearCustomerFilters = () => setCustomerFilters(defaultCustomerFilters);
 
     return (
@@ -939,7 +981,7 @@ export default function AdminDashboard({ active, onChange }) {
             <div className="min-w-0">
               <p>Customer Directory</p>
               <h3>Manage Customers</h3>
-              <span>{filteredCustomers.length} of {allCustomers.length} customers shown</span>
+              <span>{filteredCustomers.length} of {allCustomers.length} approved customers shown</span>
             </div>
             <button type="button" className="admin-customer-clear-link" onClick={clearCustomerFilters}>
               Clear Filters
@@ -955,38 +997,39 @@ export default function AdminDashboard({ active, onChange }) {
           />
 
           <div className="admin-customer-filter-grid" aria-label="Customer filters">
-            <select value={customerFilters.status} onChange={(event) => updateCustomerFilter("status", event.target.value)} className="admin-customer-filter-control" aria-label="Filter by online status">
-              <option value="all">All Status</option>
-              <option value="active">Active</option>
-              <option value="offline">Offline</option>
-            </select>
-            <select value={customerFilters.approval} onChange={(event) => updateCustomerFilter("approval", event.target.value)} className="admin-customer-filter-control" aria-label="Filter by approval status">
-              <option value="all">All Approval</option>
-              <option value="approved">Approved</option>
-              <option value="pending">Pending</option>
-              <option value="rejected">Rejected</option>
-            </select>
-            <select value={customerFilters.sort} onChange={(event) => updateCustomerFilter("sort", event.target.value)} className="admin-customer-filter-control" aria-label="Sort customers">
-              <option value="newest">Newest</option>
-              <option value="oldest">Oldest</option>
-              <option value="name-az">Name A-Z</option>
-              <option value="name-za">Name Z-A</option>
-            </select>
+            <label className="admin-customer-filter-field">
+              <span>Online Status</span>
+              <select value={customerFilters.status} onChange={(event) => updateCustomerFilter("status", event.target.value)} className="admin-customer-filter-control">
+                <option value="all">All Status</option>
+                <option value="active">Active</option>
+                <option value="offline">Offline</option>
+              </select>
+            </label>
+            <label className="admin-customer-filter-field">
+              <span>Customer Status</span>
+              <select value={customerFilters.customerStatus} onChange={(event) => handleCustomerStatusFilter(event.target.value)} className="admin-customer-filter-control">
+                <option value="all">All Customers</option>
+                <option value="approved">Approved</option>
+                <option value="suspended">Suspended</option>
+              </select>
+            </label>
+            <label className="admin-customer-filter-field">
+              <span>Sort</span>
+              <select value={customerFilters.sort} onChange={(event) => updateCustomerFilter("sort", event.target.value)} className="admin-customer-filter-control">
+                <option value="newest">Newest</option>
+                <option value="oldest">Oldest</option>
+                <option value="name-az">Name A-Z</option>
+                <option value="name-za">Name Z-A</option>
+              </select>
+            </label>
           </div>
 
           <div className="admin-customer-overview-grid" aria-label="Customer overview">
             <div className="admin-customer-overview-card">
               <span className="admin-customer-overview-icon"><UserRound size={16} /></span>
               <div>
-                <span>Active</span>
-                <strong>{customerOverview.active}</strong>
-              </div>
-            </div>
-            <div className="admin-customer-overview-card">
-              <span className="admin-customer-overview-icon"><Clock3 size={16} /></span>
-              <div>
-                <span>Offline</span>
-                <strong>{customerOverview.offline}</strong>
+                <span>All Customers</span>
+                <strong>{customerOverview.allCustomers}</strong>
               </div>
             </div>
             <div className="admin-customer-overview-card">
@@ -996,31 +1039,61 @@ export default function AdminDashboard({ active, onChange }) {
                 <strong>{customerOverview.approved}</strong>
               </div>
             </div>
+            <div className="admin-customer-overview-card">
+              <span className="admin-customer-overview-icon is-suspended"><Archive size={16} /></span>
+              <div>
+                <span>Suspended</span>
+                <strong>{customerOverview.suspended}</strong>
+              </div>
+            </div>
           </div>
         </Card>
-        <CustomersResponsiveView
-          rows={filteredCustomers}
-          rejectingUserIds={rejectingUserIds}
-          onApprove={(id) => approveUser(id, "approved")}
-          onView={(id) => setSelectedDocumentCustomerId(id)}
-          onDelete={removeCustomer}
-        />
+        {customersLoading && !allCustomers.length ? (
+          <Card className="admin-customers-card"><div className="customer-list-loading"><Loader2 size={22} className="animate-spin" /><span>Loading approved customers...</span></div></Card>
+        ) : (
+          <CustomersResponsiveView
+            rows={filteredCustomers}
+            rejectingUserIds={customerActionIds}
+            onApprove={(id) => approveUser(id, "approved")}
+            onView={(id) => setSelectedDocumentCustomerId(id)}
+            onSuspend={openCustomerSuspension}
+          />
+        )}
         <CustomerDocumentsModal customerId={selectedDocumentCustomerId} open={Boolean(selectedDocumentCustomerId)} onClose={() => setSelectedDocumentCustomerId(null)} />
         <ConfirmDialog
-          open={Boolean(pendingCustomerDelete)}
-          title="Remove customer account?"
-          message="This customer account will be removed from the active customers list."
-          detail={pendingCustomerDelete?.name}
-          confirmLabel="Remove Customer"
-          busy={Boolean(pendingCustomerDelete?.id && rejectingUserIds.includes(pendingCustomerDelete.id))}
+          open={Boolean(pendingCustomerSuspension)}
+          title="Suspend customer?"
+          message="This account will lose access to RETELA and move to the Suspended Customers repository. Orders, conversations, notifications, payments, and history will be preserved."
+          detail={pendingCustomerSuspension?.name}
+          confirmLabel="Suspend Customer"
+          busyLabel="Suspending..."
+          busy={Boolean(pendingCustomerSuspension?.id && customerActionIds.includes(pendingCustomerSuspension.id))}
           onClose={() => {
-            if (!pendingCustomerDelete?.id || !rejectingUserIds.includes(pendingCustomerDelete.id)) setPendingCustomerDelete(null);
+            if (!pendingCustomerSuspension?.id || !customerActionIds.includes(pendingCustomerSuspension.id)) {
+              setPendingCustomerSuspension(null);
+              setSuspensionReason("");
+            }
           }}
-          onConfirm={confirmRemoveCustomer}
-        />
+          onConfirm={confirmSuspendCustomer}
+        >
+          <label className="grid gap-2 text-sm font-bold text-slate-700" htmlFor="customer-suspension-reason">
+            Suspension reason
+            <textarea
+              id="customer-suspension-reason"
+              value={suspensionReason}
+              onChange={(event) => setSuspensionReason(event.target.value)}
+              maxLength={500}
+              rows={3}
+              placeholder="Explain why this customer is being suspended"
+              className="min-h-24 w-full resize-y rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-medium text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100"
+            />
+          </label>
+        </ConfirmDialog>
       </div>
     );
   }
+
+  if (active === "Suspended Customers") return <SuspendedCustomersView onChange={onChange} showToast={showProductToast} />;
 
   if (active === "Reports" || active === "Sales Analytics" || active === "Sales") {
     return <SalesAnalytics summary={summary} onViewInventory={(product) => { setInventoryFocusSku(productSku(product)); onChange("Inventory"); }} />;
@@ -2816,7 +2889,7 @@ function DashboardRevenueTooltip({ active, payload, label }) {
 function FuturisticDashboard({ summary, products, orders, users, notifications, notificationsLoading = false, lowStockThreshold = 3, onChange, onNotificationClick }) {
   const totalRevenue = Number(summary?.sales?.total_sales || 0);
   const totalOrders = Number(summary?.sales?.order_count || orders.length || 0);
-  const customerCount = users.filter((row) => row.status !== "rejected").length;
+  const customerCount = users.filter((row) => String(row.status || "").trim().toLowerCase() === "approved").length;
   const aiConversations = notifications.filter((row) => row.type === "message").length;
   const conversionRate = customerCount ? Math.min(100, Math.round((totalOrders / customerCount) * 100)) : 0;
   const monthlySales = summary?.monthlySales || [];
@@ -5123,11 +5196,11 @@ function TableCard({ rows, actions, rowClassName, columns }) {
   );
 }
 
-function CustomersResponsiveView({ rows, rejectingUserIds = [], onApprove, onView, onDelete }) {
+function CustomersResponsiveView({ rows, rejectingUserIds = [], onApprove, onView, onSuspend }) {
   if (!rows.length) {
     return (
       <Card>
-        <EmptyState title="No customers found" subtitle="Approved and pending customer accounts will appear here." />
+        <EmptyState title="No approved customers found" subtitle="Approved customer accounts will appear here after they are verified or restored." />
       </Card>
     );
   }
@@ -5179,7 +5252,7 @@ function CustomersResponsiveView({ rows, rejectingUserIds = [], onApprove, onVie
                       customer={customer}
                       disabled={rejectingUserIds.includes(customer.id)}
                       onView={onView}
-                      onDelete={onDelete}
+                      onSuspend={onSuspend}
                     />
                   </td>
                 </tr>
@@ -5197,7 +5270,7 @@ function CustomersResponsiveView({ rows, rejectingUserIds = [], onApprove, onVie
             disabled={rejectingUserIds.includes(customer.id)}
             onApprove={onApprove}
             onView={onView}
-            onDelete={onDelete}
+            onSuspend={onSuspend}
           />
         ))}
       </div>
@@ -5205,7 +5278,252 @@ function CustomersResponsiveView({ rows, rejectingUserIds = [], onApprove, onVie
   );
 }
 
-function CustomerTableActions({ customer, disabled, onView, onDelete }) {
+function SuspendedCustomersView({ onChange, showToast }) {
+  const [customers, setCustomers] = useState([]);
+  const [search, setSearch] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [selectedCustomer, setSelectedCustomer] = useState(null);
+  const [pendingRestore, setPendingRestore] = useState(null);
+  const [restoringId, setRestoringId] = useState(null);
+
+  const loadSuspendedCustomers = useCallback(async () => {
+    setLoading(true);
+    try {
+      const { data } = await api.get("/users/suspended");
+      setCustomers((Array.isArray(data) ? data : []).filter((customer) => (
+        String(customer.status || "").trim().toLowerCase() === "suspended"
+      )));
+      setError("");
+    } catch (requestError) {
+      setError(getApiErrorMessage(requestError, "Could not load suspended customers."));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadSuspendedCustomers().catch(() => {});
+  }, [loadSuspendedCustomers]);
+
+  useEffect(() => {
+    const handleUserStatus = (event) => {
+      const status = String(event.detail?.status || "").trim().toLowerCase();
+      if (["approved", "suspended"].includes(status)) loadSuspendedCustomers().catch(() => {});
+    };
+    window.addEventListener("retela:user-status", handleUserStatus);
+    return () => window.removeEventListener("retela:user-status", handleUserStatus);
+  }, [loadSuspendedCustomers]);
+
+  const filteredCustomers = useMemo(() => {
+    const normalizedSearch = search.trim().toLowerCase();
+    if (!normalizedSearch) return customers;
+    return customers.filter((customer) => [
+      customerDisplayName(customer),
+      customer.email,
+      customer.phone_number,
+      customer.location,
+      customer.formatted_address,
+      customer.suspension_reason,
+      customer.suspended_by_name
+    ].some((value) => String(value || "").toLowerCase().includes(normalizedSearch)));
+  }, [customers, search]);
+
+  async function restoreCustomer() {
+    if (!pendingRestore?.id) return;
+    const customerId = Number(pendingRestore.id);
+    setRestoringId(customerId);
+    try {
+      await api.patch(`/users/${customerId}/status`, { status: "approved" });
+      setCustomers((current) => current.filter((customer) => Number(customer.id) !== customerId));
+      setSelectedCustomer(null);
+      setPendingRestore(null);
+      clearGetCache("/users");
+      clearGetCache("/users/summary");
+      clearGetCache("/users/suspended");
+      window.dispatchEvent(new CustomEvent("retela:user-status", { detail: { userId: customerId, status: "approved" } }));
+      showToast?.("Customer restored successfully.");
+      onChange?.("Customers");
+    } catch (requestError) {
+      showToast?.(getApiErrorMessage(requestError, "Could not restore customer."), "error");
+    } finally {
+      setRestoringId(null);
+    }
+  }
+
+  return (
+    <div className="admin-customers-page grid gap-4">
+      <Card className="admin-customers-card suspended-customers-header">
+        <div className="suspended-customers-heading">
+          <div className="min-w-0">
+            <p>Data Management</p>
+            <div className="suspended-customers-title-row">
+              <h3>Suspended Customers</h3>
+              <span className="customer-approval-badge is-suspended">Suspended</span>
+            </div>
+            <span>Customer accounts are preserved here until an administrator restores them.</span>
+          </div>
+          <button type="button" className="suspended-back-button" onClick={() => onChange?.("Customers")}>
+            <ChevronLeft size={17} /> Manage Customers
+          </button>
+        </div>
+        <Field
+          icon={Search}
+          placeholder="Search suspended customers by name, email, phone, or reason"
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          wrapperClassName="admin-customer-search"
+        />
+        <div className="suspended-customers-summary">
+          <span className="suspended-summary-icon"><Archive size={17} /></span>
+          <span><strong>{customers.length}</strong> suspended account{customers.length === 1 ? "" : "s"}</span>
+        </div>
+      </Card>
+
+      <Card className="admin-customers-card suspended-customers-card">
+        {loading ? (
+          <div className="customer-list-loading"><Loader2 size={22} className="animate-spin" /><span>Loading suspended customers...</span></div>
+        ) : error ? (
+          <div className="suspended-customers-error">
+            <p>{error}</p>
+            <button type="button" onClick={() => loadSuspendedCustomers()} className="suspended-retry-button">Try again</button>
+          </div>
+        ) : filteredCustomers.length ? (
+          <div className="suspended-customers-table-wrapper" role="region" aria-label="Suspended customers table" tabIndex={0}>
+            <table className="customers-table suspended-customers-table">
+              <thead>
+                <tr>
+                  <th>Display Name</th>
+                  <th>Email</th>
+                  <th>Phone</th>
+                  <th>Location</th>
+                  <th>Suspension Date</th>
+                  <th>Suspension Reason</th>
+                  <th>Admin</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredCustomers.map((customer) => (
+                  <tr key={customer.id}>
+                    <td className="customer-wrap">
+                      <div className="customer-name-cell">
+                        <span className="customer-table-avatar" aria-hidden="true">{customerInitials(customer)}</span>
+                        <span className="customer-table-name-text">{customerDisplayName(customer)}</span>
+                      </div>
+                    </td>
+                    <td className="customer-wrap">{customer.email || "-"}</td>
+                    <td className="customer-nowrap">{customer.phone_number || "-"}</td>
+                    <td className="customer-wrap">{customer.location || customer.formatted_address || "-"}</td>
+                    <td className="customer-nowrap">{formatAdminDate(customer.suspended_at)}</td>
+                    <td className="customer-wrap">{customer.suspension_reason || "Not provided"}</td>
+                    <td className="customer-wrap">{customer.suspended_by_name || "Administrator"}</td>
+                    <td>
+                      <div className="suspended-customer-actions">
+                        <button type="button" className="suspended-view-details" onClick={() => setSelectedCustomer(customer)}>View Details</button>
+                        <button type="button" className="suspended-restore-button" disabled={Boolean(restoringId)} onClick={() => setPendingRestore(customer)}>
+                          {restoringId === Number(customer.id) ? <Loader2 size={14} className="animate-spin" /> : <RotateCcw size={14} />}
+                          Restore Customer
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <EmptyState title={customers.length ? "No suspended customers match your search" : "No suspended customers"} subtitle={customers.length ? "Try another search term." : "Suspended customer accounts will appear here after an administrator suspends them."} />
+        )}
+      </Card>
+
+      <ConfirmDialog
+        open={Boolean(pendingRestore)}
+        title="Restore customer?"
+        message="This customer will regain access to RETELA and return to the approved customer list. Their orders, conversations, notifications, payments, and history will remain intact."
+        detail={pendingRestore ? customerDisplayName(pendingRestore) : ""}
+        confirmLabel="Restore Customer"
+        busyLabel="Restoring..."
+        destructive={false}
+        busy={Boolean(restoringId)}
+        onClose={() => {
+          if (!restoringId) setPendingRestore(null);
+        }}
+        onConfirm={restoreCustomer}
+      />
+      <SuspendedCustomerDetailsModal
+        customer={selectedCustomer}
+        restoring={Boolean(restoringId)}
+        onClose={() => setSelectedCustomer(null)}
+        onRestore={() => {
+          setPendingRestore(selectedCustomer);
+          setSelectedCustomer(null);
+        }}
+      />
+    </div>
+  );
+}
+
+function SuspendedCustomerDetailsModal({ customer, restoring, onClose, onRestore }) {
+  if (!customer) return null;
+  return createPortal(
+    <AnimatePresence>
+      <motion.div
+        className="retela-modal-backdrop z-[1800]"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        onMouseDown={onClose}
+      >
+        <motion.div
+          className="retela-modal-card modal-md"
+          initial={{ opacity: 0, y: 14, scale: 0.96 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          exit={{ opacity: 0, y: 14, scale: 0.96 }}
+          transition={{ duration: 0.18 }}
+          onMouseDown={(event) => event.stopPropagation()}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="suspended-customer-details-title"
+        >
+          <div className="retela-modal-body">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-xs font-bold uppercase tracking-[0.16em] text-blue-600">Suspended Customer</p>
+                <h3 id="suspended-customer-details-title" className="mt-2 text-2xl font-extrabold text-slate-950">{customerDisplayName(customer)}</h3>
+              </div>
+              <button type="button" onClick={onClose} className="retela-modal-close" aria-label="Close customer details"><X size={18} /></button>
+            </div>
+            <div className="suspended-details-grid mt-5">
+              <SuspendedCustomerDetail label="Email" value={customer.email || "Not provided"} />
+              <SuspendedCustomerDetail label="Phone" value={customer.phone_number || "Not provided"} />
+              <SuspendedCustomerDetail label="Location" value={customer.location || customer.formatted_address || "Not provided"} />
+              <SuspendedCustomerDetail label="Suspension date" value={formatAdminDate(customer.suspended_at)} />
+              <SuspendedCustomerDetail label="Suspension reason" value={customer.suspension_reason || "Not provided"} />
+              <SuspendedCustomerDetail label="Admin who suspended" value={customer.suspended_by_name || "Administrator"} />
+            </div>
+          </div>
+          <div className="retela-modal-footer">
+            <button type="button" onClick={onClose} disabled={restoring} className="min-h-11 rounded-2xl border border-slate-200 bg-white px-4 text-sm font-bold text-slate-700 transition hover:border-emerald-300 hover:text-emerald-700 disabled:opacity-60">Close</button>
+            <button type="button" onClick={onRestore} disabled={restoring} className="inline-flex min-h-11 items-center gap-2 rounded-2xl border border-emerald-300 bg-emerald-50 px-4 text-sm font-bold text-emerald-700 transition hover:bg-emerald-100 disabled:opacity-60"><RotateCcw size={16} /> Restore Customer</button>
+          </div>
+        </motion.div>
+      </motion.div>
+    </AnimatePresence>,
+    document.body
+  );
+}
+
+function SuspendedCustomerDetail({ label, value }) {
+  return (
+    <div className="suspended-customer-detail">
+      <span>{label}</span>
+      <strong>{value || "Not provided"}</strong>
+    </div>
+  );
+}
+
+function CustomerTableActions({ customer, disabled, onView, onSuspend }) {
   return (
     <div className="customer-table-actions">
       <button
@@ -5220,18 +5538,18 @@ function CustomerTableActions({ customer, disabled, onView, onDelete }) {
       <button
         type="button"
         disabled={disabled}
-        onClick={() => onDelete?.(customer.id)}
-        className="customer-action-delete"
-        aria-label={`Delete customer ${customer.username || customer.id}`}
-        title="Delete customer"
+        onClick={() => onSuspend?.(customer.id)}
+        className="customer-action-suspend"
+        aria-label={`Suspend customer ${customer.username || customer.id}`}
+        title="Suspend customer"
       >
-        <Trash2 size={17} />
+        <Archive size={17} />
       </button>
     </div>
   );
 }
 
-function CustomerMobileCard({ customer, disabled, onApprove, onView, onDelete }) {
+function CustomerMobileCard({ customer, disabled, onApprove, onView, onSuspend }) {
   return (
     <article className={`customer-mobile-card ${disabled ? "trash-vanish" : ""}`}>
       <div className="customer-mobile-card-top">
@@ -5274,12 +5592,12 @@ function CustomerMobileCard({ customer, disabled, onApprove, onView, onDelete })
           <button
             type="button"
             disabled={disabled}
-            onClick={() => onDelete?.(customer.id)}
-            className="customer-action-delete"
-            aria-label={`Delete customer ${customer.username || customer.id}`}
-            title="Delete customer"
+            onClick={() => onSuspend?.(customer.id)}
+            className="customer-action-suspend"
+            aria-label={`Suspend customer ${customer.username || customer.id}`}
+            title="Suspend customer"
           >
-            <Trash2 size={17} />
+            <Archive size={17} />
           </button>
         </div>
       </div>
@@ -5297,15 +5615,16 @@ function MobileCustomerRow({ label, value, wide = false }) {
 }
 
 function CustomerApprovalStatus({ status }) {
+  const normalizedStatus = String(status || "pending").trim().toLowerCase();
   return (
-    <span className={`customer-approval-badge is-${status || "pending"}`}>
-      {status === "pending_otp" ? "Awaiting email OTP" : registrationStatusLabel(status)}
+    <span className={`customer-approval-badge is-${normalizedStatus}`}>
+      {normalizedStatus === "pending_otp" ? "Awaiting email OTP" : registrationStatusLabel(normalizedStatus)}
     </span>
   );
 }
 
 function CustomerApprovalControl({ customer, disabled, onApprove }) {
-  const approved = customer.status === "approved";
+  const approved = String(customer.status || "").trim().toLowerCase() === "approved";
   return approved ? (
     <span className="customer-approved-compact">
       <Check size={14} />
@@ -5625,10 +5944,11 @@ function normalizeLocationText(location) {
 }
 
 function registrationStatusLabel(status) {
-  if (status === "approved") return "Approved";
-  if (status === "rejected") return "Declined";
-  if (status === "suspended") return "Suspended";
-  return status ? status.charAt(0).toUpperCase() + status.slice(1).replace(/_/g, " ") : "Pending";
+  const normalizedStatus = String(status || "").trim().toLowerCase();
+  if (normalizedStatus === "approved") return "Approved";
+  if (normalizedStatus === "rejected") return "Declined";
+  if (normalizedStatus === "suspended") return "Suspended";
+  return normalizedStatus ? normalizedStatus.charAt(0).toUpperCase() + normalizedStatus.slice(1).replace(/_/g, " ") : "Pending";
 }
 
 function AdminLocations({ users }) {

@@ -562,6 +562,9 @@ async function ensureCoreTables() {
       password_hash VARCHAR(255) NOT NULL,
       role ENUM('admin','staff','customer') NOT NULL DEFAULT 'customer',
       status ENUM('pending_otp','pending','approved','rejected','suspended') NOT NULL DEFAULT 'pending_otp',
+      suspended_at DATETIME NULL,
+      suspension_reason VARCHAR(500) NULL,
+      suspended_by INT NULL,
       is_verified BOOLEAN NOT NULL DEFAULT false,
       otp_code VARCHAR(6) NULL,
       otp_expires_at DATETIME NULL,
@@ -601,6 +604,9 @@ async function ensureCoreTables() {
   await ensureColumn("users", "debit_account_name", "debit_account_name VARCHAR(120) NULL AFTER gcash_number");
   await ensureColumn("users", "debit_account_number", "debit_account_number VARCHAR(40) NULL AFTER debit_account_name");
   await ensureColumn("users", "is_verified", "is_verified BOOLEAN NOT NULL DEFAULT false AFTER status");
+  await ensureColumn("users", "suspended_at", "suspended_at DATETIME NULL AFTER status");
+  await ensureColumn("users", "suspension_reason", "suspension_reason VARCHAR(500) NULL AFTER suspended_at");
+  await ensureColumn("users", "suspended_by", "suspended_by INT NULL AFTER suspension_reason");
   await ensureColumn("users", "otp_code", "otp_code VARCHAR(6) NULL AFTER is_verified");
   await ensureColumn("users", "otp_expires_at", "otp_expires_at DATETIME NULL AFTER otp_code");
   await ensureColumn("users", "password_reset_otp_code", "password_reset_otp_code VARCHAR(6) NULL AFTER otp_expires_at");

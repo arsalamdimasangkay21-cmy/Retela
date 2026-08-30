@@ -13,6 +13,7 @@ export default function ConfirmDialog({
   cancelLabel = "Cancel",
   destructive = true,
   busy = false,
+  children,
   onConfirm,
   onClose
 }) {
@@ -66,6 +67,7 @@ export default function ConfirmDialog({
                 </div>
                 <p className="mt-2 text-sm leading-6 text-slate-600">{message}</p>
                 {detail ? <p className="mt-3 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-bold text-slate-700">{detail}</p> : null}
+                {children ? <div className="mt-4">{children}</div> : null}
               </div>
             </div>
             <div className="retela-modal-footer">

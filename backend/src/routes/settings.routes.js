@@ -4,11 +4,9 @@ import { fileURLToPath } from "url";
 import { Router } from "express";
 import { z } from "zod";
 import { query } from "../config/db.js";
-import { UPLOAD_ROOT } from "../config/uploads.js";
 import { requireAuth, requireRole } from "../middleware/auth.js";
 import { settingsUpload } from "../middleware/upload.js";
 import { asyncHandler, HttpError } from "../utils/errors.js";
-import { ensureProductInventoryColumns } from "../utils/productInventory.js";
 import {
   DEFAULT_SYSTEM_SETTINGS,
   GCASH_QR_URL,
@@ -43,7 +41,6 @@ const router = Router();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const backendRoot = path.join(__dirname, "../..");
-const uploadsDir = UPLOAD_ROOT;
 const defaultShippingFallback = {
   type: "fixed",
   name: "Standard Shipping",
@@ -539,90 +536,6 @@ router.post("/reset", asyncHandler(async (req, res) => {
   });
 }));
 
-async function deleteProductUploads(imageRows) {
-  const filenames = Array.from(new Set(
-    imageRows
-      .map((row) => String(row.image_url || "").trim())
-      .filter((url) => url.startsWith("/uploads/"))
-      .map((url) => path.basename(url))
-      .filter(Boolean)
-  ));
-  await Promise.all(filenames.map((filename) => fs.unlink(path.join(uploadsDir, filename)).catch(() => {})));
-  return filenames.length;
-}
-
-async function resetBusinessAutoIncrements() {
-  const tables = await query(
-    `SELECT TABLE_NAME, TABLE_TYPE
-     FROM INFORMATION_SCHEMA.TABLES
-     WHERE TABLE_SCHEMA = DATABASE()
-       AND TABLE_NAME IN ('apparel_items', 'products', 'orders', 'returns')`
-  );
-  const hasApparelTable = tables.some((row) => row.TABLE_NAME === "apparel_items" && row.TABLE_TYPE === "BASE TABLE");
-  const hasProductsTable = tables.some((row) => row.TABLE_NAME === "products" && row.TABLE_TYPE === "BASE TABLE");
-  const resetIfSafe = async (tableName) => {
-    try {
-      const [idColumn] = await query(
-        `SELECT COLUMN_NAME, EXTRA
-         FROM INFORMATION_SCHEMA.COLUMNS
-         WHERE TABLE_SCHEMA = DATABASE()
-           AND TABLE_NAME = :tableName
-           AND COLUMN_NAME = 'id'
-         LIMIT 1`,
-        { tableName }
-      );
-      const primaryKeyRows = await query(
-        `SELECT kcu.COLUMN_NAME
-         FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc
-         JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE kcu
-           ON tc.CONSTRAINT_SCHEMA = kcu.CONSTRAINT_SCHEMA
-          AND tc.TABLE_NAME = kcu.TABLE_NAME
-          AND tc.CONSTRAINT_NAME = kcu.CONSTRAINT_NAME
-         WHERE tc.CONSTRAINT_SCHEMA = DATABASE()
-           AND tc.TABLE_NAME = :tableName
-           AND tc.CONSTRAINT_TYPE = 'PRIMARY KEY'
-         ORDER BY kcu.ORDINAL_POSITION`,
-        { tableName }
-      );
-      const primaryKeyColumns = primaryKeyRows.map((row) => row.COLUMN_NAME);
-      if (!idColumn || !String(idColumn.EXTRA || "").includes("auto_increment") || primaryKeyColumns.length !== 1 || primaryKeyColumns[0] !== "id") {
-        console.warn(`[schema reset] Skipping AUTO_INCREMENT reset on ${tableName}: id is not an AUTO_INCREMENT PRIMARY KEY`);
-        return;
-      }
-      await query(`ALTER TABLE \`${tableName}\` AUTO_INCREMENT = 1`);
-    } catch (error) {
-      console.warn(`[schema reset] Skipping AUTO_INCREMENT reset on ${tableName}: ${error.message}`);
-    }
-  };
-  if (hasApparelTable) await resetIfSafe("apparel_items");
-  if (!hasApparelTable && hasProductsTable) await resetIfSafe("products");
-  await resetIfSafe("orders");
-  await resetIfSafe("returns");
-}
-
-router.post("/clear-demo-data", asyncHandler(async (req, res) => {
-  await ensureProductInventoryColumns();
-  const productImages = await query("SELECT image_url FROM products WHERE image_url IS NOT NULL AND image_url <> ''");
-
-  await query("DELETE FROM returns");
-  await query("DELETE FROM reviews WHERE order_id IS NOT NULL OR product_id IS NOT NULL");
-  await query("DELETE FROM notifications WHERE type IN ('order', 'refund', 'new_product', 'inventory', 'feedback')");
-  await query("DELETE FROM orders");
-  await query("DELETE FROM products");
-  await query("DELETE FROM conversations WHERE is_archived = TRUE OR is_deleted = TRUE");
-  await query("DELETE FROM broadcasts WHERE is_deleted = TRUE");
-  await resetBusinessAutoIncrements();
-
-  const deletedUploadCount = await deleteProductUploads(productImages);
-  req.app.get("io")?.emit("inventory:update", { type: "inventory", action: "cleared" });
-  req.app.get("io")?.emit("retela:data-change", { type: "demo-data-cleared" });
-
-  res.json({
-    message: "Demo data cleared successfully. System is ready for client deployment.",
-    deletedUploadCount
-  });
-}));
-
 router.get("/backup", asyncHandler(async (req, res) => {
   const { config, encryptedOpenAiApiKey } = await loadSystemSettings();
   const backup = {
@@ -631,7 +544,7 @@ router.get("/backup", asyncHandler(async (req, res) => {
     generatedAt: new Date().toISOString(),
     settings: sanitizeSystemSettings(config, encryptedOpenAiApiKey),
     data: {
-      users: await query("SELECT id, username, display_name, email, phone_number, location, birthday, gender, role, status, created_at, updated_at FROM users ORDER BY id ASC"),
+      users: await query("SELECT id, username, display_name, email, phone_number, location, birthday, gender, role, status, suspended_at, suspension_reason, suspended_by, created_at, updated_at FROM users ORDER BY id ASC"),
       products: await query("SELECT * FROM products ORDER BY id ASC"),
       orders: await query("SELECT * FROM orders ORDER BY id ASC"),
       order_items: await query("SELECT * FROM order_items ORDER BY id ASC"),

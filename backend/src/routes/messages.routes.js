@@ -437,6 +437,7 @@ router.get("/conversations", requireAuth, asyncHandler(async (req, res) => {
         FROM conversations c
         JOIN users u ON u.id = c.customer_id
         WHERE u.role = 'customer'
+          AND LOWER(TRIM(u.status)) = 'approved'
           AND c.is_archived = FALSE
           AND c.is_deleted = FALSE
         ORDER BY c.updated_at DESC

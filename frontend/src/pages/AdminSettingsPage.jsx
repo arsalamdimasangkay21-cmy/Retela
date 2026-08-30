@@ -168,7 +168,7 @@ const sectionDescriptions = {
   appearance: "Dashboard theme, layout density, dark mode, and sidebar behavior.",
   customers: "Customer onboarding, welcome messages, loyalty rewards, and broadcasts.",
   about: "Customer-facing shop story, location, support, policies, team, and business details.",
-  dataManagement: "Access archived and deleted records without changing how recovery and permanent deletion work.",
+  dataManagement: "Review preserved customer suspensions, archived conversations, and deleted operational records.",
   backup: "Database health, backups, restores, and downloadable backend logs."
 };
 
@@ -327,7 +327,6 @@ export default function AdminSettingsPage({ onChange }) {
   const [removeQrConfirmOpen, setRemoveQrConfirmOpen] = useState(false);
   const [gcashQrVersion, setGcashQrVersion] = useState(0);
   const [userTheme, setUserTheme] = useState(() => readUserTheme(user));
-  const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
   const showBlockingLoader = useBlockingLoader(loading);
   const restoreInputRef = useRef(null);
   const toastTimerRef = useRef(null);
@@ -818,21 +817,6 @@ export default function AdminSettingsPage({ onChange }) {
     }
   }
 
-  async function clearDemoData() {
-    setSaving("clearDemoData");
-    try {
-      const { data } = await api.post("/settings/clear-demo-data");
-      clearGetCache("/settings");
-      window.dispatchEvent(new CustomEvent("retela:data-change", { detail: { type: "demo-data-cleared" } }));
-      setClearConfirmOpen(false);
-      pushToast("success", data.message || "Demo data cleared successfully. System is ready for client deployment.");
-    } catch (error) {
-      pushToast("error", getApiErrorMessage(error, "Could not clear demo data."));
-    } finally {
-      setSaving("");
-    }
-  }
-
   if (showBlockingLoader) {
     return (
       <div className="settings-loading-grid">
@@ -1106,10 +1090,10 @@ export default function AdminSettingsPage({ onChange }) {
               onClick={() => onChange?.("Trash Bin")}
             />
             <DataManagementButton
-              icon={Trash2}
-              title="Clear Demo Data"
-              description="Remove sample products, inventory, sales, orders, reports, returns, archive, and trash data before deployment."
-              onClick={() => setClearConfirmOpen(true)}
+              icon={Users}
+              title="Suspended Customers"
+              description="View and manage customer accounts that have been suspended from accessing RETELA."
+              onClick={() => onChange?.("Suspended Customers")}
             />
           </div>
         </SettingsCard>
@@ -1130,13 +1114,6 @@ export default function AdminSettingsPage({ onChange }) {
 
       <AnimatePresence>
         {toast ? <Toast key={toast.message} type={toast.type} message={toast.message} onClose={() => setToast(null)} /> : null}
-        {clearConfirmOpen ? (
-          <ClearDemoDataModal
-            saving={saving === "clearDemoData"}
-            onConfirm={clearDemoData}
-            onClose={() => setClearConfirmOpen(false)}
-          />
-        ) : null}
         {removeQrConfirmOpen ? (
           <RemoveQrModal
             saving={saving === "gcashQrRemove"}
@@ -1389,52 +1366,6 @@ function DataManagementButton({ icon: Icon, title, description, onClick }) {
         <span className="mt-2 block text-sm leading-6 text-white/58">{description}</span>
       </span>
     </button>
-  );
-}
-
-function ClearDemoDataModal({ saving, onConfirm, onClose }) {
-  return (
-    <motion.div
-      className="retela-modal-backdrop z-[170] bg-black/70"
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      onMouseDown={saving ? undefined : onClose}
-    >
-      <motion.div
-        className="retela-modal-card retela-modal-dark modal-sm"
-        initial={{ opacity: 0, scale: 0.94, y: 18 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        exit={{ opacity: 0, scale: 0.94, y: 18 }}
-        transition={{ duration: 0.22, ease: "easeOut" }}
-        onMouseDown={(event) => event.stopPropagation()}
-      >
-        <div className="retela-modal-body flex items-start gap-4">
-          <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl border border-neonbrand/25 bg-neonbrand/10 text-neonbrand">
-            <Trash2 size={22} />
-          </span>
-          <div className="min-w-0">
-            <p className="text-xs font-bold uppercase tracking-[0.18em] text-neonbrand/75">Deployment cleanup</p>
-            <h3 className="mt-2 font-display text-2xl font-bold">Clear Demo Data?</h3>
-            <p className="mt-2 text-sm leading-6 text-white/58">
-              This removes only business demo data: products, inventory stock, orders, sales/report data, returns, archive/trash items, and related product uploads. Admins, customers, credentials, roles, permissions, and shop settings stay intact.
-            </p>
-          </div>
-        </div>
-        <div className="mx-[22px] rounded-2xl border border-white/10 bg-white/[0.055] p-4 text-sm text-white/62">
-          After clearing, product, inventory, sales, orders, reports, archive, trash, and dashboard totals will start from empty data.
-        </div>
-        <div className="retela-modal-footer">
-          <button type="button" disabled={saving} onClick={onClose} className="rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm font-bold text-white transition hover:border-neonbrand/45 hover:text-neonbrand disabled:cursor-not-allowed disabled:opacity-60">
-            Cancel
-          </button>
-          <button type="button" disabled={saving} onClick={onConfirm} className="gradient-btn inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-60">
-            {saving ? <Loader2 size={17} className="animate-spin" /> : <Trash2 size={17} />}
-            Clear Demo Data
-          </button>
-        </div>
-      </motion.div>
-    </motion.div>
   );
 }
 
