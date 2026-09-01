@@ -1379,9 +1379,6 @@ function CartPage({
                 <span>{hasDeliveryCoordinates(normalizedDeliveryLocation) ? "Exact location saved" : "Address saved. Add an exact pin when available."}</span>
                 {normalizedDeliveryLocation.landmark ? <span>{normalizedDeliveryLocation.landmark}</span> : null}
                 {distanceLabel ? <span>Distance from shop: {distanceLabel}</span> : null}
-                {shippingQuote ? <span>Shipping: {shippingFeeText(shippingQuote)}</span> : shippingQuoteLoading ? <span>Calculating shipping...</span> : null}
-                {deliveryAreaText(shippingQuote) ? <span>Delivery Area: {deliveryAreaText(shippingQuote)}</span> : null}
-                {shippingQuote?.reason ? <span>Reason: {shippingQuote.reason}</span> : null}
               </>
             ) : (
               <>
