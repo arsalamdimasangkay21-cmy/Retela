@@ -116,25 +116,40 @@ function customerNotificationRows(rows = [], customerId = null) {
   });
 }
 
-function customerNotificationCategories(notification = {}) {
+function customerNotificationCategory(notification = {}) {
   const type = String(notification?.type || "").trim().toLowerCase();
   const text = [notification?.title, notification?.body, notification?.message].map((value) => String(value || "")).join(" ");
-  const categories = new Set();
-  const deliveryText = /\b(delivery|tracking|meetup|meeting place|shipped|packed|out for delivery|delivered|delivery reminder|schedule)\b/i;
-  const paymentText = /\b(payment|paid|unpaid|pending|transaction|verification|gcash|maya|refund)\b/i;
-  const productText = /\b(product|arrival|available|availability|restocked|restock|similar)\b/i;
+  const deliveryText = /\b(delivery|tracking|meetup|meeting place|meeting date|meeting time|shipped|out for delivery|delivered|delivery reminder|delivery schedule|schedule proposed)\b/i;
+  const paymentText = /\b(payment|paid|unpaid|pending|transaction|gcash|maya)\b/i;
+  const productText = /\b(product|new arrival|available|availability|restocked|restock|similar)\b/i;
+  const refundText = /\b(return|refund|refunded|refund processing|refund completed)\b/i;
+  const promotionText = /\b(promotion|promo|voucher|discount|weekend sale|shop sale)\b/i;
   const broadcastType = String(notification?.broadcast?.broadcast_type || "").trim().toLowerCase();
+  const broadcastProductType = ["new_arrival", "new_product_drop", "restock_alert"].includes(broadcastType);
+  const hasPromotion = Boolean(notification?.promo_code || Number(notification?.discount_percentage || 0) > 0 || notification?.broadcast?.sale_enabled || ["promo_sale", "flash_sale", "holiday_promo"].includes(broadcastType));
 
-  if (type === "order" || type === "order_cancelled") categories.add("orders");
-  if (type === "message") categories.add("messages");
-  if (type === "new_product" || (type === "broadcast" && (productText.test(text) || ["new_arrival", "new_product_drop", "restock_alert"].includes(broadcastType)))) categories.add("products");
-  if (type === "payment" || type === "refund" || ((type === "order" || type === "order_cancelled") && paymentText.test(text))) categories.add("payments");
-  if ((type === "order" || type === "order_cancelled") && deliveryText.test(text)) categories.add("delivery");
-  if (type === "broadcast" && /\b(delivery|tracking|meetup|meeting place|reminder)\b/i.test(text)) categories.add("delivery");
-  if (type === "return" || type === "refund") categories.add("returns");
-  if (type === "broadcast" || notification?.promo_code || notification?.broadcast?.sale_enabled) categories.add("promotions");
+  if (type === "message") return "messages";
+  if (type === "new_product") return "products";
+  if (type === "broadcast") return broadcastProductType || (productText.test(text) && !hasPromotion) ? "products" : "promotions";
+  if (type === "approval") return "account";
+  if (type === "payment") return "payments";
+  if (type === "return" || type === "refund") return "returns";
+  if ((type === "order" || type === "order_cancelled") && paymentText.test(text)) return "payments";
+  if ((type === "order" || type === "order_cancelled") && refundText.test(text)) return "returns";
+  if ((type === "order" || type === "order_cancelled") && deliveryText.test(text)) return "delivery";
+  if (type === "order" || type === "order_cancelled") return "orders";
+  if (paymentText.test(text)) return "payments";
+  if (deliveryText.test(text)) return "delivery";
+  if (productText.test(text)) return "products";
+  if (promotionText.test(text) || hasPromotion) return "promotions";
+  if (refundText.test(text)) return "returns";
 
-  return [...categories];
+  return "account";
+}
+
+function customerNotificationCategoryLabel(notification = {}) {
+  const category = typeof notification === "string" ? notification : customerNotificationCategory(notification);
+  return customerNotificationFilterOptions.find((option) => option.value === category)?.label || "Account";
 }
 
 function paymentCheckoutUrl(payload) {
@@ -1327,7 +1342,11 @@ export default function CustomerDashboard({ active, onChange }) {
 }
 
 function FloatingNotificationsWidget({ rows = [], customerId, onViewAll }) {
-  return <NotificationPreviewPanel notifications={customerNotificationRows(rows, customerId)} onViewAll={onViewAll} maxItems={3} />;
+  const notifications = customerNotificationRows(rows, customerId).map((notification) => ({
+    ...notification,
+    badge: customerNotificationCategoryLabel(notification)
+  }));
+  return <NotificationPreviewPanel notifications={notifications} onViewAll={onViewAll} maxItems={3} />;
 }
 
 function CartPage({
@@ -2544,21 +2563,25 @@ function PaymentLoadingOverlay({ method }) {
 function Notifications({ rows = [], customerId, onRead, onShopSale, onNavigate }) {
   const [selectedNotification, setSelectedNotification] = useState(null);
   const [selectedFilter, setSelectedFilter] = useState("all");
-  const customerRows = useMemo(() => customerNotificationRows(rows, customerId), [rows, customerId]);
+  const customerRows = useMemo(
+    () => customerNotificationRows(rows, customerId).map((notification) => ({
+      ...notification,
+      customerCategory: customerNotificationCategory(notification)
+    })),
+    [rows, customerId]
+  );
   const unreadCounts = useMemo(() => {
     const counts = Object.fromEntries(customerNotificationFilterOptions.map(({ value }) => [value, 0]));
     customerRows.forEach((notification) => {
       if (notification.is_read) return;
       counts.all += 1;
-      customerNotificationCategories(notification).forEach((category) => {
-        if (category in counts) counts[category] += 1;
-      });
+      if (notification.customerCategory in counts) counts[notification.customerCategory] += 1;
     });
     return counts;
   }, [customerRows]);
   const filteredRows = useMemo(() => {
     if (selectedFilter === "all") return customerRows;
-    return customerRows.filter((notification) => customerNotificationCategories(notification).includes(selectedFilter));
+    return customerRows.filter((notification) => notification.customerCategory === selectedFilter);
   }, [customerRows, selectedFilter]);
 
   async function openNotification(notification) {
@@ -2617,7 +2640,7 @@ function Notifications({ rows = [], customerId, onRead, onShopSale, onNavigate }
         <div className="grid gap-4">
           {filteredRows.length ? filteredRows.map((notification) => {
             const unread = !notification.is_read;
-            const typeLabel = notificationDisplayType(notification);
+            const categoryLabel = customerNotificationCategoryLabel(notification.customerCategory);
             const promoStatus = notificationPromoStatus(notification);
             return (
               <button key={notification.id} type="button" onClick={() => openNotification(notification)} className="group text-left outline-none">
@@ -2627,7 +2650,7 @@ function Notifications({ rows = [], customerId, onRead, onShopSale, onNavigate }
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <strong className={`break-words ${unread ? "text-white" : ""}`}>{notification.title}</strong>
-                        <span className="rounded-full border border-neonbrand/20 bg-neonbrand/10 px-2.5 py-1 text-[11px] font-black uppercase tracking-[0.1em] text-neonbrand">{typeLabel}</span>
+                        <span className="rounded-full border border-neonbrand/20 bg-neonbrand/10 px-2.5 py-1 text-[11px] font-black uppercase tracking-[0.1em] text-neonbrand">{categoryLabel}</span>
                         {promoStatus ? <span className={`rounded-full px-2.5 py-1 text-[11px] font-black uppercase tracking-[0.1em] ${promoStatus.expired ? "bg-rose-50 text-rose-700" : "bg-emerald-50 text-emerald-700"}`}>{promoStatus.label}</span> : null}
                       </div>
                       <p className="mt-1 line-clamp-2 break-words text-sm text-slate-500">{notification.body || notification.message}</p>
@@ -2714,6 +2737,7 @@ function notificationNavigationTarget(notification) {
 function NotificationDetailModal({ notification, onClose, onCopyPromo, onShopSale }) {
   const promoStatus = notificationPromoStatus(notification);
   const displayType = notificationDisplayType(notification);
+  const categoryLabel = customerNotificationCategoryLabel(notification);
   const promoCode = notification.promo_code || notification.broadcast?.promo_code || "";
   const discount = Number(notification.discount_percentage || notification.broadcast?.discount_percentage || 0);
   const relatedProducts = Array.isArray(notification.related_products) ? notification.related_products : [];
@@ -2755,7 +2779,7 @@ function NotificationDetailModal({ notification, onClose, onCopyPromo, onShopSal
             <div className="flex flex-wrap items-center gap-2">
               <span className="inline-flex items-center gap-1 rounded-full border border-neonbrand/25 bg-neonbrand/10 px-3 py-1 text-xs font-black uppercase tracking-[0.12em] text-neonbrand">
                 {displayType === "promo" ? <Tag size={13} /> : <Megaphone size={13} />}
-                {displayType}
+                {categoryLabel}
               </span>
               {promoStatus ? <span className={`rounded-full px-3 py-1 text-xs font-black uppercase tracking-[0.12em] ${promoStatus.expired ? "bg-rose-500/15 text-rose-200" : "bg-emerald-400/15 text-emerald-100"}`}>{promoStatus.label}</span> : null}
             </div>
@@ -2774,7 +2798,7 @@ function NotificationDetailModal({ notification, onClose, onCopyPromo, onShopSal
           </div>
 
           <div className="grid gap-3 sm:grid-cols-2">
-            <NotificationInfo label="Type" value={displayType} />
+            <NotificationInfo label="Category" value={categoryLabel} />
             <NotificationInfo label="Date and Time" value={formatNotificationDate(notification.created_at)} />
             {discount ? <NotificationInfo label="Discount" value={`${discount}% Off`} /> : null}
             {(notification.promo_starts_at || notification.broadcast?.starts_at) ? <NotificationInfo label="Start Date" value={formatNotificationDate(notification.promo_starts_at || notification.broadcast?.starts_at)} /> : null}

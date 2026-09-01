@@ -42,7 +42,7 @@ function normalizeItem(notification) {
   return {
     ...notification,
     icon: config.icon,
-    badge: config.badge,
+    badge: notification.badge || config.badge,
     tone: config.tone,
     time: formatPreviewTime(notification.created_at),
     body: notification.body || notification.message || ""
