@@ -6208,6 +6208,107 @@ button {
   text-align: center;
 }
 
+.customer-notification-filter-shell {
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid #d9eee2;
+  border-radius: 18px;
+  background: #f7fcf9;
+  padding: 6px;
+  overscroll-behavior-inline: contain;
+  scrollbar-color: #9bd9b5 transparent;
+  -webkit-overflow-scrolling: touch;
+}
+
+.customer-notification-filter-list {
+  display: flex;
+  width: max-content;
+  min-width: 100%;
+  gap: 6px;
+}
+
+.customer-notification-filter-option {
+  display: inline-flex;
+  min-height: 38px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: #ffffff;
+  padding: 8px 12px;
+  color: #4f6359;
+  font-size: 0.77rem;
+  font-weight: 850;
+  line-height: 1.2;
+  white-space: nowrap;
+  transition: border-color 180ms ease, background-color 180ms ease, color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
+}
+
+.customer-notification-filter-option:hover {
+  border-color: #9ee2bb;
+  background: #ecfff3;
+  color: #087f4f;
+  transform: translateY(-1px);
+}
+
+.customer-notification-filter-option.is-active {
+  border-color: #0b9f68;
+  background: #0b9f68;
+  color: #ffffff;
+  box-shadow: 0 8px 18px rgba(11, 159, 104, 0.2);
+}
+
+.customer-notification-filter-option:focus-visible {
+  outline: 3px solid rgba(11, 159, 104, 0.26);
+  outline-offset: 2px;
+}
+
+.customer-notification-filter-count {
+  display: inline-grid;
+  min-width: 20px;
+  height: 20px;
+  place-items: center;
+  border-radius: 999px;
+  background: #e1f5e9;
+  padding: 0 5px;
+  color: #087f4f;
+  font-size: 0.68rem;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.customer-notification-filter-option.is-active .customer-notification-filter-count {
+  background: rgba(255, 255, 255, 0.2);
+  color: #ffffff;
+}
+
+.customer-notification-empty-state {
+  margin: 0;
+  border: 1px dashed #b9dcc7;
+  border-radius: 16px;
+  background: #f7fcf9;
+  padding: 32px 20px;
+  color: #52665d;
+  font-size: 0.9rem;
+  font-weight: 750;
+  text-align: center;
+}
+
+@media (max-width: 640px) {
+  .customer-notification-filter-shell {
+    border-radius: 14px;
+    padding: 5px;
+  }
+
+  .customer-notification-filter-option {
+    min-height: 36px;
+    padding: 8px 10px;
+    font-size: 0.74rem;
+  }
+}
+
 @media (max-width: 768px) {
   html,
   body,
@@ -11890,6 +11991,45 @@ button {
 
 .retela-dark .admin-notification-empty-state,
 .premium-shell.retela-dark-shell .admin-notification-empty-state {
+  border-color: rgba(116, 190, 145, 0.32) !important;
+  background: rgba(15, 26, 21, 0.72) !important;
+  color: var(--retela-text-muted-dark) !important;
+}
+
+.retela-dark .customer-notification-filter-shell,
+.premium-shell.retela-dark-shell .customer-notification-filter-shell {
+  border-color: var(--retela-border-dark) !important;
+  background: var(--retela-surface-dark-2) !important;
+}
+
+.retela-dark .customer-notification-filter-option:not(.is-active),
+.premium-shell.retela-dark-shell .customer-notification-filter-option:not(.is-active) {
+  border-color: rgba(116, 190, 145, 0.2) !important;
+  background: rgba(255, 255, 255, 0.05) !important;
+  color: var(--retela-text-dark) !important;
+}
+
+.retela-dark .customer-notification-filter-option:not(.is-active):hover,
+.premium-shell.retela-dark-shell .customer-notification-filter-option:not(.is-active):hover {
+  border-color: rgba(52, 211, 153, 0.42) !important;
+  background: rgba(22, 163, 106, 0.16) !important;
+  color: #b8ffd0 !important;
+}
+
+.retela-dark .customer-notification-filter-count,
+.premium-shell.retela-dark-shell .customer-notification-filter-count {
+  background: rgba(52, 211, 153, 0.18) !important;
+  color: #b8ffd0 !important;
+}
+
+.retela-dark .customer-notification-filter-option.is-active .customer-notification-filter-count,
+.premium-shell.retela-dark-shell .customer-notification-filter-option.is-active .customer-notification-filter-count {
+  background: rgba(255, 255, 255, 0.2) !important;
+  color: #ffffff !important;
+}
+
+.retela-dark .customer-notification-empty-state,
+.premium-shell.retela-dark-shell .customer-notification-empty-state {
   border-color: rgba(116, 190, 145, 0.32) !important;
   background: rgba(15, 26, 21, 0.72) !important;
   color: var(--retela-text-muted-dark) !important;
