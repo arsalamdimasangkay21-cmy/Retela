@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from "react";
-import { Bot, Eye, Loader2, Send, ShoppingCart, X } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Bot, Eye, Loader2, Plus, Send, ShoppingCart, X } from "lucide-react";
 import { api } from "../api/client";
+import { dispatchCustomerToast } from "./CustomerToastStack";
 
 const initialSuggestions = [
   "Browse products",
@@ -121,26 +122,35 @@ export function FloatingCustomerAssistant({ hidden = false }) {
   const [messages, setMessages] = useState([]);
   const [conversationId, setConversationId] = useState(null);
   const [sending, setSending] = useState(false);
+  const [creatingConversation, setCreatingConversation] = useState(false);
   const scrollRef = useRef(null);
+  const inputRef = useRef(null);
+  const conversationIdRef = useRef(null);
+  const creatingConversationRef = useRef(false);
 
-  async function loadConversation() {
+  const loadConversation = useCallback(async () => {
     const { data } = await api.get("/messages/conversations");
-    const conversation = data[0];
+    const conversation = conversationIdRef.current
+      ? data.find((item) => Number(item.id) === Number(conversationIdRef.current))
+      : data[0];
     if (!conversation) return;
+    conversationIdRef.current = conversation.id;
     setConversationId(conversation.id);
     const messageRes = await api.get(`/messages/${conversation.id}${open ? "?markSeen=true" : ""}`);
     setMessages(messageRes.data);
-  }
+  }, [open]);
 
   useEffect(() => {
     if (hidden) return undefined;
     loadConversation().catch(() => {});
     const timer = setInterval(() => loadConversation().catch(() => {}), open ? 4000 : 9000);
     return () => clearInterval(timer);
-  }, [hidden, open]);
+  }, [hidden, open, loadConversation]);
 
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+    window.requestAnimationFrame(() => {
+      scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+    });
   }, [messages.length, open]);
 
   useEffect(() => {
@@ -160,6 +170,35 @@ export function FloatingCustomerAssistant({ hidden = false }) {
     };
   }, []);
 
+  function focusPrompt() {
+    window.requestAnimationFrame(() => inputRef.current?.focus());
+  }
+
+  async function startNewChat() {
+    if (creatingConversationRef.current || sending) return;
+    creatingConversationRef.current = true;
+    setCreatingConversation(true);
+    try {
+      const { data } = await api.post("/messages/conversations");
+      const nextConversationId = Number(data?.id || data?.conversation_id);
+      if (!nextConversationId) throw new Error("The new conversation could not be created.");
+      conversationIdRef.current = nextConversationId;
+      setConversationId(nextConversationId);
+      setMessages([]);
+      setPrompt("");
+      setOpen(true);
+      focusPrompt();
+    } catch (error) {
+      dispatchCustomerToast({
+        type: "error",
+        message: error?.response?.data?.message || "Could not start a new chat. Please try again."
+      });
+    } finally {
+      creatingConversationRef.current = false;
+      setCreatingConversation(false);
+    }
+  }
+
   async function sendMessage(eventOrText) {
     if (eventOrText?.preventDefault) eventOrText.preventDefault();
     const text = typeof eventOrText === "string" ? eventOrText.trim() : prompt.trim();
@@ -169,6 +208,7 @@ export function FloatingCustomerAssistant({ hidden = false }) {
     setMessages((items) => [...items, { id: `draft-${Date.now()}`, sender_type: "customer", body: text }]);
     try {
       const { data } = await api.post("/messages/ai", { conversation_id: conversationId || undefined, prompt: text });
+      conversationIdRef.current = data.conversation_id;
       setConversationId(data.conversation_id);
       const messageRes = await api.get(`/messages/${data.conversation_id}?markSeen=true`);
       setMessages(messageRes.data);
@@ -188,7 +228,7 @@ export function FloatingCustomerAssistant({ hidden = false }) {
       {open ? (
         <section className="ai-chat-window fade-slide rounded-[24px] border border-emerald-100 bg-[#fbfffc] text-slate-900 shadow-[0_18px_55px_rgba(15,23,42,0.18)] backdrop-blur-2xl">
           <div className="ai-chat-header flex items-center justify-between gap-3 border-b border-emerald-100 bg-white p-3">
-            <div className="flex min-w-0 items-center gap-3">
+            <div className="flex min-w-0 flex-1 items-center gap-3">
               <span className="relative grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-emerald-50 text-emerald-700 shadow-[0_0_20px_rgba(22,163,74,0.12)]">
                 <Bot size={20} />
                 <span className="absolute -right-0.5 -top-0.5 h-3 w-3 rounded-full border-2 border-white bg-emerald-500" />
@@ -198,9 +238,15 @@ export function FloatingCustomerAssistant({ hidden = false }) {
                 <p className="truncate text-xs font-semibold text-slate-500">AI shopping help online</p>
               </div>
             </div>
-            <button type="button" onClick={() => setOpen(false)} className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl border border-slate-200 bg-white text-slate-500 transition hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700" aria-label="Close assistant">
-              <X size={18} />
-            </button>
+            <div className="flex shrink-0 items-center gap-2">
+              <button type="button" onClick={startNewChat} disabled={creatingConversation || sending} className="ai-chat-new-button" aria-busy={creatingConversation}>
+                {creatingConversation ? <Loader2 size={15} className="animate-spin" /> : <Plus size={15} />}
+                <span>{creatingConversation ? "Creating..." : "New Chat"}</span>
+              </button>
+              <button type="button" onClick={() => setOpen(false)} className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl border border-slate-200 bg-white text-slate-500 transition hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700" aria-label="Close assistant">
+                <X size={18} />
+              </button>
+            </div>
           </div>
 
           <div ref={scrollRef} className="ai-chat-messages grid content-start gap-3 p-4">
@@ -232,7 +278,7 @@ export function FloatingCustomerAssistant({ hidden = false }) {
               );
             }) : (
               <div className="rounded-3xl border border-emerald-100 bg-[#F3FAF6] p-4 text-sm leading-6 text-slate-700">
-                Ask about available tees, caps, jackets, sizes, prices, stock, delivery, or payment.
+                Hello! I'm the RETELA Assistant. How may I help you today?
               </div>
             )}
             {sending ? <p className="inline-flex max-w-fit items-center gap-2 rounded-2xl bg-[#F3FAF6] px-4 py-3 text-sm text-slate-600"><Loader2 size={15} className="animate-spin text-emerald-700" /> Thinking</p> : null}
@@ -248,6 +294,7 @@ export function FloatingCustomerAssistant({ hidden = false }) {
 
           <form onSubmit={sendMessage} className="ai-chat-input-container border-t border-emerald-100 bg-white p-3">
             <input
+              ref={inputRef}
               className="min-w-0 flex-1 rounded-2xl border border-emerald-100 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-emerald-400"
               placeholder="Ask the assistant"
               value={prompt}

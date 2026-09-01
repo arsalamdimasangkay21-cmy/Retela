@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { ensureAutoIncrementId, pool, query, requireUsableAutoIncrementId } from "../config/db.js";
 import { asyncHandler, HttpError } from "../utils/errors.js";
-import { requireApproved, requireAuth } from "../middleware/auth.js";
+import { requireApproved, requireAuth, requireRole } from "../middleware/auth.js";
 import { loadSystemSettings } from "../utils/systemSettings.js";
 import { shippingSummary } from "../utils/shippingSettings.js";
 import { generateAIResponse } from "../utils/aiProvider.js";
@@ -453,6 +453,29 @@ router.get("/conversations", requireAuth, asyncHandler(async (req, res) => {
         ORDER BY c.updated_at DESC, c.id DESC
       `, { id: req.user.id });
   res.json(rows);
+}));
+
+router.post("/conversations", requireAuth, requireRole("customer"), requireApproved, asyncHandler(async (req, res) => {
+  await ensureConversationLifecycleColumns();
+  const result = await query(
+    "INSERT INTO conversations (customer_id, admin_takeover, is_archived, is_deleted) VALUES (:customerId, false, false, false)",
+    { customerId: req.user.id }
+  );
+  const rows = await query(
+    `SELECT id, customer_id, admin_takeover, ai_processing, is_archived, is_deleted, created_at, updated_at
+     FROM conversations
+     WHERE id = :conversationId AND customer_id = :customerId AND is_deleted = FALSE
+     LIMIT 1`,
+    { conversationId: result.insertId, customerId: req.user.id }
+  );
+  res.status(201).json(rows[0] || {
+    id: Number(result.insertId),
+    customer_id: Number(req.user.id),
+    admin_takeover: false,
+    ai_processing: false,
+    is_archived: false,
+    is_deleted: false
+  });
 }));
 
 router.get("/customers/approved", requireAuth, asyncHandler(async (req, res) => {
