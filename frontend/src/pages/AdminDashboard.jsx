@@ -217,6 +217,71 @@ function adminNotificationTarget(row) {
   return "Notifications";
 }
 
+const adminNotificationFilterOptions = [
+  { value: "all", label: "All" },
+  { value: "orders", label: "Orders" },
+  { value: "messages", label: "Messages" },
+  { value: "inventory", label: "Inventory" },
+  { value: "customers", label: "Customers" },
+  { value: "payments", label: "Payments" },
+  { value: "returns", label: "Returns and Refunds" },
+  { value: "promotions", label: "Promotions" },
+  { value: "system", label: "System" }
+];
+
+function adminNotificationCategory(row = {}) {
+  const type = String(row.type || "").trim().toLowerCase();
+  const typeCategories = {
+    order: "orders",
+    order_cancelled: "orders",
+    order_update: "orders",
+    shipping: "orders",
+    pos_sale: "orders",
+    sale: "orders",
+    completed_order: "orders",
+    message: "messages",
+    inventory: "inventory",
+    low_stock: "inventory",
+    out_of_stock: "inventory",
+    stock: "inventory",
+    stock_alert: "inventory",
+    product_stock: "inventory",
+    approval: "customers",
+    customer_registration: "customers",
+    registration: "customers",
+    customer: "customers",
+    customer_update: "customers",
+    feedback: "customers",
+    payment: "payments",
+    payment_failed: "payments",
+    payment_verification: "payments",
+    unpaid: "payments",
+    return: "returns",
+    refund: "returns",
+    broadcast: "promotions",
+    new_product: "promotions",
+    promotion: "promotions",
+    voucher: "promotions",
+    discount: "promotions",
+    system: "system",
+    security: "system",
+    backup: "system",
+    maintenance: "system",
+    error: "system"
+  };
+  if (typeCategories[type]) return typeCategories[type];
+
+  const text = [row.title, row.body, row.message].map((value) => String(value || "")).join(" ");
+  if (/\b(return|refund)\b/i.test(text)) return "returns";
+  if (/\b(payment|paid|unpaid|transaction)\b/i.test(text)) return "payments";
+  if (/\b(message|chat|takeover|assistant)\b/i.test(text)) return "messages";
+  if (/\b(stock|restock|inventory|sold out|out of stock)\b/i.test(text)) return "inventory";
+  if (/\b(order|delivery|pos sale|accepted|rejected|cancelled|completed)\b/i.test(text)) return "orders";
+  if (/\b(customer|registration|profile|verification|suspended|restored|feedback)\b/i.test(text)) return "customers";
+  if (/\b(promotion|voucher|discount|broadcast|campaign)\b/i.test(text)) return "promotions";
+  return "system";
+}
+
 function duplicateOptionMessage(label) {
   return `This ${label.toLowerCase()} already exists.`;
 }
@@ -6105,6 +6170,7 @@ function AdminLocations({ users }) {
 }
 
 function AdminNotifications({ rows, loading = false, users, rejectingUserIds = [], selectedRegistration, setSelectedRegistration, approveUser, onChange, onNotificationRead }) {
+  const [selectedFilter, setSelectedFilter] = useState("all");
   const lockedRegistrationStatuses = new Set(["approved", "rejected"]);
 
   function isRegistrationNotification(row) {
@@ -6115,14 +6181,26 @@ function AdminNotifications({ rows, loading = false, users, rejectingUserIds = [
     return registration && !lockedRegistrationStatuses.has(registration.status);
   }
 
-  const adminNotificationTypes = new Set(["approval", "customer_registration", "registration", "feedback", "message", "order", "order_cancelled", "payment", "inventory", "refund", "return"]);
-  const adminRows = rows
-    .filter((row) => adminNotificationTypes.has(row.type))
+  const adminRows = (Array.isArray(rows) ? rows : [])
     .filter((row, index, source) => {
       if (!isRegistrationNotification(row)) return true;
       const key = String(row.customerId || row.registration_id || row.user_id || row.email || row.phone || row.id);
       return source.findIndex((candidate) => String(candidate.customerId || candidate.registration_id || candidate.user_id || candidate.email || candidate.phone || candidate.id) === key && isRegistrationNotification(candidate)) === index;
     });
+  const unreadCounts = useMemo(() => {
+    const counts = Object.fromEntries(adminNotificationFilterOptions.map(({ value }) => [value, 0]));
+    adminRows.forEach((row) => {
+      if (!row.is_read) {
+        counts.all += 1;
+        const category = adminNotificationCategory(row);
+        if (counts[category] !== undefined) counts[category] += 1;
+      }
+    });
+    return counts;
+  }, [adminRows]);
+  const filteredRows = selectedFilter === "all"
+    ? adminRows
+    : adminRows.filter((row) => adminNotificationCategory(row) === selectedFilter);
 
   function registrationFromNotification(row) {
     if (!isRegistrationNotification(row)) return null;
@@ -6163,9 +6241,31 @@ function AdminNotifications({ rows, loading = false, users, rejectingUserIds = [
   return (
     <>
       <div className="grid gap-4">
+        <div className="admin-notification-filter-shell" role="tablist" aria-label="Filter notifications">
+          <div className="admin-notification-filter-list">
+            {adminNotificationFilterOptions.map((option) => {
+              const selected = selectedFilter === option.value;
+              const unreadCount = unreadCounts[option.value];
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  role="tab"
+                  aria-selected={selected}
+                  aria-label={`${option.label}${unreadCount ? `, ${unreadCount} unread` : ""}`}
+                  onClick={() => setSelectedFilter(option.value)}
+                  className={`admin-notification-filter-option ${selected ? "is-active" : ""}`}
+                >
+                  {option.label}
+                  {unreadCount ? <span className="admin-notification-filter-count">{unreadCount > 99 ? "99+" : unreadCount}</span> : null}
+                </button>
+              );
+            })}
+          </div>
+        </div>
         {loading ? (
           <Card><p className="text-sm font-semibold text-slate-500">Loading admin notifications...</p></Card>
-        ) : adminRows.length ? adminRows.map((row) => {
+        ) : filteredRows.length ? filteredRows.map((row) => {
           const registration = isRegistrationNotification(row) ? registrationFromNotification(row) : null;
           const canDecide = canDecideRegistration(registration);
           return (
@@ -6203,7 +6303,7 @@ function AdminNotifications({ rows, loading = false, users, rejectingUserIds = [
               ) : null}
             </Card>
           );
-        }) : <Card><EmptyState title="No admin notifications yet" subtitle="Orders, registrations, messages, feedback, and returns will appear here." /></Card>}
+        }) : <Card className="admin-notification-empty-card"><p className="admin-notification-empty-state">No notifications in this category.</p></Card>}
       </div>
       {selectedRegistration ? (
         <div className="fixed inset-0 z-[70] grid place-items-center bg-black/70 p-4 backdrop-blur-sm">
