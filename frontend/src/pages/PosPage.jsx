@@ -479,7 +479,7 @@ function PaymentPanel({ method, setMethod, subtotal, quantity, cashReceived, set
         </div>
       )}
 
-      <button type="button" disabled={!canCheckout || busy} onClick={onCheckout} className="mt-5 inline-flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-slate-950 text-sm font-black text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50">
+      <button type="button" disabled={!canCheckout || busy} onClick={onCheckout} className="retela-pos-primary-action mt-5 inline-flex h-14 w-full items-center justify-center gap-2 rounded-2xl text-sm font-black transition">
         <CheckCircle2 size={19} />
         {method === "gcash" ? "Payment Received" : "Complete Transaction"}
       </button>
@@ -584,7 +584,7 @@ function ReceiptModal({ receipt, settings, onClose }) {
           <ReceiptBody receipt={receipt} />
         </div>
         <div className="retela-modal-footer">
-          <button type="button" onClick={printReceipt} className="inline-flex h-12 items-center justify-center gap-2 rounded-2xl bg-slate-950 text-sm font-black text-white"><Printer size={18} /> Print</button>
+          <button type="button" onClick={printReceipt} className="retela-pos-primary-action inline-flex h-12 items-center justify-center gap-2 rounded-2xl text-sm font-black"><Printer size={18} /> Print</button>
           <button type="button" onClick={onClose} className="h-12 rounded-2xl border border-slate-200 text-sm font-black text-slate-700">Done</button>
         </div>
       </div>
@@ -681,7 +681,7 @@ function escapeHtml(value) {
 
 function Toast({ message, onClose }) {
   return (
-    <div className={`fixed bottom-5 right-5 z-[160] max-w-sm rounded-2xl border bg-white p-4 text-sm font-bold shadow-xl ${message.tone === "error" ? "border-rose-100 text-rose-700" : message.tone === "success" ? "border-emerald-100 text-emerald-700" : "border-slate-100 text-slate-700"}`}>
+    <div className={`fixed right-5 top-5 z-[160] max-w-sm rounded-2xl border bg-white p-4 text-sm font-bold shadow-xl ${message.tone === "error" ? "border-rose-100 text-rose-700" : message.tone === "success" ? "border-emerald-100 text-emerald-700" : "border-slate-100 text-slate-700"}`}>
       <button type="button" onClick={onClose} className="float-right ml-3 text-slate-400" aria-label="Dismiss"><X size={16} /></button>
       {message.text}
     </div>

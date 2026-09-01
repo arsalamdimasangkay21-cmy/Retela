@@ -3881,6 +3881,40 @@ button {
   opacity: 1 !important;
 }
 
+.retela-pos-page .retela-pos-primary-action {
+  border: 1px solid #0b9f68 !important;
+  background: #0b9f68 !important;
+  color: #ffffff !important;
+  box-shadow: 0 10px 22px rgba(11, 159, 104, 0.22);
+  transition: background-color 180ms ease, border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
+}
+
+.retela-pos-page .retela-pos-primary-action:hover {
+  border-color: #087f53 !important;
+  background: #087f53 !important;
+  box-shadow: 0 12px 24px rgba(8, 127, 83, 0.26);
+}
+
+.retela-pos-page .retela-pos-primary-action:focus-visible {
+  outline: 3px solid rgba(11, 159, 104, 0.3);
+  outline-offset: 2px;
+}
+
+.retela-pos-page .retela-pos-primary-action:active {
+  background: #066b46 !important;
+  transform: translateY(1px);
+}
+
+.retela-pos-page .retela-pos-primary-action:disabled,
+.retela-dark .retela-pos-page .retela-pos-primary-action:disabled,
+.premium-shell.retela-dark-shell .retela-pos-page .retela-pos-primary-action:disabled {
+  border-color: #c7d2cc !important;
+  background: #e7eeea !important;
+  color: #33463d !important;
+  box-shadow: none !important;
+  opacity: 1 !important;
+}
+
 .retela-pos-page .retela-pos-add-item-button {
   min-width: 132px;
   flex: 0 0 auto;
