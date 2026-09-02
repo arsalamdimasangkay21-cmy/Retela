@@ -6551,6 +6551,35 @@ function Detail({ label, value }) {
   );
 }
 
+function conversationActivityTime(conversation) {
+  const value = conversation?.latest_message_at || conversation?.updated_at || conversation?.last_active_at || conversation?.created_at || "";
+  const time = new Date(value).getTime();
+  return Number.isNaN(time) ? 0 : time;
+}
+
+function dedupeConversationsByCustomer(conversations = []) {
+  const byCustomer = new Map();
+  for (const conversation of conversations) {
+    const customerId = Number(conversation?.customer_id);
+    if (!customerId) continue;
+    const key = String(customerId);
+    const current = byCustomer.get(key);
+    const nextActivity = conversationActivityTime(conversation);
+    if (!current || nextActivity > conversationActivityTime(current) || (nextActivity === conversationActivityTime(current) && Number(conversation.id || 0) > Number(current.id || 0))) {
+      byCustomer.set(key, {
+        ...conversation,
+        unread_count: Number(current?.unread_count || 0) + Number(conversation.unread_count || 0)
+      });
+    } else {
+      byCustomer.set(key, {
+        ...current,
+        unread_count: Number(current.unread_count || 0) + Number(conversation.unread_count || 0)
+      });
+    }
+  }
+  return [...byCustomer.values()].sort((left, right) => conversationActivityTime(right) - conversationActivityTime(left) || Number(right.id || 0) - Number(left.id || 0));
+}
+
 function Messages() {
   const [conversations, setConversations] = useState([]);
   const [approvedCustomers, setApprovedCustomers] = useState([]);
@@ -6563,9 +6592,12 @@ function Messages() {
 
   async function loadConversations() {
     const [conversationRes, customerRes] = await Promise.all([api.get("/messages/conversations"), api.get("/messages/customers/approved")]);
-    setConversations(conversationRes.data);
-    setApprovedCustomers(customerRes.data);
-    if (!selectedChat && (conversationRes.data[0] || customerRes.data[0])) setSelectedChat(chatKey(conversationRes.data[0] || customerRes.data[0]));
+    const nextConversations = dedupeConversationsByCustomer(conversationRes.data);
+    const conversationCustomerIds = new Set(nextConversations.map((conversation) => Number(conversation.customer_id)));
+    const nextCustomers = customerRes.data.filter((customer) => !conversationCustomerIds.has(Number(customer.customer_id)));
+    setConversations(nextConversations);
+    setApprovedCustomers(nextCustomers);
+    if (!selectedChat && (nextConversations[0] || nextCustomers[0])) setSelectedChat(chatKey(nextConversations[0] || nextCustomers[0]));
   }
 
   async function loadMessages(conversation) {
@@ -6591,7 +6623,7 @@ function Messages() {
       : { customer_id: Number(selectedConversation.customer_id), body: text, mode: "admin" };
     const { data } = await api.post("/messages", payload);
     setText("");
-    setSelectedChat(String(data.conversation_id));
+    setSelectedChat(chatKey({ ...selectedConversation, id: data.conversation_id }));
     await loadConversations();
     await loadMessages({ ...selectedConversation, id: data.conversation_id });
   }
@@ -6673,7 +6705,7 @@ function Messages() {
 }
 
 function chatKey(conversation) {
-  return conversation.id ? String(conversation.id) : `customer-${conversation.customer_id}`;
+  return `customer-${conversation.customer_id}`;
 }
 
 function AdminProfile({ profile, setProfile, profilePhoto, setProfilePhoto, saveProfile, profileSaving = false, showToast }) {

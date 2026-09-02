@@ -418,15 +418,44 @@ async function markConversationSeen({ conversationId, viewer }) {
   );
 }
 
+async function markCustomerConversationSetSeen({ customerId, viewer }) {
+  await ensureMessageStatusColumns();
+  const senderTypes = viewer === "admin" ? ["customer"] : ["admin", "ai"];
+  const placeholders = senderTypes.map((_, index) => `:senderType${index}`).join(", ");
+  const params = Object.fromEntries(senderTypes.map((senderType, index) => [`senderType${index}`, senderType]));
+  await query(
+    `UPDATE messages m
+     JOIN conversations c ON c.id = m.conversation_id
+     SET m.delivery_status = 'seen',
+         m.seen_at = COALESCE(m.seen_at, NOW()),
+         m.delivered_at = COALESCE(m.delivered_at, m.created_at)
+     WHERE c.customer_id = :customerId
+       AND c.is_archived = FALSE
+       AND c.is_deleted = FALSE
+       AND m.sender_type IN (${placeholders})
+       AND m.delivery_status <> 'seen'`,
+    { customerId, ...params }
+  );
+}
+
 router.get("/conversations", requireAuth, asyncHandler(async (req, res) => {
   await ensureMessageStatusColumns();
   await ensureConversationLifecycleColumns();
   const rows = req.user.role === "admin"
     ? await query(`
         SELECT c.*, u.username, u.email, u.phone_number, u.status,
-          (SELECT body FROM messages m WHERE m.conversation_id = c.id ORDER BY m.created_at DESC LIMIT 1) AS latest_message,
-          (SELECT created_at FROM messages m WHERE m.conversation_id = c.id ORDER BY m.created_at DESC LIMIT 1) AS latest_message_at,
-          (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id AND m.sender_type = 'customer' AND m.delivery_status <> 'seen') AS unread_count,
+          latest_message.body AS latest_message,
+          latest_message.created_at AS latest_message_at,
+          (
+            SELECT COUNT(*)
+            FROM messages unread_message
+            JOIN conversations unread_conversation ON unread_conversation.id = unread_message.conversation_id
+            WHERE unread_conversation.customer_id = u.id
+              AND unread_conversation.is_archived = FALSE
+              AND unread_conversation.is_deleted = FALSE
+              AND unread_message.sender_type = 'customer'
+              AND unread_message.delivery_status <> 'seen'
+          ) AS unread_count,
           u.last_active_at,
           CASE
             WHEN u.last_active_at >= (NOW() - INTERVAL 5 MINUTE) THEN 'active'
@@ -434,13 +463,28 @@ router.get("/conversations", requireAuth, asyncHandler(async (req, res) => {
             ELSE 'offline'
           END AS presence_status,
           u.last_active_at >= (NOW() - INTERVAL 5 MINUTE) AS is_online
-        FROM conversations c
-        JOIN users u ON u.id = c.customer_id
+        FROM users u
+        JOIN conversations c ON c.id = (
+          SELECT c2.id
+          FROM conversations c2
+          LEFT JOIN messages m2 ON m2.conversation_id = c2.id
+          WHERE c2.customer_id = u.id
+            AND c2.is_archived = FALSE
+            AND c2.is_deleted = FALSE
+          GROUP BY c2.id, c2.updated_at, c2.created_at
+          ORDER BY COALESCE(MAX(m2.created_at), c2.updated_at, c2.created_at) DESC, c2.id DESC
+          LIMIT 1
+        )
+        LEFT JOIN messages latest_message ON latest_message.id = (
+          SELECT m.id
+          FROM messages m
+          WHERE m.conversation_id = c.id
+          ORDER BY m.created_at DESC, m.id DESC
+          LIMIT 1
+        )
         WHERE u.role = 'customer'
           AND LOWER(TRIM(u.status)) = 'approved'
-          AND c.is_archived = FALSE
-          AND c.is_deleted = FALSE
-        ORDER BY c.updated_at DESC
+        ORDER BY COALESCE(latest_message.created_at, c.updated_at, c.created_at) DESC, c.id DESC
       `)
     : await query(`
         SELECT c.*,
@@ -457,19 +501,16 @@ router.get("/conversations", requireAuth, asyncHandler(async (req, res) => {
 
 router.post("/conversations", requireAuth, requireRole("customer"), requireApproved, asyncHandler(async (req, res) => {
   await ensureConversationLifecycleColumns();
-  const result = await query(
-    "INSERT INTO conversations (customer_id, admin_takeover, is_archived, is_deleted) VALUES (:customerId, false, false, false)",
-    { customerId: req.user.id }
-  );
+  const conversation = await getOrCreateCustomerConversation(req.user.id);
   const rows = await query(
     `SELECT id, customer_id, admin_takeover, ai_processing, is_archived, is_deleted, created_at, updated_at
      FROM conversations
      WHERE id = :conversationId AND customer_id = :customerId AND is_deleted = FALSE
      LIMIT 1`,
-    { conversationId: result.insertId, customerId: req.user.id }
+    { conversationId: conversation.id, customerId: req.user.id }
   );
-  res.status(201).json(rows[0] || {
-    id: Number(result.insertId),
+  res.status(rows[0] ? 200 : 201).json(rows[0] || {
+    id: Number(conversation.id),
     customer_id: Number(req.user.id),
     admin_takeover: false,
     ai_processing: false,
@@ -591,11 +632,15 @@ router.delete("/:conversationId/permanent", requireAuth, asyncHandler(async (req
 router.get("/:conversationId", requireAuth, asyncHandler(async (req, res) => {
   await ensureMessageStatusColumns();
   const conversations = req.user.role === "admin"
-    ? await query("SELECT id FROM conversations WHERE id = :id", { id: req.params.conversationId })
-    : await query("SELECT id FROM conversations WHERE id = :id AND customer_id = :userId", { id: req.params.conversationId, userId: req.user.id });
+    ? await query("SELECT id, customer_id FROM conversations WHERE id = :id", { id: req.params.conversationId })
+    : await query("SELECT id, customer_id FROM conversations WHERE id = :id AND customer_id = :userId", { id: req.params.conversationId, userId: req.user.id });
   if (!conversations.length) return res.status(404).json({ message: "Conversation not found" });
   if (req.query.markSeen === "true") {
-    await markConversationSeen({ conversationId: req.params.conversationId, viewer: req.user.role === "admin" ? "admin" : "customer" });
+    if (req.user.role === "admin") {
+      await markCustomerConversationSetSeen({ customerId: conversations[0].customer_id, viewer: "admin" });
+    } else {
+      await markConversationSeen({ conversationId: req.params.conversationId, viewer: "customer" });
+    }
   }
   const rows = await query("SELECT * FROM messages WHERE conversation_id = :id ORDER BY created_at ASC", { id: req.params.conversationId });
   res.json(rows.map((row) => ({
@@ -738,7 +783,18 @@ router.post("/", requireAuth, requireApproved, asyncHandler(async (req, res) => 
   await ensureMessageStatusColumns();
   let conversationId = input.conversation_id;
   if (!conversationId && req.user.role === "admin" && input.customer_id) {
-    const existing = await query("SELECT id FROM conversations WHERE customer_id = :customerId ORDER BY id DESC LIMIT 1", { customerId: input.customer_id });
+    const existing = await query(
+      `SELECT c.id
+       FROM conversations c
+       LEFT JOIN messages m ON m.conversation_id = c.id
+       WHERE c.customer_id = :customerId
+         AND c.is_archived = FALSE
+         AND c.is_deleted = FALSE
+       GROUP BY c.id, c.updated_at, c.created_at
+       ORDER BY COALESCE(MAX(m.created_at), c.updated_at, c.created_at) DESC, c.id DESC
+       LIMIT 1`,
+      { customerId: input.customer_id }
+    );
     conversationId = existing[0]?.id;
     if (!conversationId) {
       const result = await query("INSERT INTO conversations (customer_id, admin_takeover) VALUES (:customerId, true)", { customerId: input.customer_id });

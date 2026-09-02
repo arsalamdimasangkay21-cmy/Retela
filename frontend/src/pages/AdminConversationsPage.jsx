@@ -16,7 +16,36 @@ const quickReplySeeds = [
 ];
 
 function chatKey(conversation) {
-  return conversation.id ? String(conversation.id) : `customer-${conversation.customer_id}`;
+  return `customer-${conversation.customer_id}`;
+}
+
+function activityTime(conversation) {
+  const value = conversation?.latest_message_at || conversation?.updated_at || conversation?.last_active_at || conversation?.created_at || "";
+  const time = new Date(value).getTime();
+  return Number.isNaN(time) ? 0 : time;
+}
+
+function dedupeConversationsByCustomer(conversations = []) {
+  const byCustomer = new Map();
+  for (const conversation of conversations) {
+    const customerId = Number(conversation?.customer_id);
+    if (!customerId) continue;
+    const key = String(customerId);
+    const current = byCustomer.get(key);
+    const nextActivity = activityTime(conversation);
+    if (!current || nextActivity > activityTime(current) || (nextActivity === activityTime(current) && Number(conversation.id || 0) > Number(current.id || 0))) {
+      byCustomer.set(key, {
+        ...conversation,
+        unread_count: Number(current?.unread_count || 0) + Number(conversation.unread_count || 0)
+      });
+    } else {
+      byCustomer.set(key, {
+        ...current,
+        unread_count: Number(current.unread_count || 0) + Number(conversation.unread_count || 0)
+      });
+    }
+  }
+  return [...byCustomer.values()].sort((left, right) => activityTime(right) - activityTime(left) || Number(right.id || 0) - Number(left.id || 0));
 }
 
 function formatTime(value) {
@@ -124,7 +153,7 @@ export default function AdminConversationsPage() {
     || approvedCustomers.find((customer) => chatKey(customer) === selectedChat);
 
   const conversationCards = useMemo(() => {
-    const pool = conversations.map((conversation) => {
+    const pool = dedupeConversationsByCustomer(conversations).map((conversation) => {
       const snapshot = conversationSnapshots[conversation.id] || {};
       return {
         ...conversation,
@@ -201,8 +230,9 @@ export default function AdminConversationsPage() {
       api.get("/messages/conversations"),
       api.get("/messages/customers/approved")
     ]);
-    const nextConversations = conversationRes.data;
-    const nextCustomers = customerRes.data;
+    const nextConversations = dedupeConversationsByCustomer(conversationRes.data);
+    const conversationCustomerIds = new Set(nextConversations.map((conversation) => Number(conversation.customer_id)));
+    const nextCustomers = customerRes.data.filter((customer) => !conversationCustomerIds.has(Number(customer.customer_id)));
     setConversations(nextConversations);
     setApprovedCustomers(nextCustomers);
     setConversationSnapshots((current) => ({
@@ -267,7 +297,7 @@ export default function AdminConversationsPage() {
         : { customer_id: Number(selectedConversation.customer_id), body: draftText, mode: "admin" };
       const { data } = await api.post("/messages", payload);
       setText("");
-      setSelectedChat(String(data.conversation_id));
+      setSelectedChat(chatKey({ ...selectedConversation, id: data.conversation_id }));
       await loadConversations();
       await loadMessages({ ...selectedConversation, id: data.conversation_id });
     } finally {
