@@ -55,6 +55,39 @@ export function configureSocket(io) {
       socket.join(`conversation:${conversationId}`);
     });
 
+    socket.on("order-live:join", async (orderIdInput, ack) => {
+      const orderId = Number(orderIdInput);
+      if (!socket.user?.id || !Number.isInteger(orderId) || orderId <= 0) {
+        ack?.({ ok: false, message: "A valid order is required." });
+        return;
+      }
+      try {
+        const rows = await query("SELECT id, user_id FROM orders WHERE id = :orderId LIMIT 1", { orderId });
+        const order = rows[0];
+        const isAdmin = socket.user.role === "admin" || socket.user.role === "staff";
+        const isOwner = Number(order?.user_id) === Number(socket.user.id);
+        if (!order || (!isAdmin && !isOwner)) {
+          ack?.({ ok: false, message: "Not authorized for this order." });
+          return;
+        }
+        socket.join(`order-live:${orderId}`);
+        ack?.({ ok: true });
+      } catch (error) {
+        console.error("[socket] Failed to join order live room", {
+          socketId: socket.id,
+          userId: socket.user?.id || null,
+          orderId,
+          message: error.message
+        });
+        ack?.({ ok: false, message: "Could not join live route." });
+      }
+    });
+
+    socket.on("order-live:leave", (orderIdInput) => {
+      const orderId = Number(orderIdInput);
+      if (Number.isInteger(orderId) && orderId > 0) socket.leave(`order-live:${orderId}`);
+    });
+
     socket.on("typing", ({ conversationId, isTyping }) => {
       markActive();
       socket.to(`conversation:${conversationId}`).emit("typing", { conversationId, isTyping });

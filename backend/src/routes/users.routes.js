@@ -61,6 +61,45 @@ function nullableString(max) {
   return z.string().trim().max(max).nullable().optional();
 }
 
+function cleanGeocoderText(value, max = 255) {
+  const text = String(value || "").trim();
+  return text ? text.slice(0, max) : null;
+}
+
+async function geocodeManualDeliveryAddress(address) {
+  const text = String(address || "").trim();
+  if (!text) return null;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 7000);
+  try {
+    const response = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&limit=1&countrycodes=ph&q=${encodeURIComponent(text)}`, {
+      signal: controller.signal,
+      headers: { "User-Agent": "RETELA/1.0 delivery-address-geocoder" }
+    });
+    if (!response.ok) return null;
+    const results = await response.json();
+    const item = Array.isArray(results) ? results[0] : null;
+    const latitude = Number.parseFloat(item?.lat);
+    const longitude = Number.parseFloat(item?.lon);
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude) || Math.abs(latitude) < 0.01 || Math.abs(longitude) < 0.01) return null;
+    const addressDetails = item?.address || {};
+    return {
+      formattedAddress: cleanGeocoderText(item?.display_name || text, 500),
+      latitude,
+      longitude,
+      municipality: cleanGeocoderText(addressDetails.city || addressDetails.town || addressDetails.municipality || addressDetails.county, 160),
+      province: cleanGeocoderText(addressDetails.state || addressDetails.province, 160),
+      region: cleanGeocoderText(addressDetails.region, 160),
+      postalCode: cleanGeocoderText(addressDetails.postcode, 20),
+      placeId: cleanGeocoderText(item?.place_id, 255)
+    };
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 async function getSafeUser(userId) {
   const users = await query(SAFE_USER_SELECT, { id: userId });
   if (!users.length) throw new HttpError(404, "Account not found");
@@ -260,14 +299,17 @@ router.patch("/me", upload.single("profilePhoto"), asyncHandler(async (req, res)
       throw new HttpError(400, "Please select a location from the suggestions.");
     }
     if (input.delivery_location_source === "manual") {
+      const geocoded = await geocodeManualDeliveryAddress(input.formatted_address);
       input.delivery_barangay = null;
-      input.delivery_municipality = null;
-      input.delivery_province = null;
-      input.delivery_region = null;
-      input.delivery_postal_code = null;
-      input.delivery_place_id = null;
-      input.delivery_latitude = null;
-      input.delivery_longitude = null;
+      input.delivery_municipality = geocoded?.municipality || null;
+      input.delivery_province = geocoded?.province || null;
+      input.delivery_region = geocoded?.region || null;
+      input.delivery_postal_code = geocoded?.postalCode || null;
+      input.delivery_place_id = geocoded?.placeId || null;
+      input.delivery_latitude = geocoded?.latitude ?? null;
+      input.delivery_longitude = geocoded?.longitude ?? null;
+      input.delivery_location_source = geocoded ? "nominatim" : "manual";
+      input.formatted_address = geocoded?.formattedAddress || input.formatted_address;
     }
   }
   const updates = [];

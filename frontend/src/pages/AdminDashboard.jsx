@@ -5128,7 +5128,7 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
                   <button type="button" onClick={saveTracking} className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-emerald-700">Save</button>
                 </div>
               </div>
-              {isDeliveryOrder ? <OrderDeliveryInfo order={source} title="Delivery Location" mapLabel="View Delivery Route" routeEnabled onRouteMetrics={handleRouteMetrics} /> : null}
+              {isDeliveryOrder ? <OrderDeliveryInfo order={source} title="Delivery Location" mapLabel="View Delivery Route" routeEnabled liveRouteEnabled onRouteMetrics={handleRouteMetrics} /> : null}
               {showMeetupDetails ? <section ref={meetupSectionRef} className="admin-meeting-place-card">
                 <div>
                   <p className="text-xs font-bold uppercase tracking-[0.16em] text-emerald-700">COD meetup</p>

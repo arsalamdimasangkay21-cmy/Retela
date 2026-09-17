@@ -135,6 +135,26 @@ CALL retela_add_column_if_missing('orders', 'payment_review_required_at', 'payme
 CALL retela_add_column_if_missing('orders', 'payment_review_note', 'payment_review_note VARCHAR(255) NULL');
 CALL retela_add_column_if_missing('orders', 'tracking_number', 'tracking_number VARCHAR(120) NULL');
 
+CREATE TABLE IF NOT EXISTS order_live_locations (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  order_id INT NOT NULL,
+  user_id INT NOT NULL,
+  source_type ENUM('rider','customer') NOT NULL DEFAULT 'rider',
+  latitude DECIMAL(10,7) NOT NULL,
+  longitude DECIMAL(10,7) NOT NULL,
+  heading DECIMAL(6,2) NULL,
+  speed DECIMAL(8,3) NULL,
+  accuracy DECIMAL(8,2) NULL,
+  is_live BOOLEAN NOT NULL DEFAULT TRUE,
+  shared_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  stopped_at DATETIME NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_order_live_source (order_id, user_id, source_type),
+  INDEX idx_order_live_order (order_id, source_type, is_live, shared_at),
+  INDEX idx_order_live_user (user_id, is_live)
+);
+
 UPDATE orders
 SET status = 'payment_failed'
 WHERE status NOT IN ('payment_failed', 'rejected', 'cancelled')

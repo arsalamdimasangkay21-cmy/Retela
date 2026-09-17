@@ -8713,6 +8713,33 @@ button {
   color: #ffffff;
 }
 
+.retela-route-rider-marker {
+  position: absolute;
+  z-index: 7;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid rgba(29, 78, 216, 0.22);
+  border-radius: 999px;
+  background: #2563eb;
+  padding: 6px 8px;
+  color: #ffffff;
+  font-size: 0.72rem;
+  font-weight: 900;
+  line-height: 1.1;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 14px 28px rgba(37, 99, 235, 0.32);
+}
+
+.retela-route-rider-marker svg {
+  position: static;
+  width: 23px;
+  height: 23px;
+  color: #ffffff;
+  filter: drop-shadow(0 2px 3px rgba(15, 23, 42, 0.28));
+  transition: transform 420ms ease;
+}
+
 .retela-route-marker strong {
   min-width: 0;
   overflow: hidden;
@@ -8748,6 +8775,83 @@ button {
   margin-top: 12px;
   margin-bottom: 14px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.retela-live-route-panel {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid #bfdbfe;
+  border-radius: 16px;
+  background: linear-gradient(135deg, #eff6ff 0%, #ecfdf5 100%);
+  padding: 12px;
+}
+
+.retela-live-route-panel p {
+  color: #1d4ed8;
+  font-size: 0.68rem;
+  font-weight: 950;
+  letter-spacing: 0.14em;
+  line-height: 1.3;
+  text-transform: uppercase;
+}
+
+.retela-live-route-panel strong {
+  display: block;
+  margin-top: 4px;
+  color: #0f172a;
+  font-size: 0.95rem;
+  font-weight: 900;
+}
+
+.retela-live-route-panel span {
+  display: block;
+  margin-top: 4px;
+  color: #475569;
+  font-size: 0.78rem;
+  font-weight: 750;
+}
+
+.retela-live-route-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.retela-live-route-actions button,
+.retela-live-route-badge {
+  display: inline-flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid #93c5fd;
+  border-radius: 12px;
+  background: #ffffff;
+  padding: 8px 12px;
+  color: #1d4ed8;
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.retela-live-route-actions button:not(:disabled):hover {
+  border-color: #2563eb;
+  background: #dbeafe;
+}
+
+.retela-live-route-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.retela-live-route-badge {
+  border-color: #86efac;
+  background: #dcfce7;
+  color: #166534;
 }
 
 .order-action-completed {

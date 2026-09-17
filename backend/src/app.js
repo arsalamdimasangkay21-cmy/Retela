@@ -13,6 +13,7 @@ import notificationsRoutes from "./routes/notifications.routes.js";
 import broadcastsRoutes from "./routes/broadcasts.routes.js";
 import reviewsRoutes from "./routes/reviews.routes.js";
 import returnsRoutes from "./routes/returns.routes.js";
+import liveLocationsRoutes from "./routes/live-locations.routes.js";
 import reportsRoutes from "./routes/reports.routes.js";
 import paymentsRoutes from "./routes/payments.routes.js";
 import settingsRoutes from "./routes/settings.routes.js";
@@ -154,6 +155,7 @@ export function createApp(io) {
   app.use("/api/broadcasts", broadcastsRoutes);
   app.use("/api/reviews", reviewsRoutes);
   app.use("/api/returns", returnsRoutes);
+  app.use("/api/live-locations", liveLocationsRoutes);
   app.use("/api/analytics", reportsRoutes);
   app.use("/api/reports", reportsRoutes);
   app.use("/api/payments", paymentsRoutes);

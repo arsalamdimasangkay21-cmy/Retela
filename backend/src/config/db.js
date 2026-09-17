@@ -868,6 +868,39 @@ async function ensureCoreTables() {
        AND LOWER(REPLACE(REPLACE(REPLACE(TRIM(COALESCE(payment_status, '')), ' ', ''), '_', ''), '-', '')) IN ('failed','paymentfailed','unpaid','cancelled','canceled','expired')`
   );
 
+  await ensureTable("order_live_locations", `
+    CREATE TABLE IF NOT EXISTS order_live_locations (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      order_id INT NOT NULL,
+      user_id INT NOT NULL,
+      source_type ENUM('rider','customer') NOT NULL DEFAULT 'rider',
+      latitude DECIMAL(10,7) NOT NULL,
+      longitude DECIMAL(10,7) NOT NULL,
+      heading DECIMAL(6,2) NULL,
+      speed DECIMAL(8,3) NULL,
+      accuracy DECIMAL(8,2) NULL,
+      is_live BOOLEAN NOT NULL DEFAULT TRUE,
+      shared_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      stopped_at DATETIME NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_order_live_source (order_id, user_id, source_type),
+      INDEX idx_order_live_order (order_id, source_type, is_live, shared_at),
+      INDEX idx_order_live_user (user_id, is_live)
+    )
+  `);
+  await ensureAutoIncrementId("order_live_locations");
+  await ensureColumn("order_live_locations", "source_type", "source_type ENUM('rider','customer') NOT NULL DEFAULT 'rider' AFTER user_id");
+  await ensureColumn("order_live_locations", "heading", "heading DECIMAL(6,2) NULL AFTER longitude");
+  await ensureColumn("order_live_locations", "speed", "speed DECIMAL(8,3) NULL AFTER heading");
+  await ensureColumn("order_live_locations", "accuracy", "accuracy DECIMAL(8,2) NULL AFTER speed");
+  await ensureColumn("order_live_locations", "is_live", "is_live BOOLEAN NOT NULL DEFAULT TRUE AFTER accuracy");
+  await ensureColumn("order_live_locations", "shared_at", "shared_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP AFTER is_live");
+  await ensureColumn("order_live_locations", "stopped_at", "stopped_at DATETIME NULL AFTER shared_at");
+  await ensureIndex("order_live_locations", "uq_order_live_source", "CREATE UNIQUE INDEX uq_order_live_source ON order_live_locations (order_id, user_id, source_type)", ["order_id", "user_id", "source_type"]);
+  await ensureIndex("order_live_locations", "idx_order_live_order", "CREATE INDEX idx_order_live_order ON order_live_locations (order_id, source_type, is_live, shared_at)", ["order_id", "source_type", "is_live", "shared_at"]);
+  await ensureIndex("order_live_locations", "idx_order_live_user", "CREATE INDEX idx_order_live_user ON order_live_locations (user_id, is_live)", ["user_id", "is_live"]);
+
   await ensureTable("cart_items", `
     CREATE TABLE IF NOT EXISTS cart_items (
       id INT AUTO_INCREMENT PRIMARY KEY,
