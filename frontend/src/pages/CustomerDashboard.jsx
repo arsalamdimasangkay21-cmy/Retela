@@ -779,13 +779,6 @@ export default function CustomerDashboard({ active, onChange }) {
   );
 
   useEffect(() => {
-    if (codEligibilityResolved && !codEligible && paymentMethod === "cod") {
-      setPaymentMethod("qrph");
-      setPaymentError("");
-    }
-  }, [codEligibilityResolved, codEligible, paymentMethod]);
-
-  useEffect(() => {
     // Changing the payment method changes the policy text, so require the
     // customer to acknowledge the newly selected policy again.
     setPolicyAccepted(false);
@@ -864,13 +857,13 @@ export default function CustomerDashboard({ active, onChange }) {
   }
 
   function selectPaymentMethod(method) {
-    if (method === "cod" && !codEligible) {
+    setPaymentMethod(method);
+    if (method === "cod" && codEligibilityResolved && !codEligible) {
       const message = codEligibilityMessage(currentDeliveryLocation, shopMunicipality);
       setPaymentError(message);
       notifyCart(message, "warning");
       return;
     }
-    setPaymentMethod(method);
     setPaymentError("");
     if (method !== "cod" && profile?.phone_number) {
       const key = paymentNumberKey(method);
@@ -1256,7 +1249,7 @@ export default function CustomerDashboard({ active, onChange }) {
             <div className="grid gap-3 rounded-2xl border border-white/10 bg-white/[0.045] p-3">
               <p className="text-xs font-bold uppercase tracking-[0.16em] text-white/45">Payment Method</p>
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                {checkoutPaymentMethods.filter(([value]) => value !== "cod" || codEligible).map(([value, label]) => (
+                {checkoutPaymentMethods.map(([value, label]) => (
                   <button key={value} type="button" onClick={() => selectPaymentMethod(value)} className={`inline-flex items-center justify-center gap-1 rounded-xl px-2 py-2 text-xs font-bold transition ${paymentMethod === value ? "bg-neonbrand text-black" : "bg-white/[0.06] text-white/65 hover:text-neonbrand"}`}>
                     {value === "debit" ? <CreditCard size={14} /> : <WalletCards size={14} />}{label}
                   </button>
@@ -1483,7 +1476,7 @@ function CartPage({
         <div className="mt-4 grid gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-3">
           <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">Payment Method</p>
           <div className="payment-methods grid grid-cols-2 gap-2">
-            {checkoutPaymentMethods.filter(([value]) => value !== "cod" || codEligible).map(([value, label]) => (
+            {checkoutPaymentMethods.map(([value, label]) => (
               <button key={value} type="button" onClick={() => selectPaymentMethod(value)} className={`payment-method-option inline-flex items-center justify-center gap-1 rounded-xl px-2 py-2 text-xs font-bold transition ${paymentMethod === value ? "bg-emerald-600 text-white" : "bg-white text-slate-600 hover:text-emerald-700"}`}>
                 {value === "debit" ? <CreditCard size={14} /> : <WalletCards size={14} />}{label}
               </button>
