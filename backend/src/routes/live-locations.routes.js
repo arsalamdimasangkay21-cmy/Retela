@@ -3,7 +3,7 @@ import { z } from "zod";
 import { query } from "../config/db.js";
 import { requireAuth, requireApproved, requireRole } from "../middleware/auth.js";
 import { asyncHandler, HttpError } from "../utils/errors.js";
-import { validCoordinates } from "../utils/shippingCalculator.js";
+import { haversineDistanceKm, validCoordinates } from "../utils/shippingCalculator.js";
 
 const router = Router();
 let liveLocationTableReady;
@@ -66,6 +66,38 @@ function serializeLiveLocation(row) {
     stopped_at: row.stopped_at || null,
     status: row.is_live ? "live" : "stopped"
   };
+}
+
+async function notifyCustomerOnce(req, { userId, orderId, title, body }) {
+  if (!userId || !orderId || !title || !body) return null;
+  const existing = await query(
+    `SELECT id
+     FROM notifications
+     WHERE user_id = :userId
+       AND type = 'order'
+       AND title = :title
+       AND body = :body
+     LIMIT 1`,
+    { userId, title, body }
+  );
+  if (existing.length) return null;
+  const result = await query(
+    "INSERT INTO notifications (user_id, type, title, body) VALUES (:userId, 'order', :title, :body)",
+    { userId, title, body }
+  );
+  const payload = {
+    id: result.insertId,
+    user_id: Number(userId),
+    type: "order",
+    title,
+    body,
+    message: body,
+    order_id: Number(orderId),
+    is_read: false,
+    created_at: new Date().toISOString()
+  };
+  req.app.get("io")?.to(`user:${userId}`).emit("notification:new", payload);
+  return payload;
 }
 
 async function loadOrderForLiveLocation(orderId, user) {
@@ -193,6 +225,26 @@ router.post("/orders/:id", requireAuth, requireApproved, asyncHandler(async (req
   });
   req.app.get("io")?.to(`order-live:${orderId}`).emit("live-location:update", payload);
   req.app.get("io")?.to("admin").emit("live-location:update", payload);
+  if (sourceType === "rider") {
+    await notifyCustomerOnce(req, {
+      userId: order.user_id,
+      orderId,
+      title: "Rider location available",
+      body: `Your rider location is now available for order #${orderId}.`
+    });
+    const distanceKm = haversineDistanceKm(
+      { latitude: input.latitude, longitude: input.longitude },
+      { latitude: order.delivery_latitude, longitude: order.delivery_longitude }
+    );
+    if (distanceKm !== null && distanceKm <= 0.5) {
+      await notifyCustomerOnce(req, {
+        userId: order.user_id,
+        orderId,
+        title: "Rider approaching",
+        body: `Your rider is approaching the delivery area for order #${orderId}.`
+      });
+    }
+  }
   res.status(201).json(payload);
 }));
 

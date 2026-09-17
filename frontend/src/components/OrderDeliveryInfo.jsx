@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LocateFixed, Loader2, MapPin, Navigation, Radio, RotateCcw, Route, Square } from "lucide-react";
 import { api, cachedGet, getApiErrorMessage, getStoredAuthToken } from "../api/client";
 import { acquireSocket, releaseSocket } from "../api/socket";
@@ -104,7 +104,34 @@ function formatUpdatedAgo(value) {
   return `${minutes} min ago`;
 }
 
-export default function OrderDeliveryInfo({ order, title = "Delivery Information", mapLabel = "View Location", routeEnabled = true, liveRouteEnabled = false, onRouteMetrics }) {
+function routeCacheKey(origin, destination) {
+  if (!origin || !destination) return "";
+  return [
+    Number(origin.latitude).toFixed(5),
+    Number(origin.longitude).toFixed(5),
+    Number(destination.latitude).toFixed(5),
+    Number(destination.longitude).toFixed(5)
+  ].join(":");
+}
+
+async function fetchDrivingRoute(origin, destination, { signal, cache } = {}) {
+  const key = routeCacheKey(origin, destination);
+  if (cache?.has(key)) return cache.get(key);
+  const response = await fetch(routeUrl(origin, destination), { signal });
+  if (!response.ok) throw new Error(`Route unavailable (${response.status})`);
+  const data = await response.json();
+  const routeData = Array.isArray(data?.routes) ? data.routes[0] : null;
+  if (!routeData) throw new Error("Route unavailable");
+  const route = {
+    coordinates: (routeData.geometry?.coordinates || []).map(([longitude, latitude]) => ({ latitude, longitude })),
+    distanceMeters: Number(routeData.distance || 0),
+    durationSeconds: Number(routeData.duration || 0)
+  };
+  if (cache && key) cache.set(key, route);
+  return route;
+}
+
+export default function OrderDeliveryInfo({ order, title = "Delivery Information", mapLabel = "View Location", routeEnabled = true, liveRouteEnabled = false, canShareLiveLocation = false, routeInitiallyVisible = true, onRouteMetrics }) {
   const snapshot = orderDeliverySnapshot(order);
   const mapUrl = deliveryMapUrl(snapshot);
   return (
@@ -134,7 +161,7 @@ export default function OrderDeliveryInfo({ order, title = "Delivery Information
           </div>
         ) : null}
       </div>
-      {routeEnabled ? <InlineDeliveryRoute order={order} snapshot={snapshot} liveRouteEnabled={liveRouteEnabled} onRouteMetrics={onRouteMetrics} /> : mapUrl ? (
+      {routeEnabled ? <InlineDeliveryRoute order={order} snapshot={snapshot} liveRouteEnabled={liveRouteEnabled} canShareLiveLocation={canShareLiveLocation} routeInitiallyVisible={routeInitiallyVisible} onRouteMetrics={onRouteMetrics} /> : mapUrl ? (
         <a className="order-delivery-map-button" href={mapUrl} target="_blank" rel="noreferrer">
           <MapPin size={15} /> {mapLabel}
         </a>
@@ -143,7 +170,7 @@ export default function OrderDeliveryInfo({ order, title = "Delivery Information
   );
 }
 
-function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, onRouteMetrics }) {
+function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canShareLiveLocation = false, routeInitiallyVisible = true, onRouteMetrics }) {
   const [destinationSnapshot, setDestinationSnapshot] = useState(snapshot);
   const [settings, setSettings] = useState(null);
   const [route, setRoute] = useState(null);
@@ -151,6 +178,9 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, onRout
   const [liveLocation, setLiveLocation] = useState(null);
   const [displayedLiveLocation, setDisplayedLiveLocation] = useState(null);
   const [trackingActive, setTrackingActive] = useState(false);
+  const [routeVisible, setRouteVisible] = useState(Boolean(routeInitiallyVisible));
+  const [routeRequested, setRouteRequested] = useState(true);
+  const [followRider, setFollowRider] = useState(!canShareLiveLocation);
   const [locating, setLocating] = useState(false);
   const [loadingSettings, setLoadingSettings] = useState(true);
   const [loadingRoute, setLoadingRoute] = useState(false);
@@ -166,6 +196,8 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, onRout
   const headingRef = useRef(0);
   const animationRef = useRef(null);
   const routeRequestRef = useRef(0);
+  const routeCacheRef = useRef(new Map());
+  const liveRouteRefreshRef = useRef({ point: null, at: 0 });
 
   const shop = useMemo(() => normalizeShopLocation(settings || {}), [settings]);
   const hasShopCoordinates = shop.latitude !== null && shop.longitude !== null;
@@ -178,8 +210,77 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, onRout
   }, [order?.id]);
 
   useEffect(() => {
+    setRouteVisible(Boolean(routeInitiallyVisible));
+    setRouteRequested(true);
+    setLiveRoute(null);
+    setLiveLocation(null);
+    setDisplayedLiveLocation(null);
+    liveRouteRefreshRef.current = { point: null, at: 0 };
+  }, [order?.id, routeInitiallyVisible]);
+
+  useEffect(() => {
     trackingActiveRef.current = trackingActive;
   }, [trackingActive]);
+
+  const applyLiveLocation = useCallback((payload) => {
+    const next = normalizeLiveLocation(payload);
+    if (!next || Number(next.order_id) !== Number(order?.id || 0)) return;
+    if (next.source_type !== "rider") return;
+    if (!next.is_live) {
+      setLiveLocation(null);
+      setLiveRoute(null);
+      return;
+    }
+    setLiveLocation(next);
+    setLocating(false);
+  }, [order?.id]);
+
+  const leaveLiveSocket = useCallback(() => {
+    const socket = socketRef.current;
+    if (!socket) return;
+    if (socketHandlersRef.current) {
+      socket.off("live-location:update", socketHandlersRef.current.updateHandler);
+      socket.off("live-location:stopped", socketHandlersRef.current.stoppedHandler);
+    }
+    if (joinedOrderIdRef.current) socket.emit("order-live:leave", joinedOrderIdRef.current);
+    releaseSocket(socket);
+    socketRef.current = null;
+    socketHandlersRef.current = null;
+    joinedOrderIdRef.current = null;
+  }, []);
+
+  const joinLiveSocket = useCallback(() => {
+    const token = getStoredAuthToken();
+    const socket = acquireSocket(token);
+    const orderId = Number(order?.id || 0);
+    if (!socket || !orderId) return null;
+    leaveLiveSocket();
+    const updateHandler = (payload) => applyLiveLocation(payload);
+    const stoppedHandler = (payload) => applyLiveLocation(payload);
+    socket.emit("order-live:join", orderId);
+    socket.on("live-location:update", updateHandler);
+    socket.on("live-location:stopped", stoppedHandler);
+    socketRef.current = socket;
+    socketHandlersRef.current = { updateHandler, stoppedHandler };
+    joinedOrderIdRef.current = orderId;
+    currentOrderIdRef.current = orderId;
+    return socket;
+  }, [applyLiveLocation, leaveLiveSocket, order?.id]);
+
+  useEffect(() => {
+    if (!liveRouteEnabled || !order?.id) return undefined;
+    joinLiveSocket();
+    api.get(`/live-locations/orders/${order.id}`)
+      .then(({ data }) => {
+        const rows = Array.isArray(data?.locations) ? data.locations : [];
+        const rider = rows.find((row) => row.source_type === "rider");
+        if (rider) applyLiveLocation(rider);
+      })
+      .catch(() => {});
+    return () => {
+      leaveLiveSocket();
+    };
+  }, [applyLiveLocation, joinLiveSocket, leaveLiveSocket, liveRouteEnabled, order?.id]);
 
   useEffect(() => {
     setDestinationSnapshot(snapshot);
@@ -232,29 +333,15 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, onRout
   }, []);
 
   useEffect(() => {
-    if (loadingSettings || !hasShopCoordinates || !hasDestinationCoordinates) return undefined;
+    if (!routeRequested || loadingSettings || !hasShopCoordinates || !hasDestinationCoordinates) return undefined;
     const controller = new AbortController();
-    setRoute(null);
     setLoadingRoute(true);
     setError("");
     if (import.meta.env.DEV) console.info("[route] request", { origin: { latitude: shop.latitude, longitude: shop.longitude }, destination: { latitude: destinationSnapshot.latitude, longitude: destinationSnapshot.longitude } });
-    fetch(
-      routeUrl(shop, destinationSnapshot),
-      { signal: controller.signal }
-    )
-      .then((response) => {
-        if (import.meta.env.DEV) console.info("[route] HTTP status", response.status);
-        return response.ok ? response.json() : Promise.reject(new Error(`Route unavailable (${response.status})`));
-      })
-      .then((data) => {
-        const routeData = Array.isArray(data?.routes) ? data.routes[0] : null;
-        if (!routeData) throw new Error("Route unavailable");
-        setRoute({
-          coordinates: (routeData.geometry?.coordinates || []).map(([longitude, latitude]) => ({ latitude, longitude })),
-          distanceMeters: Number(routeData.distance || 0),
-          durationSeconds: Number(routeData.duration || 0)
-        });
-        if (import.meta.env.DEV) console.info("[route] response", { distanceMeters: routeData.distance, durationSeconds: routeData.duration });
+    fetchDrivingRoute(shop, destinationSnapshot, { signal: controller.signal, cache: routeCacheRef.current })
+      .then((routeData) => {
+        setRoute(routeData);
+        if (import.meta.env.DEV) console.info("[route] response", { distanceMeters: routeData.distanceMeters, durationSeconds: routeData.durationSeconds });
       })
       .catch((requestError) => {
         if (requestError?.name !== "AbortError") {
@@ -266,7 +353,7 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, onRout
         setLoadingRoute(false);
       });
     return () => controller.abort();
-  }, [destinationSnapshot.latitude, destinationSnapshot.longitude, hasDestinationCoordinates, hasShopCoordinates, loadingSettings, shop.latitude, shop.longitude]);
+  }, [destinationSnapshot.latitude, destinationSnapshot.longitude, hasDestinationCoordinates, hasShopCoordinates, loadingSettings, routeRequested, shop.latitude, shop.longitude]);
 
   useEffect(() => {
     if (!route || typeof onRouteMetrics !== "function") return;
@@ -276,28 +363,26 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, onRout
   }, [onRouteMetrics, route]);
 
   useEffect(() => {
-    if (!trackingActive || !liveRouteUsable || !liveLocation) return undefined;
+    if (!routeVisible || !liveRouteUsable || !liveLocation) return undefined;
+    const previous = liveRouteRefreshRef.current.point;
+    const now = Date.now();
+    const movedMeters = previous ? distanceMetersBetween(previous, liveLocation) : Infinity;
+    if (liveRoute && movedMeters < 90 && now - liveRouteRefreshRef.current.at < 45000) return undefined;
+    liveRouteRefreshRef.current = { point: liveLocation, at: now };
     const requestId = routeRequestRef.current + 1;
     routeRequestRef.current = requestId;
     const controller = new AbortController();
-    fetch(routeUrl(liveLocation, destinationSnapshot), { signal: controller.signal })
-      .then((response) => response.ok ? response.json() : Promise.reject(new Error(`Live route unavailable (${response.status})`)))
-      .then((data) => {
+    fetchDrivingRoute(liveLocation, destinationSnapshot, { signal: controller.signal, cache: routeCacheRef.current })
+      .then((routeData) => {
         if (requestId !== routeRequestRef.current) return;
-        const routeData = Array.isArray(data?.routes) ? data.routes[0] : null;
-        if (!routeData) throw new Error("Live route unavailable");
-        setLiveRoute({
-          coordinates: (routeData.geometry?.coordinates || []).map(([longitude, latitude]) => ({ latitude, longitude })),
-          distanceMeters: Number(routeData.distance || 0),
-          durationSeconds: Number(routeData.duration || 0)
-        });
+        setLiveRoute(routeData);
         setLiveError("");
       })
       .catch((requestError) => {
         if (requestError?.name !== "AbortError") setLiveError("Live road route is temporarily unavailable.");
       });
     return () => controller.abort();
-  }, [destinationSnapshot.latitude, destinationSnapshot.longitude, liveLocation, liveRouteUsable, trackingActive]);
+  }, [destinationSnapshot.latitude, destinationSnapshot.longitude, liveLocation, liveRoute, liveRouteUsable, routeVisible]);
 
   useEffect(() => {
     if (!liveLocation) return;
@@ -330,51 +415,6 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, onRout
       if (animationRef.current) window.cancelAnimationFrame(animationRef.current);
     };
   }, [liveLocation]);
-
-  function applyLiveLocation(payload) {
-    const next = normalizeLiveLocation(payload);
-    if (!next || Number(next.order_id) !== Number(order?.id || 0)) return;
-    if (next.source_type !== "rider") return;
-    if (!next.is_live) {
-      setLiveLocation(null);
-      setLiveRoute(null);
-      return;
-    }
-    setLiveLocation(next);
-    setLocating(false);
-  }
-
-  function joinLiveSocket() {
-    const token = getStoredAuthToken();
-    const socket = acquireSocket(token);
-    const orderId = Number(order?.id || 0);
-    if (!socket || !orderId) return null;
-    leaveLiveSocket();
-    const updateHandler = (payload) => applyLiveLocation(payload);
-    const stoppedHandler = (payload) => applyLiveLocation(payload);
-    socket.emit("order-live:join", orderId);
-    socket.on("live-location:update", updateHandler);
-    socket.on("live-location:stopped", stoppedHandler);
-    socketRef.current = socket;
-    socketHandlersRef.current = { updateHandler, stoppedHandler };
-    joinedOrderIdRef.current = orderId;
-    currentOrderIdRef.current = orderId;
-    return socket;
-  }
-
-  function leaveLiveSocket() {
-    const socket = socketRef.current;
-    if (!socket) return;
-    if (socketHandlersRef.current) {
-      socket.off("live-location:update", socketHandlersRef.current.updateHandler);
-      socket.off("live-location:stopped", socketHandlersRef.current.stoppedHandler);
-    }
-    if (joinedOrderIdRef.current) socket.emit("order-live:leave", joinedOrderIdRef.current);
-    releaseSocket(socket);
-    socketRef.current = null;
-    socketHandlersRef.current = null;
-    joinedOrderIdRef.current = null;
-  }
 
   function publishPosition(position) {
     const coords = position.coords || {};
@@ -416,6 +456,7 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, onRout
       setLiveError("Location sharing is not supported in this browser.");
       return;
     }
+    trackingActiveRef.current = true;
     setTrackingActive(true);
     setLocating(true);
     joinLiveSocket();
@@ -460,8 +501,20 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, onRout
     lastPublishedRef.current = { point: null, at: 0 };
   }
 
-  const activeRoute = trackingActive && liveRoute ? liveRoute : route;
+  function toggleRouteVisibility() {
+    setLiveError("");
+    if (routeVisible) {
+      setRouteVisible(false);
+      return;
+    }
+    setRouteVisible(true);
+    setRouteRequested(true);
+  }
+
+  const activeRoute = routeVisible ? (liveRoute || route) : null;
+  const showLiveLocation = liveRouteEnabled ? displayedLiveLocation : null;
   const updatedText = displayedLiveLocation ? formatUpdatedAgo(displayedLiveLocation.shared_at) : "Waiting for live location";
+  const routeButtonLabel = loadingRoute && routeVisible ? "Loading Route..." : routeVisible ? "Hide Route" : "Show Routes";
 
   return <div className="retela-inline-route">
         <div className="retela-route-summary">
@@ -495,7 +548,8 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, onRout
               shop={shop}
               destination={destinationSnapshot}
               route={activeRoute}
-              liveLocation={trackingActive ? displayedLiveLocation : null}
+              liveLocation={showLiveLocation}
+              followRider={followRider}
             />
             <div className="retela-route-metrics">
               <RouteMetric label="Distance" value={activeRoute ? `${(activeRoute.distanceMeters / 1000).toFixed(1)} km` : loadingRoute || locating ? "Loading..." : "Unavailable"} />
@@ -504,22 +558,31 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, onRout
             {liveRouteEnabled ? (
               <div className="retela-live-route-panel">
                 <div>
-                  <p>Live Route</p>
-                  <strong>{trackingActive ? "Rider -> Customer" : "Saved route available"}</strong>
-                  <span>{trackingActive ? `${displayedLiveLocation ? "Live" : "Waiting"} - Updated ${updatedText}` : "Live location unavailable - showing saved delivery location."}</span>
+                  <p>{canShareLiveLocation ? "Route Controls" : "Delivery Tracking"}</p>
+                  <strong>{displayedLiveLocation ? "Rider location available" : routeVisible ? "Road route ready" : "Map ready"}</strong>
+                  <span>{displayedLiveLocation ? `Live - Updated ${updatedText}` : "Rider location temporarily unavailable."}</span>
                 </div>
                 <div className="retela-live-route-actions">
-                  {!trackingActive ? (
+                  <button type="button" onClick={toggleRouteVisibility} disabled={loadingRoute && routeVisible}>
+                    {loadingRoute && routeVisible ? <Loader2 size={15} className="animate-spin" /> : <Route size={15} />}
+                    {routeButtonLabel}
+                  </button>
+                  {displayedLiveLocation ? (
+                    <button type="button" onClick={() => setFollowRider((value) => !value)}>
+                      <LocateFixed size={14} /> {followRider ? "Following Rider" : "Follow Rider"}
+                    </button>
+                  ) : null}
+                  {canShareLiveLocation ? !trackingActive ? (
                     <button type="button" onClick={startLiveTracking} disabled={locating || !liveRouteUsable}>
-                      {locating ? <Loader2 size={15} className="animate-spin" /> : <Route size={15} />}
-                      {locating ? "Loading/Locating..." : "Show Routes"}
+                      {locating ? <Loader2 size={15} className="animate-spin" /> : <Radio size={15} />}
+                      {locating ? "Locating..." : "Start Live Tracking"}
                     </button>
                   ) : (
                     <>
                       <span className="retela-live-route-badge"><Radio size={14} /> {displayedLiveLocation ? "Live Tracking" : "Loading/Locating..."}</span>
-                      <button type="button" onClick={() => stopLiveTracking()}><Square size={14} /> Stop Route</button>
+                      <button type="button" onClick={() => stopLiveTracking()}><Square size={14} /> Stop Live</button>
                     </>
-                  )}
+                  ) : null}
                 </div>
               </div>
             ) : null}
@@ -550,15 +613,19 @@ function RouteMetric({ label, value }) {
   );
 }
 
-function DeliveryRouteMap({ shop, destination, route, liveLocation = null }) {
+function DeliveryRouteMap({ shop, destination, route, liveLocation = null, followRider = false }) {
   const [zoomOffset, setZoomOffset] = useState(0);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [tileState, setTileState] = useState("loading");
   const [tileVersion, setTileVersion] = useState(0);
+  const [userMovedMap, setUserMovedMap] = useState(false);
+  const [interacting, setInteracting] = useState(false);
+  const containerRef = useRef(null);
   const pointerRef = useRef(new Map());
   const dragOriginRef = useRef(null);
   const pinchRef = useRef(null);
-  const map = useMemo(() => buildRouteMapModel(shop, destination, route, zoomOffset, liveLocation), [destination, liveLocation, route, shop, zoomOffset]);
+  const fitLiveLocation = Boolean(liveLocation && (followRider || !userMovedMap));
+  const map = useMemo(() => buildRouteMapModel(shop, destination, route, zoomOffset, fitLiveLocation ? liveLocation : null), [destination, fitLiveLocation, liveLocation, route, shop, zoomOffset]);
   const routePoints = (route?.coordinates?.length ? route.coordinates : [shop, destination]).map((point) => projectPointOnMap(point, map));
   const routeReady = Boolean(route?.coordinates?.length);
   const shopPoint = projectPointOnMap(shop, map);
@@ -576,7 +643,10 @@ function DeliveryRouteMap({ shop, destination, route, liveLocation = null }) {
   }
 
   function handlePointerDown(event) {
+    event.preventDefault();
+    event.stopPropagation();
     event.currentTarget.setPointerCapture?.(event.pointerId);
+    setInteracting(true);
     pointerRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
     if (pointerRef.current.size === 1) dragOriginRef.current = { pointer: event.pointerId, x: event.clientX, y: event.clientY, pan };
     if (pointerRef.current.size === 2) pinchRef.current = { distance: pointerDistance(), zoomOffset };
@@ -584,36 +654,76 @@ function DeliveryRouteMap({ shop, destination, route, liveLocation = null }) {
 
   function handlePointerMove(event) {
     if (!pointerRef.current.has(event.pointerId)) return;
+    event.preventDefault();
+    event.stopPropagation();
     pointerRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
     if (pointerRef.current.size >= 2 && pinchRef.current) {
       const distance = pointerDistance();
       if (distance && pinchRef.current.distance) setZoomOffset(Math.max(-3, Math.min(3, pinchRef.current.zoomOffset + Math.round((distance - pinchRef.current.distance) / 90))));
+      setUserMovedMap(true);
       return;
     }
     if (dragOriginRef.current?.pointer === event.pointerId) {
       setPan({ x: dragOriginRef.current.pan.x + event.clientX - dragOriginRef.current.x, y: dragOriginRef.current.pan.y + event.clientY - dragOriginRef.current.y });
+      setUserMovedMap(true);
     }
   }
 
   function handlePointerUp(event) {
+    event.preventDefault();
+    event.stopPropagation();
     pointerRef.current.delete(event.pointerId);
     if (pointerRef.current.size < 2) pinchRef.current = null;
-    if (!pointerRef.current.size) dragOriginRef.current = null;
+    if (!pointerRef.current.size) {
+      dragOriginRef.current = null;
+      setInteracting(false);
+    }
   }
 
   function resetRouteView() {
     setZoomOffset(0);
     setPan({ x: 0, y: 0 });
+    setUserMovedMap(false);
   }
 
   useEffect(() => {
     setPan({ x: 0, y: 0 });
     setZoomOffset(0);
-  }, [destination.latitude, destination.longitude, shop.latitude, shop.longitude]);
+    setUserMovedMap(false);
+  }, [destination.latitude, destination.longitude, route?.coordinates?.length, shop.latitude, shop.longitude]);
+
+  useEffect(() => {
+    if (!followRider || !liveLocation) return;
+    resetRouteView();
+  }, [followRider, liveLocation?.latitude, liveLocation?.longitude]);
+
+  useEffect(() => {
+    const node = containerRef.current;
+    if (!node || typeof window.ResizeObserver === "undefined") return undefined;
+    const observer = new window.ResizeObserver(() => {
+      setTileVersion((value) => value + 1);
+    });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
 
   return (
-    <div className="retela-route-map" aria-label="Delivery route map" onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerCancel={handlePointerUp} onWheel={(event) => { event.preventDefault(); setZoomOffset((value) => Math.max(-3, Math.min(3, value + (event.deltaY < 0 ? 1 : -1)))); }}>
-      <div className="retela-map-canvas" style={{ transform: `translate3d(${pan.x}px, ${pan.y}px, 0)` }}>
+    <div
+      ref={containerRef}
+      className="retela-route-map"
+      aria-label="Delivery route map"
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerUp}
+      onWheel={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        setZoomOffset((value) => Math.max(-3, Math.min(3, value + (event.deltaY < 0 ? 1 : -1))));
+        setUserMovedMap(true);
+      }}
+    >
+      <div className={`retela-map-canvas${interacting ? " is-interacting" : ""}`} style={{ transform: `translate3d(${pan.x}px, ${pan.y}px, 0)` }}>
       {tileState !== "error" && map.tiles.map((tile) => (
         <img
           key={`${tile.tileX}-${tile.tileY}-${map.zoom}-${tileVersion}`}
@@ -640,7 +750,7 @@ function DeliveryRouteMap({ shop, destination, route, liveLocation = null }) {
       <div className="retela-route-map-tools">
         <button type="button" onClick={() => setZoomOffset((value) => Math.min(3, value + 1))}>+</button>
         <button type="button" onClick={() => setZoomOffset((value) => Math.max(-3, value - 1))}>-</button>
-        {liveLocation ? <button type="button" onClick={resetRouteView} aria-label="Fit Route" title="Fit Route"><LocateFixed size={14} /></button> : null}
+        <button type="button" onClick={resetRouteView} aria-label="Recenter Map" title="Recenter Map"><LocateFixed size={14} /></button>
         <button type="button" onClick={resetRouteView} aria-label="Reset Route View" title="Reset Route View"><RotateCcw size={14} /></button>
       </div>
     </div>

@@ -3108,6 +3108,8 @@ function Orders({ rows, profile, reviews = [], returnRequests = [], onNavigate, 
 function CustomerOrderModal({ loading, selectedOrder, onPay, payingOrderId, onMeetupConfirmation, onClose }) {
   const order = selectedOrder?.order;
   const cancelled = isOrderCancelled(order);
+  const deliveryTrackingEnabled = Boolean(order?.fulfillment_method === "delivery"
+    && ["approved", "processing", "ready", "paid"].includes(normalizeOrderStatus(order?.status)));
   const meetingPlace = String(order?.meeting_place || "").trim();
   const meetupScheduleSaved = Boolean(meetingPlace && order?.meetup_date && order?.meetup_time);
   const meetupEligibility = orderMeetupEligibility(order);
@@ -3174,7 +3176,7 @@ function CustomerOrderModal({ loading, selectedOrder, onPay, payingOrderId, onMe
                     <p className="mt-2 break-words font-semibold">{order.rejection_reason || "RETELA rejected this order. Please contact support for more details."}</p>
                   </section>
                 ) : null}
-                {order.fulfillment_method === "delivery" ? <OrderDeliveryInfo order={order} title="Delivery Information" mapLabel="View Location" /> : null}
+                {order.fulfillment_method === "delivery" ? <OrderDeliveryInfo order={order} title={deliveryTrackingEnabled ? "Delivery Tracking" : "Delivery Information"} mapLabel="View Location" liveRouteEnabled={deliveryTrackingEnabled} routeInitiallyVisible /> : null}
                 {showMeetupWaiting ? (
                   <section className="retela-meeting-place-card retela-meetup-waiting-card">
                     <div>
@@ -3695,6 +3697,7 @@ function ReturnForm({ orders, returnRequests, onSaved }) {
   const [orderDetails, setOrderDetails] = useState(null);
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [orderSearch, setOrderSearch] = useState("");
   const selectedOrder = orders.find((order) => Number(order.id) === Number(form.order_id));
   const selectedReturn = returnRequests.find((row) => Number(row.order_id) === Number(form.order_id));
   const validation = getReturnValidation(selectedOrder, selectedReturn);
@@ -3768,13 +3771,13 @@ function ReturnForm({ orders, returnRequests, onSaved }) {
         <ReturnPolicyNotice />
 
         <form onSubmit={submit} className="mt-5 grid gap-4">
-          <label className="grid gap-2">
-            <span className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">Order Selection</span>
-            <select className="rounded-2xl border border-slate-200 bg-white p-3 text-sm text-slate-900 outline-none transition focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100" value={form.order_id} onChange={(event) => setForm({ ...form, order_id: event.target.value })}>
-              <option value="">Select purchase</option>
-              {availableOrders.map((order) => <option key={order.id} value={order.id}>{orderNumber(order)} - {order.first_product_name || order.product_names || "Apparel"} - {money(order.total_amount)}</option>)}
-            </select>
-          </label>
+          <ReturnOrderCombobox
+            orders={availableOrders}
+            value={form.order_id}
+            search={orderSearch}
+            onSearchChange={setOrderSearch}
+            onChange={(orderId) => setForm({ ...form, order_id: orderId })}
+          />
 
           {selectedOrder ? (
             <>
@@ -3824,6 +3827,121 @@ function ReturnForm({ orders, returnRequests, onSaved }) {
         </Card>
       </div>
     </motion.div>
+  );
+}
+
+function ReturnOrderCombobox({ orders = [], value, search, onSearchChange, onChange }) {
+  const [open, setOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const selectedOrder = orders.find((order) => Number(order.id) === Number(value));
+  const query = String(search || "").trim().toLowerCase();
+  const filteredOrders = useMemo(() => {
+    if (!query) return orders.slice(0, 25);
+    return orders.filter((order) => {
+      const haystack = [
+        orderNumber(order),
+        `#${order.id}`,
+        order.id,
+        order.first_product_name,
+        order.product_names,
+        order.brands,
+        order.total_amount,
+        money(order.total_amount),
+        formatDate(order.created_at)
+      ].join(" ").toLowerCase();
+      return haystack.includes(query);
+    }).slice(0, 25);
+  }, [orders, query]);
+
+  useEffect(() => {
+    setActiveIndex(0);
+  }, [query, filteredOrders.length]);
+
+  function selectOrder(order) {
+    onChange?.(String(order?.id || ""));
+    onSearchChange?.("");
+    setOpen(false);
+  }
+
+  function clearSelection() {
+    onChange?.("");
+    onSearchChange?.("");
+    setOpen(false);
+  }
+
+  function handleKeyDown(event) {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setOpen(true);
+      if (!filteredOrders.length) return;
+      setActiveIndex((index) => Math.min(filteredOrders.length - 1, index + 1));
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setOpen(true);
+      if (!filteredOrders.length) return;
+      setActiveIndex((index) => Math.max(0, index - 1));
+    } else if (event.key === "Enter") {
+      if (!open || !filteredOrders[activeIndex]) return;
+      event.preventDefault();
+      selectOrder(filteredOrders[activeIndex]);
+    } else if (event.key === "Escape") {
+      setOpen(false);
+    }
+  }
+
+  return (
+    <div className="retela-return-order-combobox">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">Order Selection</span>
+        {selectedOrder ? <button type="button" onClick={clearSelection}>Clear</button> : null}
+      </div>
+      <div className="retela-return-order-search">
+        <Search size={16} />
+        <input
+          type="search"
+          role="combobox"
+          aria-expanded={open}
+          aria-controls="return-order-results"
+          aria-autocomplete="list"
+          value={search}
+          onChange={(event) => {
+            onSearchChange?.(event.target.value);
+            setOpen(true);
+          }}
+          onFocus={() => setOpen(true)}
+          onKeyDown={handleKeyDown}
+          placeholder="Search order or product..."
+        />
+        {search ? <button type="button" aria-label="Clear search" onClick={() => onSearchChange?.("")}>X</button> : null}
+      </div>
+      {selectedOrder ? (
+        <div className="retela-return-selected-order">
+          <span>Selected purchase</span>
+          <strong>{orderNumber(selectedOrder)} - {selectedOrder.first_product_name || selectedOrder.product_names || "Apparel"} - {money(selectedOrder.total_amount)}</strong>
+        </div>
+      ) : null}
+      {open ? (
+        <div id="return-order-results" className="retela-return-order-results" role="listbox">
+          {filteredOrders.length ? filteredOrders.map((order, index) => (
+            <button
+              key={order.id}
+              type="button"
+              role="option"
+              aria-selected={Number(order.id) === Number(value)}
+              className={index === activeIndex ? "is-active" : ""}
+              onMouseEnter={() => setActiveIndex(index)}
+              onMouseDown={(event) => {
+                event.preventDefault();
+                selectOrder(order);
+              }}
+            >
+              <strong>{orderNumber(order)} - {order.first_product_name || order.product_names || "Apparel"} - {money(order.total_amount)}</strong>
+              <span>{formatDate(order.created_at)}{order.brands ? ` - ${order.brands}` : ""}</span>
+            </button>
+          )) : <p>No purchases found.</p>}
+        </div>
+      ) : null}
+    </div>
   );
 }
 

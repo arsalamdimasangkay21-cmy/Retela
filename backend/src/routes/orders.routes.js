@@ -9,6 +9,7 @@ import { calculateCheckoutPricing } from "../utils/promotions.js";
 import { calculateShippingQuote, getShippingPolicy } from "../utils/shippingSettings.js";
 import { createAdminNotification } from "../utils/adminNotifications.js";
 import { ensureCartTable } from "./cart.routes.js";
+import { ensureLiveLocationTable } from "./live-locations.routes.js";
 import { loadSystemSettings } from "../utils/systemSettings.js";
 import { loadCustomerDeliveryLocation } from "../utils/customerLocation.js";
 import { haversineDistanceKm, normalizeMunicipality, validCoordinates } from "../utils/shippingCalculator.js";
@@ -17,6 +18,7 @@ const router = Router();
 const orderStatusEnumSql = "ENUM('pending','awaiting_payment','paid','approved','processing','ready','completed','cancelled','payment_failed','rejected')";
 const paymentStatusEnumSql = "ENUM('unpaid','awaiting_payment','paid','failed','expired','cancelled','refunded')";
 const statuses = ["pending", "awaiting_payment", "paid", "approved", "processing", "ready", "completed", "cancelled", "payment_failed", "rejected"];
+const terminalStatuses = new Set(["completed", "cancelled", "payment_failed", "rejected"]);
 const customerCancellableStatuses = new Set(["pending", "awaiting_payment"]);
 const allowedAdminStatusTransitions = {
   pending: new Set(["approved", "cancelled"]),
@@ -681,6 +683,9 @@ router.patch("/:id/cancel", requireAuth, requireApproved, asyncHandler(async (re
     const cancelledOrder = updatedRows[0];
     req.app.get("io")?.to(`user:${req.user.id}`).emit("order:update", { id: orderId, status: "cancelled", payment_status: "cancelled" });
     req.app.get("io")?.to("admin").emit("order:update", { id: orderId, status: "cancelled", payment_status: "cancelled" });
+    await ensureLiveLocationTable();
+    await query("UPDATE order_live_locations SET is_live = FALSE, stopped_at = NOW() WHERE order_id = :orderId AND is_live = TRUE", { orderId });
+    req.app.get("io")?.to(`order-live:${orderId}`).emit("live-location:stopped", { order_id: orderId, is_live: false, status: "stopped", stopped_at: new Date().toISOString() });
     inventoryUpdates.forEach((update) => {
       req.app.get("io")?.emit("inventory:update", { type: "inventory", action: "order_cancelled", ...update });
     });
@@ -1185,6 +1190,9 @@ router.patch("/:id/reject", requireAuth, requireRole("admin"), asyncHandler(asyn
   const io = req.app.get("io");
   if (order.user_id) io?.to(`user:${order.user_id}`).emit("order:update", updatePayload);
   io?.to("admin").emit("order:update", updatePayload);
+  await ensureLiveLocationTable();
+  await query("UPDATE order_live_locations SET is_live = FALSE, stopped_at = NOW() WHERE order_id = :orderId AND is_live = TRUE", { orderId });
+  io?.to(`order-live:${orderId}`).emit("live-location:stopped", { order_id: orderId, is_live: false, status: "stopped", stopped_at: new Date().toISOString() });
   result.inventoryUpdates.forEach((update) => {
     io?.emit("inventory:update", { type: "inventory", action: "payment-failed-rejected-restock", ...update });
   });
@@ -1251,6 +1259,9 @@ router.patch("/:id/status", requireAuth, requireRole("admin"), asyncHandler(asyn
       req.app.get("io")?.to(`user:${order.user_id}`).emit("order:update", updatePayload);
     }
     req.app.get("io")?.to("admin").emit("order:update", updatePayload);
+    await ensureLiveLocationTable();
+    await query("UPDATE order_live_locations SET is_live = FALSE, stopped_at = NOW() WHERE order_id = :orderId AND is_live = TRUE", { orderId });
+    req.app.get("io")?.to(`order-live:${orderId}`).emit("live-location:stopped", { order_id: orderId, is_live: false, status: "stopped", stopped_at: new Date().toISOString() });
     result.inventoryUpdates.forEach((update) => {
       req.app.get("io")?.emit("inventory:update", { type: "inventory", action: "payment-failed-rejected-restock", ...update });
     });
@@ -1295,16 +1306,29 @@ router.patch("/:id/status", requireAuth, requireRole("admin"), asyncHandler(asyn
     await query("UPDATE orders SET status = :status WHERE id = :id", { id: orderId, status });
   }
   const updatedOrder = await loadDecoratedOrder(orderId, { role: "admin" });
-  const title = status === "ready" ? "Out for Delivery" : status === "completed" ? "Order received" : "Order update";
+  const title = status === "approved" ? "Order accepted by rider" : status === "ready" ? "Rider is on the way" : status === "completed" ? "Order received" : "Order update";
   const body = status === "ready"
-    ? "Your order is out for delivery."
+    ? `Your rider is now on the way for order #${orderId}.`
     : status === "completed"
       ? "Your order was marked received. Please send feedback from the Feedback page."
-      : `Your order is now ${status === "approved" ? "accepted" : status}.`;
-  await query(
+      : status === "approved"
+        ? `Your order #${orderId} has been accepted by a rider.`
+        : `Your order is now ${status}.`;
+  const customerNotificationResult = await query(
     "INSERT INTO notifications (user_id, type, title, body) VALUES (:userId, 'order', :title, :body)",
     { userId: order.user_id, title, body }
   );
+  const customerNotification = {
+    id: customerNotificationResult.insertId,
+    user_id: Number(order.user_id),
+    type: "order",
+    title,
+    body,
+    message: body,
+    order_id: orderId,
+    is_read: false,
+    created_at: new Date().toISOString()
+  };
   if (status === "completed" && currentStatus !== "completed") {
     await query(
       "INSERT INTO notifications (type, title, body) VALUES ('order', 'Sale completed', :body)",
@@ -1319,7 +1343,13 @@ router.patch("/:id/status", requireAuth, requireRole("admin"), asyncHandler(asyn
   }
   const updatePayload = updatedOrder || { id: orderId, status };
   if (order.user_id) req.app.get("io")?.to(`user:${order.user_id}`).emit("order:update", updatePayload);
+  if (order.user_id) req.app.get("io")?.to(`user:${order.user_id}`).emit("notification:new", customerNotification);
   req.app.get("io")?.to("admin").emit("order:update", updatePayload);
+  if (terminalStatuses.has(status)) {
+    await ensureLiveLocationTable();
+    await query("UPDATE order_live_locations SET is_live = FALSE, stopped_at = NOW() WHERE order_id = :orderId AND is_live = TRUE", { orderId });
+    req.app.get("io")?.to(`order-live:${orderId}`).emit("live-location:stopped", { order_id: orderId, is_live: false, status: "stopped", stopped_at: new Date().toISOString() });
+  }
   inventoryResult.inventoryUpdates.forEach((update) => {
     req.app.get("io")?.emit("inventory:update", { type: "inventory", action: "order-completed", ...update });
   });
