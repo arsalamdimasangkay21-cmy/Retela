@@ -8432,6 +8432,46 @@ button {
   isolation: isolate;
 }
 
+.retela-route-map-shell {
+  position: relative;
+  min-height: clamp(300px, 42vw, 430px);
+  max-height: min(52dvh, 460px);
+  aspect-ratio: 16 / 9;
+  margin-top: 14px;
+  overflow: hidden;
+  border: 1px solid #cde7d9;
+  border-radius: 20px;
+  background: #dcebe2;
+  contain: layout paint;
+  overscroll-behavior: contain;
+  touch-action: pan-x pan-y;
+  isolation: isolate;
+}
+
+.retela-route-map-shell .retela-route-map {
+  position: absolute;
+  inset: 0;
+  min-height: 0;
+  max-height: none;
+  aspect-ratio: auto;
+  margin-top: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  contain: none;
+  touch-action: auto;
+}
+
+.retela-route-map-shell .retela-route-map img {
+  width: auto;
+  height: auto;
+  max-width: none;
+  transform: none;
+  user-select: auto;
+  -webkit-user-drag: auto;
+  pointer-events: auto;
+}
+
 .retela-map-canvas {
   position: absolute;
   inset: 0;
@@ -8634,7 +8674,8 @@ button {
   margin-top: 2px;
 }
 
-.retela-inline-route .retela-route-map {
+.retela-inline-route .retela-route-map,
+.retela-inline-route .retela-route-map-shell {
   min-height: clamp(180px, 24vw, 260px);
   margin-top: 0;
 }
@@ -9280,7 +9321,8 @@ button {
     grid-template-columns: 1fr;
   }
 
-  .retela-route-map {
+  .retela-route-map,
+  .retela-route-map-shell {
     min-height: 320px;
   }
 
@@ -12890,7 +12932,9 @@ button {
 }
 
 .retela-dark .retela-route-map,
-.premium-shell.retela-dark-shell .retela-route-map {
+.retela-dark .retela-route-map-shell,
+.premium-shell.retela-dark-shell .retela-route-map,
+.premium-shell.retela-dark-shell .retela-route-map-shell {
   border-color: var(--retela-border-dark) !important;
   background: #0f1a15 !important;
 }

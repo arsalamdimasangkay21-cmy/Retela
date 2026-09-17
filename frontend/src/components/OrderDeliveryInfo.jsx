@@ -1,8 +1,60 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { LocateFixed, Loader2, MapPin, Navigation, Radio, RotateCcw, Route, Square } from "lucide-react";
+import { LocateFixed, Loader2, MapPin, Radio, RotateCcw, Route, Square } from "lucide-react";
 import { api, cachedGet, getApiErrorMessage, getStoredAuthToken } from "../api/client";
 import { acquireSocket, releaseSocket } from "../api/socket";
-import { osmTileUrl, routeUrl, validMapCoordinate } from "../config/maps";
+import { validMapCoordinate } from "../config/maps";
+
+const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || "";
+let googleMapsPromise;
+
+function loadGoogleMaps() {
+  if (!GOOGLE_MAPS_API_KEY) return Promise.reject(new Error("Google Maps API key is not configured."));
+  if (window.google?.maps?.DirectionsService) return Promise.resolve(window.google);
+  if (googleMapsPromise) return googleMapsPromise;
+
+  let createdScriptId = "";
+  googleMapsPromise = new Promise((resolve, reject) => {
+    const existing = document.getElementById("retela-google-maps-places") || document.getElementById("retela-google-maps-delivery");
+    let timeoutId;
+    const onReady = () => {
+      window.clearTimeout(timeoutId);
+      if (window.google?.maps?.DirectionsService) resolve(window.google);
+      else reject(new Error("Google Maps did not load."));
+    };
+    const onError = () => {
+      window.clearTimeout(timeoutId);
+      reject(new Error("Google Maps failed to load."));
+    };
+
+    if (existing) {
+      if (window.google?.maps?.DirectionsService) {
+        resolve(window.google);
+        return;
+      }
+      existing.addEventListener("load", onReady, { once: true });
+      existing.addEventListener("error", onError, { once: true });
+      timeoutId = window.setTimeout(onError, 12000);
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.id = "retela-google-maps-places";
+    createdScriptId = script.id;
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(GOOGLE_MAPS_API_KEY)}&libraries=places&v=weekly`;
+    script.async = true;
+    script.defer = true;
+    script.addEventListener("load", onReady, { once: true });
+    script.addEventListener("error", onError, { once: true });
+    timeoutId = window.setTimeout(onError, 12000);
+    document.head.appendChild(script);
+  }).catch((error) => {
+    if (createdScriptId) document.getElementById(createdScriptId)?.remove();
+    googleMapsPromise = undefined;
+    throw error;
+  });
+
+  return googleMapsPromise;
+}
 
 function finiteCoordinate(value) {
   const number = Number(value);
@@ -114,19 +166,43 @@ function routeCacheKey(origin, destination) {
   ].join(":");
 }
 
+function routeAbortError() {
+  const error = new Error("Route request cancelled");
+  error.name = "AbortError";
+  return error;
+}
+
 async function fetchDrivingRoute(origin, destination, { signal, cache } = {}) {
   const key = routeCacheKey(origin, destination);
   if (cache?.has(key)) return cache.get(key);
-  const response = await fetch(routeUrl(origin, destination), { signal });
-  if (!response.ok) throw new Error(`Route unavailable (${response.status})`);
-  const data = await response.json();
-  const routeData = Array.isArray(data?.routes) ? data.routes[0] : null;
-  if (!routeData) throw new Error("Route unavailable");
-  const route = {
-    coordinates: (routeData.geometry?.coordinates || []).map(([longitude, latitude]) => ({ latitude, longitude })),
-    distanceMeters: Number(routeData.distance || 0),
-    durationSeconds: Number(routeData.duration || 0)
-  };
+  const google = await loadGoogleMaps();
+  if (signal?.aborted) throw routeAbortError();
+  const route = await new Promise((resolve, reject) => {
+    const service = new google.maps.DirectionsService();
+    const abort = () => reject(routeAbortError());
+    signal?.addEventListener("abort", abort, { once: true });
+    service.route({
+      origin: { lat: Number(origin.latitude), lng: Number(origin.longitude) },
+      destination: { lat: Number(destination.latitude), lng: Number(destination.longitude) },
+      travelMode: google.maps.TravelMode.DRIVING,
+      provideRouteAlternatives: false
+    }, (result, status) => {
+      signal?.removeEventListener("abort", abort);
+      if (signal?.aborted) return reject(routeAbortError());
+      if (status !== google.maps.DirectionsStatus.OK || !result?.routes?.[0]) {
+        reject(new Error(status === google.maps.DirectionsStatus.ZERO_RESULTS ? "No driving route is available for these locations." : "Google route details are temporarily unavailable."));
+        return;
+      }
+      const legs = result.routes[0].legs || [];
+      resolve({
+        provider: "google",
+        directions: result,
+        coordinates: (result.routes[0].overview_path || []).map((point) => ({ latitude: point.lat(), longitude: point.lng() })),
+        distanceMeters: legs.reduce((sum, leg) => sum + Number(leg.distance?.value || 0), 0),
+        durationSeconds: legs.reduce((sum, leg) => sum + Number(leg.duration?.value || 0), 0)
+      });
+    });
+  });
   if (cache && key) cache.set(key, route);
   return route;
 }
@@ -311,7 +387,7 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
     if (import.meta.env.DEV && hasShopCoordinates && hasDestinationCoordinates) {
       console.info("[delivery-map] shop", { latitude: shop.latitude, longitude: shop.longitude });
       console.info("[delivery-map] customer", { latitude: destinationSnapshot.latitude, longitude: destinationSnapshot.longitude });
-      console.info("[route] provider", "OSRM");
+      console.info("[route] provider", GOOGLE_MAPS_API_KEY ? "Google Directions" : "Google Maps key missing");
     }
   }, [destinationSnapshot.latitude, destinationSnapshot.longitude, hasDestinationCoordinates, hasShopCoordinates, shop.latitude, shop.longitude]);
 
@@ -614,218 +690,208 @@ function RouteMetric({ label, value }) {
 }
 
 function DeliveryRouteMap({ shop, destination, route, liveLocation = null, followRider = false }) {
-  const [zoomOffset, setZoomOffset] = useState(0);
-  const [pan, setPan] = useState({ x: 0, y: 0 });
-  const [tileState, setTileState] = useState("loading");
-  const [tileVersion, setTileVersion] = useState(0);
-  const [userMovedMap, setUserMovedMap] = useState(false);
-  const [interacting, setInteracting] = useState(false);
   const containerRef = useRef(null);
-  const pointerRef = useRef(new Map());
-  const dragOriginRef = useRef(null);
-  const pinchRef = useRef(null);
-  const fitLiveLocation = Boolean(liveLocation && (followRider || !userMovedMap));
-  const map = useMemo(() => buildRouteMapModel(shop, destination, route, zoomOffset, fitLiveLocation ? liveLocation : null), [destination, fitLiveLocation, liveLocation, route, shop, zoomOffset]);
-  const routePoints = (route?.coordinates?.length ? route.coordinates : [shop, destination]).map((point) => projectPointOnMap(point, map));
-  const routeReady = Boolean(route?.coordinates?.length);
-  const shopPoint = projectPointOnMap(shop, map);
-  const destinationPoint = projectPointOnMap(destination, map);
-  const riderPoint = liveLocation ? projectPointOnMap(liveLocation, map) : null;
-  const path = routePoints.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`).join(" ");
-  function retryTiles() {
-    setTileState("loading");
-    setTileVersion((value) => value + 1);
-  }
+  const mapRef = useRef(null);
+  const directionsRendererRef = useRef(null);
+  const shopMarkerRef = useRef(null);
+  const customerMarkerRef = useRef(null);
+  const riderMarkerRef = useRef(null);
+  const resizeObserverRef = useRef(null);
+  const lastBoundsRef = useRef(null);
+  const [mapState, setMapState] = useState("loading");
+  const [mapError, setMapError] = useState("");
 
-  function pointerDistance() {
-    const points = [...pointerRef.current.values()];
-    return points.length >= 2 ? Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y) : null;
-  }
-
-  function handlePointerDown(event) {
-    event.preventDefault();
-    event.stopPropagation();
-    event.currentTarget.setPointerCapture?.(event.pointerId);
-    setInteracting(true);
-    pointerRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
-    if (pointerRef.current.size === 1) dragOriginRef.current = { pointer: event.pointerId, x: event.clientX, y: event.clientY, pan };
-    if (pointerRef.current.size === 2) pinchRef.current = { distance: pointerDistance(), zoomOffset };
-  }
-
-  function handlePointerMove(event) {
-    if (!pointerRef.current.has(event.pointerId)) return;
-    event.preventDefault();
-    event.stopPropagation();
-    pointerRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
-    if (pointerRef.current.size >= 2 && pinchRef.current) {
-      const distance = pointerDistance();
-      if (distance && pinchRef.current.distance) setZoomOffset(Math.max(-3, Math.min(3, pinchRef.current.zoomOffset + Math.round((distance - pinchRef.current.distance) / 90))));
-      setUserMovedMap(true);
-      return;
-    }
-    if (dragOriginRef.current?.pointer === event.pointerId) {
-      setPan({ x: dragOriginRef.current.pan.x + event.clientX - dragOriginRef.current.x, y: dragOriginRef.current.pan.y + event.clientY - dragOriginRef.current.y });
-      setUserMovedMap(true);
-    }
-  }
-
-  function handlePointerUp(event) {
-    event.preventDefault();
-    event.stopPropagation();
-    pointerRef.current.delete(event.pointerId);
-    if (pointerRef.current.size < 2) pinchRef.current = null;
-    if (!pointerRef.current.size) {
-      dragOriginRef.current = null;
-      setInteracting(false);
-    }
-  }
-
-  function resetRouteView() {
-    setZoomOffset(0);
-    setPan({ x: 0, y: 0 });
-    setUserMovedMap(false);
-  }
-
-  useEffect(() => {
-    setPan({ x: 0, y: 0 });
-    setZoomOffset(0);
-    setUserMovedMap(false);
-  }, [destination.latitude, destination.longitude, route?.coordinates?.length, shop.latitude, shop.longitude]);
-
-  useEffect(() => {
-    if (!followRider || !liveLocation) return;
-    resetRouteView();
-  }, [followRider, liveLocation?.latitude, liveLocation?.longitude]);
+  const fitMap = useCallback((includeRider = false) => {
+    const google = window.google;
+    const map = mapRef.current;
+    if (!google?.maps || !map) return;
+    const bounds = new google.maps.LatLngBounds();
+    bounds.extend({ lat: Number(shop.latitude), lng: Number(shop.longitude) });
+    bounds.extend({ lat: Number(destination.latitude), lng: Number(destination.longitude) });
+    if (includeRider && liveLocation) bounds.extend({ lat: Number(liveLocation.latitude), lng: Number(liveLocation.longitude) });
+    route?.directions?.routes?.[0]?.overview_path?.forEach((point) => bounds.extend(point));
+    lastBoundsRef.current = bounds;
+    map.fitBounds(bounds, { top: 64, right: 48, bottom: 58, left: 48 });
+    window.setTimeout(() => {
+      if (map.getZoom() > 17) map.setZoom(17);
+      if (map.getZoom() < 10) map.setZoom(10);
+    }, 60);
+  }, [destination.latitude, destination.longitude, liveLocation, route, shop.latitude, shop.longitude]);
 
   useEffect(() => {
     const node = containerRef.current;
-    if (!node || typeof window.ResizeObserver === "undefined") return undefined;
-    const observer = new window.ResizeObserver(() => {
-      setTileVersion((value) => value + 1);
-    });
-    observer.observe(node);
-    return () => observer.disconnect();
+    if (!node) return undefined;
+    let active = true;
+    loadGoogleMaps()
+      .then((google) => {
+        if (!active || !node) return;
+        const center = { lat: Number(shop.latitude), lng: Number(shop.longitude) };
+        const map = new google.maps.Map(node, {
+          center,
+          zoom: 14,
+          clickableIcons: false,
+          fullscreenControl: false,
+          mapTypeControl: false,
+          streetViewControl: false,
+          rotateControl: false,
+          scaleControl: true,
+          zoomControl: false,
+          gestureHandling: "greedy",
+          backgroundColor: "#dfeee5",
+          styles: [
+            { featureType: "poi.business", stylers: [{ visibility: "simplified" }] },
+            { featureType: "transit", stylers: [{ visibility: "off" }] }
+          ]
+        });
+        mapRef.current = map;
+        directionsRendererRef.current = new google.maps.DirectionsRenderer({
+          map,
+          suppressMarkers: true,
+          preserveViewport: true,
+          polylineOptions: {
+            strokeColor: "#0b8f59",
+            strokeOpacity: 0.92,
+            strokeWeight: 5
+          }
+        });
+        shopMarkerRef.current = createDeliveryMarker(google, map, shop, "shop");
+        customerMarkerRef.current = createDeliveryMarker(google, map, destination, "customer");
+        setMapState("ready");
+        window.setTimeout(() => fitMap(Boolean(liveLocation)), 120);
+      })
+      .catch((error) => {
+        if (!active) return;
+        setMapError(error?.message || "Google Maps could not be loaded.");
+        setMapState("error");
+      });
+
+    return () => {
+      active = false;
+      resizeObserverRef.current?.disconnect();
+      resizeObserverRef.current = null;
+      directionsRendererRef.current?.setMap(null);
+      shopMarkerRef.current?.setMap(null);
+      customerMarkerRef.current?.setMap(null);
+      riderMarkerRef.current?.setMap(null);
+      directionsRendererRef.current = null;
+      shopMarkerRef.current = null;
+      customerMarkerRef.current = null;
+      riderMarkerRef.current = null;
+      mapRef.current = null;
+    };
   }, []);
 
+  useEffect(() => {
+    const node = containerRef.current;
+    const map = mapRef.current;
+    if (!node || !map || typeof window.ResizeObserver === "undefined") return undefined;
+    const observer = new window.ResizeObserver(() => {
+      window.google?.maps?.event?.trigger(map, "resize");
+      if (lastBoundsRef.current) map.fitBounds(lastBoundsRef.current, { top: 64, right: 48, bottom: 58, left: 48 });
+    });
+    observer.observe(node);
+    resizeObserverRef.current = observer;
+    return () => observer.disconnect();
+  }, [mapState]);
+
+  useEffect(() => {
+    const google = window.google;
+    if (!google?.maps || !mapRef.current) return;
+    shopMarkerRef.current?.setPosition({ lat: Number(shop.latitude), lng: Number(shop.longitude) });
+    customerMarkerRef.current?.setPosition({ lat: Number(destination.latitude), lng: Number(destination.longitude) });
+    fitMap(Boolean(liveLocation));
+  }, [destination.latitude, destination.longitude, fitMap, liveLocation, shop.latitude, shop.longitude]);
+
+  useEffect(() => {
+    const renderer = directionsRendererRef.current;
+    if (!renderer) return;
+    if (route?.directions) {
+      renderer.setDirections(route.directions);
+      window.setTimeout(() => fitMap(Boolean(liveLocation)), 80);
+    } else {
+      renderer.setMap(null);
+      renderer.setMap(mapRef.current);
+      fitMap(Boolean(liveLocation));
+    }
+  }, [fitMap, liveLocation, route]);
+
+  useEffect(() => {
+    const google = window.google;
+    const map = mapRef.current;
+    if (!google?.maps || !map) return;
+    if (!liveLocation) {
+      riderMarkerRef.current?.setMap(null);
+      riderMarkerRef.current = null;
+      return;
+    }
+    const position = { lat: Number(liveLocation.latitude), lng: Number(liveLocation.longitude) };
+    if (!riderMarkerRef.current) {
+      riderMarkerRef.current = createDeliveryMarker(google, map, liveLocation, "rider");
+    }
+    riderMarkerRef.current.setPosition(position);
+    riderMarkerRef.current.setIcon(deliveryMarkerIcon(google, "rider", liveLocation.heading));
+    if (followRider) map.panTo(position);
+  }, [followRider, liveLocation]);
+
+  function zoomBy(delta) {
+    const map = mapRef.current;
+    if (!map) return;
+    map.setZoom(Math.max(3, Math.min(20, Number(map.getZoom() || 14) + delta)));
+  }
+
   return (
-    <div
-      ref={containerRef}
-      className="retela-route-map"
-      aria-label="Delivery route map"
-      onPointerDown={handlePointerDown}
-      onPointerMove={handlePointerMove}
-      onPointerUp={handlePointerUp}
-      onPointerCancel={handlePointerUp}
-      onWheel={(event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        setZoomOffset((value) => Math.max(-3, Math.min(3, value + (event.deltaY < 0 ? 1 : -1))));
-        setUserMovedMap(true);
-      }}
-    >
-      <div className={`retela-map-canvas${interacting ? " is-interacting" : ""}`} style={{ transform: `translate3d(${pan.x}px, ${pan.y}px, 0)` }}>
-      {tileState !== "error" && map.tiles.map((tile) => (
-        <img
-          key={`${tile.tileX}-${tile.tileY}-${map.zoom}-${tileVersion}`}
-          src={osmTileUrl(map.zoom, tile.tileX, tile.tileY, tileVersion)}
-          alt=""
-          loading="lazy"
-          onLoad={() => setTileState((state) => state === "loading" ? "ready" : state)}
-          onError={() => { if (import.meta.env.DEV) console.warn("[map] tile load error"); setTileState("error"); }}
-          style={{
-            left: `calc(50% + ${(tile.x - map.offsetX) * 256}px)`,
-            top: `calc(50% + ${(tile.y - map.offsetY) * 256}px)`
-          }}
-        />
-      ))}
-      {tileState === "error" ? <div className="retela-map-status-overlay"><span>Map could not be loaded.</span><button type="button" onClick={retryTiles}>Retry</button></div> : null}
-      {tileState === "loading" ? <div className="retela-map-status-overlay is-loading"><Loader2 size={16} className="animate-spin" /> Loading map...</div> : null}
-      {tileState === "ready" ? <>
-        {routeReady ? <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><path d={path} /></svg> : null}
-        <RouteMarker point={shopPoint} tone="shop" label="RETELA Shop" />
-        <RouteMarker point={destinationPoint} tone="customer" label="Customer Delivery Location" />
-        {riderPoint ? <RiderRouteMarker point={riderPoint} heading={liveLocation.heading} /> : null}
-      </> : null}
-      </div>
+    <div className="retela-route-map-shell" onWheel={(event) => event.stopPropagation()} onTouchMove={(event) => event.stopPropagation()}>
+      <div ref={containerRef} className="retela-route-map" aria-label="Delivery route map" />
+      {mapState === "loading" ? <div className="retela-map-status-overlay is-loading"><Loader2 size={16} className="animate-spin" /> Loading Google Map...</div> : null}
+      {mapState === "error" ? <div className="retela-map-status-overlay"><span>{mapError}</span></div> : null}
       <div className="retela-route-map-tools">
-        <button type="button" onClick={() => setZoomOffset((value) => Math.min(3, value + 1))}>+</button>
-        <button type="button" onClick={() => setZoomOffset((value) => Math.max(-3, value - 1))}>-</button>
-        <button type="button" onClick={resetRouteView} aria-label="Recenter Map" title="Recenter Map"><LocateFixed size={14} /></button>
-        <button type="button" onClick={resetRouteView} aria-label="Reset Route View" title="Reset Route View"><RotateCcw size={14} /></button>
+        <button type="button" onClick={() => zoomBy(1)} aria-label="Zoom in">+</button>
+        <button type="button" onClick={() => zoomBy(-1)} aria-label="Zoom out">-</button>
+        <button type="button" onClick={() => fitMap(Boolean(liveLocation))} aria-label="Recenter Map" title="Recenter Map"><LocateFixed size={14} /></button>
+        <button type="button" onClick={() => fitMap(true)} aria-label="Reset Route View" title="Reset Route View"><RotateCcw size={14} /></button>
       </div>
     </div>
   );
 }
 
-function RiderRouteMarker({ point, heading }) {
-  return (
-    <span className="retela-route-rider-marker" style={{ left: `${point.x}%`, top: `${point.y}%` }}>
-      <Navigation size={23} style={{ transform: `rotate(${Number(heading || 0)}deg)` }} />
-      <strong>Rider</strong>
-    </span>
-  );
+function createDeliveryMarker(google, map, point, type) {
+  return new google.maps.Marker({
+    map,
+    position: { lat: Number(point.latitude), lng: Number(point.longitude) },
+    title: type === "shop" ? "RETELA Shop" : type === "customer" ? "Customer Delivery Location" : "Rider",
+    label: type === "rider" ? null : {
+      text: type === "shop" ? "Shop" : "Customer",
+      color: type === "shop" ? "#ffffff" : "#123526",
+      fontSize: "11px",
+      fontWeight: "800"
+    },
+    icon: deliveryMarkerIcon(google, type, point.heading),
+    optimized: true
+  });
 }
 
-function RouteMarker({ point, tone, label }) {
-  return (
-    <span className={`retela-route-marker is-${tone}`} style={{ left: `${point.x}%`, top: `${point.y}%` }}>
-      <MapPin size={22} />
-      <strong>{label}</strong>
-    </span>
-  );
-}
-
-function buildRouteMapModel(shop, destination, route, zoomOffset, liveLocation = null) {
-  const points = [
-    shop,
-    destination,
-    liveLocation,
-    ...(route?.coordinates || [])
-  ].filter((point) => point && finiteCoordinate(point.latitude) !== null && finiteCoordinate(point.longitude) !== null);
-  const lats = points.map((point) => point.latitude);
-  const lngs = points.map((point) => point.longitude);
-  const minLat = Math.min(...lats);
-  const maxLat = Math.max(...lats);
-  const minLng = Math.min(...lngs);
-  const maxLng = Math.max(...lngs);
-  const centerLat = (minLat + maxLat) / 2;
-  const centerLng = (minLng + maxLng) / 2;
-  const span = Math.max(maxLat - minLat, maxLng - minLng, 0.01);
-  const baseZoom = span < 0.02 ? 14 : span < 0.06 ? 13 : span < 0.14 ? 12 : span < 0.35 ? 11 : 10;
-  const zoom = Math.max(8, Math.min(17, baseZoom + zoomOffset));
-  const center = projectToTile(centerLat, centerLng, zoom);
-  const tileX = Math.floor(center.x);
-  const tileY = Math.floor(center.y);
-  const tiles = [];
-  for (let y = -2; y <= 2; y += 1) {
-    for (let x = -2; x <= 2; x += 1) {
-      tiles.push({ x, y, tileX: tileX + x, tileY: tileY + y });
-    }
+function deliveryMarkerIcon(google, type, heading = 0) {
+  if (type === "rider") {
+    return {
+      path: google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
+      rotation: Number(heading || 0),
+      scale: 5.4,
+      fillColor: "#2563eb",
+      fillOpacity: 1,
+      strokeColor: "#ffffff",
+      strokeWeight: 2,
+      anchor: new google.maps.Point(0, 2)
+    };
   }
+  const color = type === "shop" ? "#0b8f59" : "#2563eb";
   return {
-    center,
-    zoom,
-    offsetX: center.x - tileX,
-    offsetY: center.y - tileY,
-    tiles
-  };
-}
-
-function projectToTile(latitude, longitude, zoom) {
-  const safeLatitude = Math.max(-85.0511, Math.min(85.0511, Number(latitude) || 0));
-  const safeLongitude = Math.max(-180, Math.min(180, Number(longitude) || 0));
-  const latRad = (safeLatitude * Math.PI) / 180;
-  const scale = 2 ** zoom;
-  return {
-    x: ((safeLongitude + 180) / 360) * scale,
-    y: ((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * scale
-  };
-}
-
-function projectPointOnMap(point, map) {
-  const tile = projectToTile(point.latitude, point.longitude, map.zoom);
-  return {
-    x: 50 + (tile.x - map.center.x) * 100,
-    y: 50 + (tile.y - map.center.y) * 100
+    path: "M12 2C7.6 2 4 5.6 4 10c0 5.4 8 12 8 12s8-6.6 8-12c0-4.4-3.6-8-8-8zm0 11.2A3.2 3.2 0 1 1 12 6.8a3.2 3.2 0 0 1 0 6.4z",
+    fillColor: color,
+    fillOpacity: 1,
+    strokeColor: "#ffffff",
+    strokeWeight: 2,
+    scale: 1.55,
+    labelOrigin: new google.maps.Point(12, -4),
+    anchor: new google.maps.Point(12, 22)
   };
 }
