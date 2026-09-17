@@ -101,6 +101,16 @@ CALL retela_add_column_if_missing('products', 'sale_ends_at', 'sale_ends_at DATE
 CALL retela_add_index_if_missing('products', 'idx_products_deleted', 'CREATE INDEX idx_products_deleted ON products (is_deleted)');
 
 CALL retela_add_column_if_missing('orders', 'fulfillment_method', 'fulfillment_method ENUM(''delivery'',''pickup'') NOT NULL DEFAULT ''delivery''');
+CALL retela_add_column_if_missing('orders', 'delivery_address', 'delivery_address VARCHAR(500) NULL');
+CALL retela_add_column_if_missing('orders', 'delivery_latitude', 'delivery_latitude DECIMAL(10,7) NULL');
+CALL retela_add_column_if_missing('orders', 'delivery_longitude', 'delivery_longitude DECIMAL(10,7) NULL');
+CALL retela_add_column_if_missing('orders', 'delivery_municipality', 'delivery_municipality VARCHAR(160) NULL');
+CALL retela_add_column_if_missing('orders', 'delivery_province', 'delivery_province VARCHAR(160) NULL');
+CALL retela_add_column_if_missing('orders', 'delivery_region', 'delivery_region VARCHAR(160) NULL');
+CALL retela_add_column_if_missing('orders', 'delivery_postal_code', 'delivery_postal_code VARCHAR(20) NULL');
+CALL retela_add_column_if_missing('orders', 'delivery_place_id', 'delivery_place_id VARCHAR(255) NULL');
+CALL retela_add_column_if_missing('orders', 'delivery_landmark', 'delivery_landmark VARCHAR(255) NULL');
+CALL retela_add_column_if_missing('orders', 'delivery_notes', 'delivery_notes TEXT NULL');
 CALL retela_add_column_if_missing('orders', 'subtotal_amount', 'subtotal_amount DECIMAL(10,2) NOT NULL DEFAULT 0');
 CALL retela_add_column_if_missing('orders', 'coupon_discount', 'coupon_discount DECIMAL(10,2) NOT NULL DEFAULT 0');
 CALL retela_add_column_if_missing('orders', 'sale_discount', 'sale_discount DECIMAL(10,2) NOT NULL DEFAULT 0');

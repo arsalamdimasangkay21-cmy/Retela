@@ -270,8 +270,11 @@ router.post("/", requireAuth, requireApproved, upload.array("images", 10), async
 
 router.patch("/:id/decision", requireAuth, requireRole("admin"), asyncHandler(async (req, res) => {
   await ensureReturnColumns();
-  const schema = z.object({ status: z.enum(returnStatuses), admin_note: z.string().optional() });
+  const schema = z.object({ status: z.enum(returnStatuses), admin_note: z.string().trim().max(1000).optional().default("") });
   const input = schema.parse(req.body);
+  if (input.status === "rejected" && !input.admin_note) {
+    throw new HttpError(400, "Admin note is required when rejecting a return/refund request.");
+  }
   const lowStockThreshold = await configuredLowStockThreshold();
   const result = await transaction(async (run) => {
     const rows = await run(
@@ -286,6 +289,9 @@ router.patch("/:id/decision", requireAuth, requireRole("admin"), asyncHandler(as
       admin_note: input.admin_note || null,
       id: req.params.id
     });
+    if (input.status === "refunded") {
+      await run("UPDATE orders SET payment_status = 'refunded' WHERE id = :orderId", { orderId: existing.order_id });
+    }
 
     const inventoryUpdates = [];
     if (shouldRestock) {
@@ -319,17 +325,26 @@ router.patch("/:id/decision", requireAuth, requireRole("admin"), asyncHandler(as
         });
       }
     }
-    return { userId: existing.user_id, inventoryUpdates };
+    return { userId: existing.user_id, orderId: existing.order_id, inventoryUpdates };
   });
+  const statusText = input.status.replace("_", " ");
+  const noteSuffix = input.admin_note ? ` Note: ${input.admin_note}` : "";
   await query(
     "INSERT INTO notifications (user_id, type, title, body) VALUES (:userId, 'refund', 'Return request update', :body)",
-    { userId: result.userId, body: `Your return request is now ${input.status.replace("_", " ")}.` }
+    { userId: result.userId, body: `Your return request for Order #${result.orderId} is now ${statusText}.${noteSuffix}` }
   );
   result.inventoryUpdates.forEach((update) => {
     req.app.get("io")?.emit("inventory:update", { type: "inventory", action: "return-restocked", ...update });
   });
-  req.app.get("io")?.to(`user:${result.userId}`).emit("return:update", { id: Number(req.params.id), status: input.status });
-  res.json({ message: "Return/refund decision saved" });
+  const returnPayload = { id: Number(req.params.id), order_id: Number(result.orderId), status: input.status, admin_note: input.admin_note || null };
+  req.app.get("io")?.to(`user:${result.userId}`).emit("return:update", returnPayload);
+  req.app.get("io")?.to("admin").emit("return:update", returnPayload);
+  if (input.status === "refunded") {
+    const orderPayload = { id: Number(result.orderId), payment_status: "refunded" };
+    req.app.get("io")?.to(`user:${result.userId}`).emit("order:update", orderPayload);
+    req.app.get("io")?.to("admin").emit("order:update", orderPayload);
+  }
+  res.json({ message: "Return/refund decision saved", return: returnPayload });
 }));
 
 export default router;

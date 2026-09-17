@@ -849,12 +849,12 @@ export default function AdminDashboard({ active, onChange }) {
     }
   }
 
-  async function decideReturn(id, status) {
+  async function decideReturn(id, status, adminNote = "") {
     const actionKey = `return-${id}`;
     if (busyAction === actionKey) return;
     setBusyAction(actionKey);
     try {
-      await api.patch(`/returns/${id}/decision`, { status });
+      await api.patch(`/returns/${id}/decision`, { status, admin_note: adminNote });
       clearGetCache("/returns");
       clearGetCache("/orders");
       clearGetCache("/notifications");
@@ -1177,7 +1177,7 @@ export default function AdminDashboard({ active, onChange }) {
   if (active === "Locations") return <AdminLocations users={users} />;
   if (active === "Profile") return <AdminProfile profile={profile} setProfile={setProfile} profilePhoto={profilePhoto} setProfilePhoto={setProfilePhoto} saveProfile={saveProfile} profileSaving={busyAction === "profile-save"} showToast={showProductToast} />;
   if (active === "Settings") return <AdminSettingsPage onChange={onChange} />;
-  return <TableCard rows={returns} actions={(row) => <><button onClick={() => decideReturn(row.id, "approved")} className="rounded-lg bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700">Approve</button><button onClick={() => decideReturn(row.id, "rejected")} className="rounded-lg bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700">Reject</button></>} />;
+  return <TableCard rows={returns} actions={(row) => <><button onClick={() => decideReturn(row.id, "approved")} className="rounded-lg bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700">Approve</button><button onClick={() => decideReturn(row.id, "rejected", "Return/refund request rejected by administrator.")} className="rounded-lg bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700">Reject</button></>} />;
 }
 
 function ArchivePage({ onChanged }) {
@@ -4764,7 +4764,7 @@ function isOrderInDateRange(dateValue, range) {
 }
 
 function orderCompleteDeliveryAddress(order) {
-  const address = String(order?.delivery_address || order?.location || "").trim();
+  const address = String(order?.delivery_address || "").trim();
   const structuredParts = [
     order?.delivery_municipality,
     order?.delivery_province,
@@ -4895,6 +4895,8 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
   const [displayedRouteDistanceKm, setDisplayedRouteDistanceKm] = useState(null);
   const [actionStatus, setActionStatus] = useState("");
   const [rejectConfirmOpen, setRejectConfirmOpen] = useState(false);
+  const [rejectReason, setRejectReason] = useState("");
+  const [rejectReasonError, setRejectReasonError] = useState("");
   const modalActionGuardsRef = useRef(new Set());
   const customerPhone = orderCustomerPhone(source);
   const customerEmail = String(source?.customer_email || source?.customerEmail || source?.email || "").trim();
@@ -4929,6 +4931,9 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
 
   useEffect(() => {
     setDisplayedRouteDistanceKm(null);
+    setRejectConfirmOpen(false);
+    setRejectReason("");
+    setRejectReasonError("");
   }, [source?.id]);
 
   useEffect(() => {
@@ -5008,17 +5013,20 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
 
   function rejectOrder() {
     if (!canRejectOrder || actionStatus || rejected) return;
-    if (paymentFailed) {
-      setRejectConfirmOpen(true);
-      return;
-    }
-    void updateStatus("cancelled");
+    setRejectReason("");
+    setRejectReasonError("");
+    setRejectConfirmOpen(true);
   }
 
-  async function confirmPaymentFailedReject(event) {
+  async function confirmRejectOrder(event) {
     event?.preventDefault?.();
-    if (!paymentFailed || actionStatus || rejected) return;
-    const result = await updateStatus("rejected", { reason: paymentFailedRejectionReason });
+    if (actionStatus || rejected) return;
+    const reason = rejectReason.trim();
+    if (!reason) {
+      setRejectReasonError("Enter the rejection reason before rejecting this order.");
+      return;
+    }
+    const result = await updateStatus("rejected", { reason });
     if (result) setRejectConfirmOpen(false);
   }
 
@@ -5202,7 +5210,7 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
                   {actionStatus === "approved" ? <Loader2 size={14} className="animate-spin" /> : null}
                   {actionStatus === "approved" ? "Accepting..." : "Accept"}
                 </button>
-                <button type="button" disabled={Boolean(actionStatus) || !canRejectOrder} onClick={rejectOrder} className={`inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-xs font-bold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-55 ${canRejectOrder ? orderButtonClass(paymentFailed ? "rejected" : "cancelled") : "bg-slate-100 text-slate-500"}`}>
+                <button type="button" disabled={Boolean(actionStatus) || !canRejectOrder} onClick={rejectOrder} className={`inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-xs font-bold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-55 ${canRejectOrder ? orderButtonClass("rejected") : "bg-slate-100 text-slate-500"}`}>
                   {["cancelled", "rejected"].includes(actionStatus) ? <Loader2 size={14} className="animate-spin" /> : null}
                   {["cancelled", "rejected"].includes(actionStatus) ? "Rejecting..." : "Reject"}
                 </button>
@@ -5224,7 +5232,7 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
     <ConfirmDialog
       open={rejectConfirmOpen}
       title="Reject this order?"
-      message="The payment for this order was unsuccessful or could not be verified. Rejecting the order will release the reserved items and notify the customer."
+      message="Enter the reason for rejecting this order. The reason will be saved and shown to the customer."
       cancelLabel="Cancel"
       confirmLabel="Reject Order"
       busyLabel="Rejecting..."
@@ -5232,8 +5240,25 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
       onClose={() => {
         if (actionStatus !== "rejected") setRejectConfirmOpen(false);
       }}
-      onConfirm={confirmPaymentFailedReject}
-    />
+      onConfirm={confirmRejectOrder}
+    >
+      <label className="grid gap-2 text-sm font-bold text-slate-700">
+        <span>Rejection Reason</span>
+        <textarea
+          value={rejectReason}
+          onChange={(event) => {
+            setRejectReason(event.target.value);
+            if (rejectReasonError) setRejectReasonError("");
+          }}
+          maxLength={255}
+          rows={4}
+          placeholder={paymentFailed ? paymentFailedRejectionReason : "Explain why this order is being rejected."}
+          className="min-h-24 w-full resize-y rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 outline-none placeholder:text-slate-400 focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100"
+        />
+        <span className="text-right text-xs font-semibold text-slate-400">{rejectReason.length}/255</span>
+        {rejectReasonError ? <span className="text-xs font-bold text-rose-600">{rejectReasonError}</span> : null}
+      </label>
+    </ConfirmDialog>
     </>
   );
 }
@@ -6434,7 +6459,36 @@ function FeedbackDetail({ label, value }) {
 
 function AdminReturns({ rows, decideReturn }) {
   const [selectedReturn, setSelectedReturn] = useState(null);
+  const [decision, setDecision] = useState(null);
+  const [decisionNote, setDecisionNote] = useState("");
+  const [decisionError, setDecisionError] = useState("");
+  const [decisionSaving, setDecisionSaving] = useState(false);
   const selectedImages = feedbackImageList(selectedReturn);
+  function openDecision(row, status) {
+    setDecision({ row, status });
+    setDecisionNote("");
+    setDecisionError("");
+  }
+
+  async function confirmDecision(event) {
+    event?.preventDefault?.();
+    if (!decision?.row?.id || decisionSaving) return;
+    const note = decisionNote.trim();
+    if (decision.status === "rejected" && !note) {
+      setDecisionError("Enter the reason for rejecting this return/refund request.");
+      return;
+    }
+    setDecisionSaving(true);
+    try {
+      await decideReturn(decision.row.id, decision.status, note);
+      setDecision(null);
+      setDecisionNote("");
+      setDecisionError("");
+    } finally {
+      setDecisionSaving(false);
+    }
+  }
+
   return (
     <div className="grid gap-5">
       <section className="relative overflow-hidden rounded-[30px] border border-white/10 bg-black/35 p-5 shadow-2xl shadow-black/30 backdrop-blur-2xl sm:p-7">
@@ -6462,10 +6516,10 @@ function AdminReturns({ rows, decideReturn }) {
                 <p className="mt-2 text-xs font-bold uppercase tracking-[0.14em] text-neonbrand/65">{row.refund_type || "Refund"}</p>
               </div>
               <div className="flex flex-wrap gap-2 lg:justify-end">
-                <button type="button" onClick={(event) => { event.stopPropagation(); decideReturn(row.id, "under_review"); }} className="rounded-xl border border-sky-300/25 bg-sky-300/10 px-3 py-2 text-xs font-bold text-sky-200">Review</button>
-                <button type="button" onClick={(event) => { event.stopPropagation(); decideReturn(row.id, "approved"); }} className="rounded-xl border border-neonbrand/25 bg-neonbrand/10 px-3 py-2 text-xs font-bold text-neonbrand">Approve</button>
-                <button type="button" onClick={(event) => { event.stopPropagation(); decideReturn(row.id, "refunded"); }} className="rounded-xl border border-violet-300/25 bg-violet-300/10 px-3 py-2 text-xs font-bold text-violet-200">Refunded</button>
-                <button type="button" onClick={(event) => { event.stopPropagation(); decideReturn(row.id, "rejected"); }} className="rounded-xl border border-rose-300/25 bg-rose-300/10 px-3 py-2 text-xs font-bold text-rose-200">Reject</button>
+                <button type="button" onClick={(event) => { event.stopPropagation(); openDecision(row, "under_review"); }} className="rounded-xl border border-sky-300/25 bg-sky-300/10 px-3 py-2 text-xs font-bold text-sky-200">Review</button>
+                <button type="button" onClick={(event) => { event.stopPropagation(); openDecision(row, "approved"); }} className="rounded-xl border border-neonbrand/25 bg-neonbrand/10 px-3 py-2 text-xs font-bold text-neonbrand">Approve</button>
+                <button type="button" onClick={(event) => { event.stopPropagation(); openDecision(row, "refunded"); }} className="rounded-xl border border-violet-300/25 bg-violet-300/10 px-3 py-2 text-xs font-bold text-violet-200">Refunded</button>
+                <button type="button" onClick={(event) => { event.stopPropagation(); openDecision(row, "rejected"); }} className="rounded-xl border border-rose-300/25 bg-rose-300/10 px-3 py-2 text-xs font-bold text-rose-200">Reject</button>
               </div>
             </div>
           </Card>
@@ -6491,6 +6545,7 @@ function AdminReturns({ rows, decideReturn }) {
                 <FeedbackDetail label="Reason" value={selectedReturn.reason_category} />
                 <FeedbackDetail label="Refund Type" value={selectedReturn.refund_type} />
                 <FeedbackDetail label="Status" value={selectedReturn.status} />
+                <FeedbackDetail label="Admin Note" value={selectedReturn.admin_note} />
                 <FeedbackDetail label="Submitted" value={selectedReturn.created_at ? new Date(selectedReturn.created_at).toLocaleString() : "Not provided"} />
               </div>
               <section className="admin-feedback-comment-section">
@@ -6507,6 +6562,35 @@ function AdminReturns({ rows, decideReturn }) {
         </div>,
         document.body
       ) : null}
+      <ConfirmDialog
+        open={Boolean(decision)}
+        title={`${returnStatusLabel(decision?.status)} return request?`}
+        message={`This will mark Order #${decision?.row?.order_id || "N/A"} as ${returnStatusLabel(decision?.status).toLowerCase()}.`}
+        confirmLabel="Save Decision"
+        busyLabel="Saving..."
+        destructive={decision?.status === "rejected"}
+        busy={decisionSaving}
+        onClose={() => {
+          if (!decisionSaving) setDecision(null);
+        }}
+        onConfirm={confirmDecision}
+      >
+        <label className="grid gap-2 text-sm font-bold text-slate-700">
+          <span>{decision?.status === "rejected" ? "Reason" : "Admin Note"}</span>
+          <textarea
+            value={decisionNote}
+            onChange={(event) => {
+              setDecisionNote(event.target.value);
+              if (decisionError) setDecisionError("");
+            }}
+            maxLength={1000}
+            rows={4}
+            placeholder={decision?.status === "rejected" ? "Explain why this request is rejected." : "Add an optional note for the customer."}
+            className="min-h-24 w-full resize-y rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 outline-none placeholder:text-slate-400 focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100"
+          />
+          {decisionError ? <span className="text-xs font-bold text-rose-600">{decisionError}</span> : null}
+        </label>
+      </ConfirmDialog>
     </div>
   );
 }
@@ -6521,6 +6605,14 @@ function ReturnBadge({ status }) {
   };
   const label = status === "under_review" ? "Under Review" : status ? status.charAt(0).toUpperCase() + status.slice(1) : "Pending";
   return <span className={`rounded-full border px-3 py-1 text-xs font-black ${styles[status] || styles.pending}`}>{label}</span>;
+}
+
+function returnStatusLabel(status) {
+  if (status === "under_review") return "Under Review";
+  if (status === "approved") return "Approved";
+  if (status === "rejected") return "Rejected";
+  if (status === "refunded") return "Refunded";
+  return "Pending";
 }
 
 function ActiveDot({ active }) {

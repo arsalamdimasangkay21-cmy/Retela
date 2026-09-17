@@ -84,15 +84,6 @@ function orderHasFailedOnlinePayment(order) {
   return Boolean(order && !isCodPaymentMethod(order.payment_method ?? order.paymentMethod) && isFailedOnlinePaymentStatus(paymentStatus));
 }
 
-function isPaymentFailedOrder(order) {
-  if (!order || isCodPaymentMethod(order.payment_method ?? order.paymentMethod)) return false;
-  const currentStatus = normalizeOrderStatus(order.status);
-  const paymentStatus = normalizeOrderStatus(order.payment_status ?? order.paymentStatus);
-  const paymentFailure = failedOnlinePaymentStatuses.has(paymentStatus);
-  const cancelledPaymentFailure = currentStatus === "cancelled" && paymentFailure;
-  return currentStatus === "payment_failed" || cancelledPaymentFailure;
-}
-
 function compactSql(columnSql) {
   return `LOWER(REPLACE(REPLACE(REPLACE(TRIM(COALESCE(${columnSql}, '')), ' ', ''), '_', ''), '-', ''))`;
 }
@@ -110,8 +101,9 @@ async function markExistingOnlinePaymentFailures(orderId = null) {
   );
 }
 
-function paymentFailedCustomerNotice(orderId) {
-  return `Your RETELA order #${orderId} was rejected because the payment could not be completed or verified. No item will be released for delivery. If you believe this was an error, please contact RETELA support.`;
+function rejectionCustomerNotice(orderId, reason) {
+  const rejectionReason = String(reason || paymentFailedRejectionReason).trim() || paymentFailedRejectionReason;
+  return `Your RETELA order #${orderId} was rejected. Reason: ${rejectionReason}`;
 }
 
 function finiteNonNegativeNumber(value) {
@@ -167,7 +159,7 @@ async function decorateMeetupEligibility(orders) {
     const customerMunicipality = order.delivery_municipality || null;
     const addressMunicipality = normalizeMunicipality(customerMunicipality);
     const explicitMunicipalityMismatch = Boolean(addressMunicipality && configuredShopMunicipality && addressMunicipality !== configuredShopMunicipality);
-    const addressInShopMunicipality = addressMatchesMunicipality(order.delivery_address || order.location, shopMunicipality);
+    const addressInShopMunicipality = addressMatchesMunicipality(order.delivery_address, shopMunicipality);
     const hasCoordinates = validCoordinates(order.delivery_latitude, order.delivery_longitude)
       && validCoordinates(shopCoordinates.latitude, shopCoordinates.longitude);
     const distance = hasCoordinates ? haversineDistanceKm(shopCoordinates, {
@@ -405,7 +397,8 @@ async function loadDecoratedOrder(orderId, userContext = {}) {
        o.sale_discount, o.shipping_fee, o.shipping_zone, o.shipping_distance_km, o.shipping_rule,
        o.coupon_code, o.total_amount, o.checkout_url, o.created_at,
        u.username, u.display_name, COALESCE(u.display_name, u.username) AS customer_name, u.email,
-       u.email AS customer_email, u.location, u.phone_number, u.phone_number AS customer_phone
+       u.email AS customer_email, o.delivery_address AS location, u.location AS customer_location,
+       u.phone_number, u.phone_number AS customer_phone
      FROM orders o
      LEFT JOIN users u ON u.id = o.user_id
      WHERE o.id = :id
@@ -483,7 +476,8 @@ router.get("/", requireAuth, requireApproved, asyncHandler(async (req, res) => {
     MAX(COALESCE(u.display_name, u.username)) AS customer_name,
     MAX(u.email) AS email,
     MAX(u.email) AS customer_email,
-    MAX(u.location) AS location,
+    MAX(o.delivery_address) AS location,
+    MAX(u.location) AS customer_location,
     MAX(u.phone_number) AS phone_number,
     MAX(u.phone_number) AS customer_phone,
 
@@ -807,7 +801,17 @@ async function createOrderTransactionAttempt(req, input, pricing, attempt) {
         pricing,
         status: input.payment_method === "cod" ? "pending" : "awaiting_payment",
         payment_method: input.payment_method,
-        fulfillment_method: input.fulfillment_method
+        fulfillment_method: input.fulfillment_method,
+        delivery_address: input.fulfillment_method === "delivery" ? input.delivery_address : null,
+        delivery_latitude: input.fulfillment_method === "delivery" ? input.delivery_latitude ?? null : null,
+        delivery_longitude: input.fulfillment_method === "delivery" ? input.delivery_longitude ?? null : null,
+        delivery_municipality: input.fulfillment_method === "delivery" ? input.delivery_municipality || null : null,
+        delivery_province: input.fulfillment_method === "delivery" ? input.delivery_province || null : null,
+        delivery_region: input.fulfillment_method === "delivery" ? input.delivery_region || null : null,
+        delivery_postal_code: input.fulfillment_method === "delivery" ? input.delivery_postal_code || null : null,
+        delivery_place_id: input.fulfillment_method === "delivery" ? input.delivery_place_id || null : null,
+        delivery_landmark: input.fulfillment_method === "delivery" ? input.delivery_landmark || null : null,
+        delivery_notes: input.fulfillment_method === "delivery" ? input.delivery_notes || null : null
       }
     };
   } catch (error) {
@@ -969,15 +973,16 @@ async function restoreDeductedOrderInventoryForConnection(conn, orderId, lowStoc
   return updates;
 }
 
-async function rejectPaymentFailedOrder(orderId, reason = paymentFailedRejectionReason) {
-  const rejectionReason = String(reason || paymentFailedRejectionReason).trim() || paymentFailedRejectionReason;
+async function rejectOrderWithReason(orderId, reason) {
+  const rejectionReason = String(reason || "").trim();
+  if (!rejectionReason) throw new HttpError(400, "Rejection reason is required.");
   const { config } = await loadSystemSettings();
   const lowStockThreshold = Number(config?.inventory?.lowStockThreshold ?? 3);
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
     const [orders] = await conn.execute(
-      `SELECT id, user_id, status, payment_status, payment_method, inventory_deducted_at, rejection_reason
+      `SELECT id, user_id, status, payment_status, payment_method, inventory_deducted_at
        FROM orders
        WHERE id = ?
        FOR UPDATE`,
@@ -986,26 +991,31 @@ async function rejectPaymentFailedOrder(orderId, reason = paymentFailedRejection
     if (!orders.length) throw new HttpError(404, "Order not found");
     const order = orders[0];
     const currentStatus = orderStatusForStorage(order.status);
-    const isCod = isCodPaymentMethod(order.payment_method);
     if (currentStatus === "rejected") {
       await conn.commit();
       return { updated: false, userId: order.user_id, inventoryUpdates: [] };
     }
-    if (isCod) {
-      throw new HttpError(409, "COD orders cannot be rejected through failed-payment handling.");
+    if (currentStatus === "completed") {
+      throw new HttpError(409, "Completed orders must be handled through the return/refund flow.");
     }
-    if (!isPaymentFailedOrder(order)) {
-      throw new HttpError(409, "Only payment-failed online orders can be rejected this way.");
+    if (currentStatus === "cancelled") {
+      throw new HttpError(409, "Cancelled orders cannot be rejected.");
     }
 
     const inventoryUpdates = order.inventory_deducted_at
       ? await restoreDeductedOrderInventoryForConnection(conn, orderId, lowStockThreshold)
       : [];
-    const noticeBody = paymentFailedCustomerNotice(orderId);
+    const paymentStatus = normalizeOrderStatus(order.payment_status);
+    const nextPaymentStatus = !isCodPaymentMethod(order.payment_method) && failedOnlinePaymentStatuses.has(paymentStatus)
+      ? "failed"
+      : ["unpaid", "awaiting_payment"].includes(paymentStatus)
+        ? "cancelled"
+        : order.payment_status;
+
     await conn.execute(
       `UPDATE orders
        SET status = 'rejected',
-           payment_status = 'failed',
+           payment_status = ?,
            rejection_reason = ?,
            rejected_at = NOW(),
            inventory_deducted_at = NULL,
@@ -1016,26 +1026,20 @@ async function rejectPaymentFailedOrder(orderId, reason = paymentFailedRejection
            qr_code_url = NULL,
            payment_expires_at = NULL
        WHERE id = ?`,
-      [rejectionReason, orderId]
+      [nextPaymentStatus, rejectionReason, orderId]
     );
     if (order.user_id) {
-      const [existingNotifications] = await conn.execute(
-        "SELECT id FROM notifications WHERE user_id = ? AND type = 'order' AND title = 'Order rejected' AND body = ? LIMIT 1",
-        [order.user_id, noticeBody]
+      await conn.execute(
+        "INSERT INTO notifications (user_id, type, title, body) VALUES (?, 'order', 'Order rejected', ?)",
+        [order.user_id, rejectionCustomerNotice(orderId, rejectionReason)]
       );
-      if (!existingNotifications.length) {
-        await conn.execute(
-          "INSERT INTO notifications (user_id, type, title, body) VALUES (?, 'order', 'Order rejected', ?)",
-          [order.user_id, noticeBody]
-        );
-      }
     }
     await conn.commit();
     return { updated: true, userId: order.user_id, inventoryUpdates };
   } catch (error) {
-    await rollbackQuietly(conn, "order-payment-failed-reject");
+    await rollbackQuietly(conn, "order-reject");
     if (error instanceof HttpError) throw error;
-    console.error("[order-payment-failed-reject] transaction failed", {
+    console.error("[order-reject] transaction failed", {
       orderId,
       message: error?.message,
       code: error?.code,
@@ -1155,7 +1159,7 @@ router.patch("/:id/reject", requireAuth, requireRole("admin"), asyncHandler(asyn
   const orderId = Number(req.params.id);
   if (!Number.isInteger(orderId) || orderId <= 0) throw new HttpError(400, "A valid order ID is required");
   const input = z.object({
-    reason: z.string().trim().max(255).optional()
+    reason: z.string().trim().min(1, "Rejection reason is required.").max(255)
   }).parse(req.body);
   const order = await loadDecoratedOrder(orderId, { role: "admin" });
   if (!order) throw new HttpError(404, "Order not found");
@@ -1168,8 +1172,8 @@ router.patch("/:id/reject", requireAuth, requireRole("admin"), asyncHandler(asyn
     requestedStatus: "rejected"
   });
 
-  const rejectionReason = input.reason || paymentFailedRejectionReason;
-  const result = await rejectPaymentFailedOrder(orderId, rejectionReason);
+  const rejectionReason = input.reason;
+  const result = await rejectOrderWithReason(orderId, rejectionReason);
   const updatedOrder = await loadDecoratedOrder(orderId, { role: "admin" });
   const updatePayload = updatedOrder || {
     id: orderId,
@@ -1188,7 +1192,7 @@ router.patch("/:id/reject", requireAuth, requireRole("admin"), asyncHandler(asyn
     io?.to(`user:${result.userId}`).emit("notification:new", {
       type: "order",
       title: "Order rejected",
-      body: paymentFailedCustomerNotice(orderId),
+      body: rejectionCustomerNotice(orderId, rejectionReason),
       order_id: orderId,
       created_at: new Date().toISOString()
     });
@@ -1216,12 +1220,6 @@ router.patch("/:id/status", requireAuth, requireRole("admin"), asyncHandler(asyn
   const isCod = isCodPaymentMethod(order.payment_method ?? order.paymentMethod);
   const paymentStatus = normalizeOrderStatus(order.payment_status ?? order.paymentStatus);
   const hasFailedOnlinePayment = orderHasFailedOnlinePayment(order);
-  const allowsPaymentFailureRejection = status === "rejected"
-    && !isCod
-    && (
-      currentStatus === "payment_failed"
-      || (currentStatus === "cancelled" && failedOnlinePaymentStatuses.has(paymentStatus))
-    );
   console.info("ORDER STATUS PATCH RECEIVED", {
     orderId,
     adminId: Number(req.user?.id) || null,
@@ -1231,7 +1229,8 @@ router.patch("/:id/status", requireAuth, requireRole("admin"), asyncHandler(asyn
     requestedStatus: status
   });
   if (status === "rejected") {
-    const rejectionReason = paymentFailedRejectionReason;
+    const rejectionReason = String(input.reason || "").trim();
+    if (!rejectionReason) throw new HttpError(400, "Rejection reason is required.");
     console.info("REJECT REQUEST RECEIVED", {
       orderId,
       currentStatus,
@@ -1239,7 +1238,7 @@ router.patch("/:id/status", requireAuth, requireRole("admin"), asyncHandler(asyn
       paymentStatus,
       requestedStatus: status
     });
-    const result = await rejectPaymentFailedOrder(orderId, rejectionReason);
+    const result = await rejectOrderWithReason(orderId, rejectionReason);
     const updatedOrder = await loadDecoratedOrder(orderId, { role: "admin" });
     const updatePayload = updatedOrder || {
       id: orderId,
@@ -1259,7 +1258,7 @@ router.patch("/:id/status", requireAuth, requireRole("admin"), asyncHandler(asyn
       req.app.get("io")?.to(`user:${result.userId}`).emit("notification:new", {
         type: "order",
         title: "Order rejected",
-        body: paymentFailedCustomerNotice(orderId),
+        body: rejectionCustomerNotice(orderId, rejectionReason),
         order_id: orderId,
         created_at: new Date().toISOString()
       });
@@ -1272,7 +1271,7 @@ router.patch("/:id/status", requireAuth, requireRole("admin"), asyncHandler(asyn
   if (hasFailedOnlinePayment && paymentFailedBlockedAdminTargets.has(status)) {
     throw new HttpError(409, "Payment-failed online orders cannot be accepted, sent out for delivery, or completed.");
   }
-  if (currentStatus !== status && !allowsPaymentFailureRejection && !allowedAdminStatusTransitions[currentStatus]?.has(status)) {
+  if (currentStatus !== status && !allowedAdminStatusTransitions[currentStatus]?.has(status)) {
     throw new HttpError(409, "This order status cannot be changed that way.");
   }
   if (status === "approved" && !isCod && paymentStatus !== "paid") {

@@ -16,7 +16,7 @@ function validShopCoordinate(latitude, longitude) {
 
 function orderDeliverySnapshot(order = {}) {
   return {
-    address: String(order.delivery_address || order.location || "").trim(),
+    address: String(order.delivery_address || "").trim(),
     latitude: finiteCoordinate(order.delivery_latitude),
     longitude: finiteCoordinate(order.delivery_longitude),
     landmark: String(order.delivery_landmark || "").trim(),

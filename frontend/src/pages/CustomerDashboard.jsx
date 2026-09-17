@@ -3059,6 +3059,9 @@ function Orders({ rows, profile, reviews = [], returnRequests = [], onNavigate, 
                   <OrderMeta label="Delivered" value={order.status === "completed" ? formatDate(order.updated_at || order.created_at) : "Pending"} />
                 </div>
                 {order.tracking_number ? <p className="mt-2 break-words text-xs font-bold text-emerald-700">Tracking: {order.tracking_number}</p> : null}
+                {normalizeOrderStatus(order.status) === "rejected" && order.rejection_reason ? (
+                  <p className="mt-2 break-words rounded-xl border border-rose-100 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700">Rejected: {order.rejection_reason}</p>
+                ) : null}
               </div>
             </div>
             <div className="grid gap-2 sm:grid-cols-3 lg:w-[360px]">
@@ -3172,6 +3175,12 @@ function CustomerOrderModal({ loading, selectedOrder, onPay, payingOrderId, onMe
                   <ModalInfo label="Tracking Number" value={order.tracking_number || "Waiting for admin"} />
                   <ModalInfo label="Payment Status" value={customerOrderStatus(order.payment_status || "unpaid")} />
                 </div>
+                {normalizeOrderStatus(order.status) === "rejected" ? (
+                  <section className="rounded-2xl border border-rose-100 bg-rose-50 p-4 text-sm text-rose-800">
+                    <p className="text-xs font-bold uppercase tracking-[0.16em] text-rose-600">Rejection Reason</p>
+                    <p className="mt-2 break-words font-semibold">{order.rejection_reason || "RETELA rejected this order. Please contact support for more details."}</p>
+                  </section>
+                ) : null}
                 {order.fulfillment_method === "delivery" ? <OrderDeliveryInfo order={order} title="Delivery Information" mapLabel="View Location" /> : null}
                 {showMeetupWaiting ? (
                   <section className="retela-meeting-place-card retela-meetup-waiting-card">
@@ -4186,6 +4195,7 @@ function ReturnHistoryCard({ request }) {
         <StatusBadge status={request.status} />
       </div>
       <p className="mt-3 line-clamp-3 text-sm leading-6 text-slate-600">{request.reason}</p>
+      {request.admin_note ? <p className="mt-3 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600">Admin note: {request.admin_note}</p> : null}
     </article>
   );
 }
