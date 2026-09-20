@@ -88,7 +88,7 @@ async function ensureReturnColumns() {
        FROM INFORMATION_SCHEMA.COLUMNS
        WHERE TABLE_SCHEMA = DATABASE()
          AND TABLE_NAME = 'returns'
-         AND COLUMN_NAME IN ('customer_id', 'product_id', 'brand_id', 'brand_name', 'product_name', 'order_number', 'amount', 'shipping_fee', 'estimated_refund', 'reason_category', 'refund_type', 'proof_images')`
+         AND COLUMN_NAME IN ('customer_id', 'product_id', 'brand_id', 'brand_name', 'product_name', 'order_number', 'amount', 'shipping_fee', 'estimated_refund', 'reason_category', 'refund_type', 'image_url', 'proof_images')`
     );
     const columns = new Set(rows.map((row) => row.COLUMN_NAME));
     await safeModifyColumn("returns", "status", "status enum update", "ALTER TABLE returns MODIFY status ENUM('pending','under_review','approved','rejected','refunded') NOT NULL DEFAULT 'pending'");
@@ -127,6 +127,9 @@ async function ensureReturnColumns() {
     if (!columns.has("estimated_refund")) {
       await query("ALTER TABLE returns ADD COLUMN estimated_refund DECIMAL(10,2) NOT NULL DEFAULT 0 AFTER shipping_fee");
     }
+    if (!columns.has("image_url")) {
+      await query("ALTER TABLE returns ADD COLUMN image_url VARCHAR(255) NULL AFTER estimated_refund");
+    }
     if (!columns.has("proof_images")) {
       await query("ALTER TABLE returns ADD COLUMN proof_images JSON NULL AFTER image_url");
     }
@@ -140,6 +143,27 @@ async function ensureReturnColumns() {
 async function ensureReturnNotificationTypes() {
   returnNotificationTypesReady ||= safeModifyColumn("notifications", "type", "type enum update", `ALTER TABLE notifications MODIFY type ${NOTIFICATION_TYPE_ENUM_SQL} NOT NULL`);
   return returnNotificationTypesReady;
+}
+
+async function notifyAdminOfReturn(req, input) {
+  try {
+    await ensureReturnNotificationTypes();
+    await createAdminNotification({
+      type: "return",
+      title: "New return request",
+      body: `${req.user.username} requested ${input.refund_type} for Order #${input.order_id}.`,
+      customerId: req.user.id,
+      app: req.app
+    });
+  } catch (error) {
+    console.error("[returns:create] Return request saved, but admin notification failed", {
+      orderId: input.order_id,
+      userId: req.user?.id || null,
+      code: error?.code || null,
+      sqlMessage: error?.sqlMessage || null,
+      message: error?.message || null
+    });
+  }
 }
 
 router.get("/", requireAuth, asyncHandler(async (req, res) => {
@@ -232,7 +256,6 @@ router.post("/", requireAuth, requireApproved, handleReturnImagesUpload, async (
   try {
     if (!req.user?.id) throw new HttpError(401, "Authenticated user is required.");
     await ensureReturnColumns();
-    await ensureReturnNotificationTypes();
     const schema = z.object({
       order_id: z.coerce.number().int().positive(),
       reason_category: z.enum(returnReasons),
@@ -308,13 +331,7 @@ router.post("/", requireAuth, requireApproved, handleReturnImagesUpload, async (
         proofImages: imageUrls.length ? JSON.stringify(imageUrls) : null
       }
     );
-    await createAdminNotification({
-      type: "return",
-      title: "New return request",
-      body: `${req.user.username} requested ${input.refund_type} for Order #${input.order_id}.`,
-      customerId: req.user.id,
-      app: req.app
-    });
+    await notifyAdminOfReturn(req, input);
     req.app.get("io")?.to("admin").emit("return:new", {
       order_id: input.order_id,
       reason: input.reason_category,
