@@ -104,6 +104,7 @@ function normalizeLiveLocation(value = {}) {
   const latitude = finiteCoordinate(value.latitude);
   const longitude = finiteCoordinate(value.longitude);
   if (!validMapCoordinate(latitude, longitude)) return null;
+  const isLive = value.trackingActive !== false && value.is_live !== false && value.status !== "stopped";
   return {
     order_id: Number(value.order_id ?? value.orderId ?? 0) || null,
     user_id: Number(value.user_id ?? value.userId ?? 0) || null,
@@ -113,8 +114,9 @@ function normalizeLiveLocation(value = {}) {
     heading: finiteCoordinate(value.heading),
     speed: finiteCoordinate(value.speed),
     accuracy: finiteCoordinate(value.accuracy),
-    is_live: value.is_live !== false && value.status !== "stopped",
-    shared_at: value.shared_at || value.sharedAt || new Date().toISOString()
+    is_live: isLive,
+    trackingActive: isLive,
+    shared_at: value.shared_at || value.sharedAt || value.updatedAt || new Date().toISOString()
   };
 }
 
@@ -177,6 +179,10 @@ async function fetchDrivingRoute(origin, destination, { signal, cache } = {}) {
   if (cache?.has(key)) return cache.get(key);
   const google = await loadGoogleMaps();
   if (signal?.aborted) throw routeAbortError();
+  console.log("Route request:", {
+    origin: { latitude: Number(origin.latitude), longitude: Number(origin.longitude) },
+    destination: { latitude: Number(destination.latitude), longitude: Number(destination.longitude) }
+  });
   const route = await new Promise((resolve, reject) => {
     const service = new google.maps.DirectionsService();
     const abort = () => reject(routeAbortError());
@@ -190,7 +196,7 @@ async function fetchDrivingRoute(origin, destination, { signal, cache } = {}) {
       signal?.removeEventListener("abort", abort);
       if (signal?.aborted) return reject(routeAbortError());
       if (status !== google.maps.DirectionsStatus.OK || !result?.routes?.[0]) {
-        reject(new Error(status === google.maps.DirectionsStatus.ZERO_RESULTS ? "No driving route is available for these locations." : "Google route details are temporarily unavailable."));
+        reject(new Error(status === google.maps.DirectionsStatus.ZERO_RESULTS ? "No driving route is available for these locations." : `Google Directions failed: ${status}`));
         return;
       }
       const legs = result.routes[0].legs || [];
@@ -308,6 +314,15 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
   }, [trackingActive]);
 
   const applyLiveLocation = useCallback((payload) => {
+    const payloadOrderId = Number(payload?.order_id ?? payload?.orderId ?? 0);
+    if (payloadOrderId && payloadOrderId !== Number(order?.id || 0)) return;
+    if (payload?.trackingActive === false || payload?.is_live === false || payload?.status === "stopped") {
+      setLiveLocation(null);
+      setRiderPosition(null);
+      setLiveRoute(null);
+      setDisplayedLiveLocation(null);
+      return;
+    }
     const next = normalizeLiveLocation(payload);
     if (!next || Number(next.order_id) !== Number(order?.id || 0)) return;
     if (next.source_type !== "rider") return;
@@ -323,6 +338,7 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
       heading: next.heading,
       shared_at: next.shared_at
     };
+    console.log("Receiving rider location:", next.latitude, next.longitude);
     console.log("MAP RIDER POSITION:", markerPosition);
     setRiderPosition(markerPosition);
     setLiveLocation(next);
@@ -331,15 +347,10 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
 
   const fetchLatestLiveLocation = useCallback(() => {
     if (!liveRouteEnabled || !order?.id) return Promise.resolve(null);
-    return api.get(`/orders/${order.id}/location`)
+    return api.get(`/live-locations/orders/${order.id}`)
       .then(({ data }) => {
-        const payload = {
-          ...data,
-          order_id: Number(order.id),
-          source_type: "rider",
-          is_live: true,
-          shared_at: data?.updatedAt || data?.updated_at || data?.shared_at || new Date().toISOString()
-        };
+        const payload = (data?.locations || []).find((location) => location?.source_type === "rider") || null;
+        if (!payload) return null;
         applyLiveLocation(payload);
         return payload;
       })
@@ -453,7 +464,7 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
       .catch((requestError) => {
         if (requestError?.name !== "AbortError") {
           if (import.meta.env.DEV) console.warn("[route] error", requestError?.message);
-          setError("Route details are temporarily unavailable.");
+          setError(requestError?.message || "Route details are temporarily unavailable.");
         }
       })
       .finally(() => {
@@ -475,15 +486,11 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
       ? { latitude: riderPosition.lat, longitude: riderPosition.lng, heading: riderPosition.heading, shared_at: riderPosition.shared_at }
       : liveLocation;
     if (!routeVisible || !liveRouteUsable || !routeOrigin) return undefined;
-    const previous = liveRouteRefreshRef.current.point;
     const now = Date.now();
-    const movedMeters = previous ? distanceMetersBetween(previous, routeOrigin) : Infinity;
-    if (liveRoute && movedMeters < 25 && now - liveRouteRefreshRef.current.at < 15000) return undefined;
     liveRouteRefreshRef.current = { point: routeOrigin, at: now };
     const requestId = routeRequestRef.current + 1;
     routeRequestRef.current = requestId;
     const controller = new AbortController();
-    console.log("ROUTE ORIGIN:", riderPosition || routeOrigin);
     fetchDrivingRoute(routeOrigin, destinationSnapshot, { signal: controller.signal, cache: routeCacheRef.current })
       .then((routeData) => {
         if (requestId !== routeRequestRef.current) return;
@@ -491,7 +498,7 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
         setLiveError("");
       })
       .catch((requestError) => {
-        if (requestError?.name !== "AbortError") setLiveError("Live road route is temporarily unavailable.");
+        if (requestError?.name !== "AbortError") setLiveError(requestError?.message || "Live road route is temporarily unavailable.");
       });
     return () => controller.abort();
   }, [destinationSnapshot, liveLocation, liveRoute, liveRouteUsable, riderPosition, routeVisible]);
@@ -538,7 +545,7 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
       accuracy: Number.isFinite(coords.accuracy) ? coords.accuracy : null
     };
     if (!validMapCoordinate(point.latitude, point.longitude)) return;
-    console.log("REAL RIDER GPS:", point.latitude, point.longitude);
+    console.log("Current rider location:", point.latitude, point.longitude);
     const now = Date.now();
     const previous = lastPublishedRef.current.point;
     lastPublishedRef.current = { point, at: now };
@@ -557,7 +564,13 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
     console.log("MAP RIDER POSITION:", nextRiderPosition);
     setRiderPosition(nextRiderPosition);
     applyLiveLocation({ ...payload, heading, speed: point.speed, accuracy: point.accuracy, order_id: Number(order.id), user_id: 0, source_type: "rider", is_live: true, shared_at: new Date().toISOString() });
-    api.post(`/orders/${order.id}/location`, payload).catch((requestError) => {
+    api.post(`/live-locations/orders/${order.id}`, {
+      ...payload,
+      source_type: "rider",
+      heading,
+      speed: point.speed,
+      accuracy: point.accuracy
+    }).catch((requestError) => {
       setLiveError(getApiErrorMessage(requestError, "Could not publish live location."));
     });
   }
@@ -577,9 +590,11 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
     setTrackingActive(true);
     setLocating(true);
     joinLiveSocket();
+    console.log("GPS started");
     watchIdRef.current = navigator.geolocation.watchPosition(
       publishPosition,
       (geoError) => {
+        console.error("GPS Error:", geoError);
         setLocating(false);
         const messages = {
           1: "Location permission is required for delivery tracking.",
@@ -588,7 +603,7 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
         };
         setLiveError(messages[geoError?.code] || "Could not read live location.");
       },
-      { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
+      { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 }
     );
   }
 
@@ -799,7 +814,7 @@ function DeliveryRouteMap({ shop, destination, route, riderPosition = null, foll
           suppressMarkers: true,
           preserveViewport: true,
           polylineOptions: {
-            strokeColor: "#0b8f59",
+            strokeColor: "#2563eb",
             strokeOpacity: 0.92,
             strokeWeight: 5
           }
@@ -871,7 +886,7 @@ function DeliveryRouteMap({ shop, destination, route, riderPosition = null, foll
         map,
         path: route.coordinates.map((point) => ({ lat: Number(point.latitude), lng: Number(point.longitude) })),
         geodesic: true,
-        strokeColor: "#0b8f59",
+        strokeColor: "#2563eb",
         strokeOpacity: 0.92,
         strokeWeight: 5
       });

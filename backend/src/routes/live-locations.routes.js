@@ -52,6 +52,7 @@ function normalizeSourceType(req, value) {
 
 function serializeLiveLocation(row) {
   if (!row) return null;
+  const isLive = Boolean(Number(row.is_live));
   return {
     order_id: Number(row.order_id),
     user_id: Number(row.user_id),
@@ -61,10 +62,12 @@ function serializeLiveLocation(row) {
     heading: row.heading === null || row.heading === undefined ? null : Number(row.heading),
     speed: row.speed === null || row.speed === undefined ? null : Number(row.speed),
     accuracy: row.accuracy === null || row.accuracy === undefined ? null : Number(row.accuracy),
-    is_live: Boolean(Number(row.is_live)),
+    is_live: isLive,
+    trackingActive: isLive,
+    updatedAt: row.shared_at,
     shared_at: row.shared_at,
     stopped_at: row.stopped_at || null,
-    status: row.is_live ? "live" : "stopped"
+    status: isLive ? "live" : "stopped"
   };
 }
 
@@ -102,7 +105,7 @@ async function notifyCustomerOnce(req, { userId, orderId, title, body }) {
 
 async function loadOrderForLiveLocation(orderId, user) {
   const rows = await query(
-    `SELECT id, user_id, status, fulfillment_method, delivery_address, delivery_latitude, delivery_longitude
+    `SELECT id, user_id, status, delivery_status, fulfillment_method, delivery_address, delivery_latitude, delivery_longitude
      FROM orders
      WHERE id = :orderId
      LIMIT 1`,
@@ -118,8 +121,11 @@ async function loadOrderForLiveLocation(orderId, user) {
 
 function assertTrackableOrder(order) {
   const status = normalizeStatus(order.status);
+  const deliveryStatus = normalizeStatus(order.delivery_status);
   if (terminalStatuses.has(status)) throw new HttpError(409, "Live route tracking is stopped for this order status.");
-  if (!activeTrackingStatuses.has(status)) throw new HttpError(409, "Live route tracking starts when the order is Out for Delivery.");
+  if (!activeTrackingStatuses.has(status) && deliveryStatus !== "out_for_delivery") {
+    throw new HttpError(409, "Live route tracking starts when the order is Out for Delivery.");
+  }
   if (String(order.fulfillment_method || "delivery").toLowerCase() !== "delivery") {
     throw new HttpError(409, "Live route tracking is only available for delivery orders.");
   }
@@ -245,6 +251,13 @@ router.post("/orders/:id", requireAuth, requireApproved, asyncHandler(async (req
     shared_at: new Date().toISOString(),
     stopped_at: null
   });
+  console.info("[live-location] rider location updated", {
+    orderId,
+    userId: req.user.id,
+    latitude: payload.latitude,
+    longitude: payload.longitude,
+    trackingActive: payload.trackingActive
+  });
   req.app.get("io")?.to(`order-live:${orderId}`).emit("live-location:update", payload);
   req.app.get("io")?.to("admin").emit("live-location:update", payload);
   if (sourceType === "rider") {
@@ -286,7 +299,7 @@ router.delete("/orders/:id", requireAuth, requireApproved, asyncHandler(async (r
        AND source_type = :sourceType`,
     { orderId, userId: req.user.id, sourceType }
   );
-  const payload = { order_id: orderId, user_id: Number(req.user.id), source_type: sourceType, is_live: false, status: "stopped", stopped_at: new Date().toISOString() };
+  const payload = { order_id: orderId, user_id: Number(req.user.id), source_type: sourceType, is_live: false, trackingActive: false, status: "stopped", stopped_at: new Date().toISOString(), updatedAt: new Date().toISOString() };
   req.app.get("io")?.to(`order-live:${orderId}`).emit("live-location:stopped", payload);
   req.app.get("io")?.to("admin").emit("live-location:stopped", payload);
   res.json(payload);
@@ -297,7 +310,7 @@ router.delete("/orders/:id/all", requireAuth, requireRole("admin", "staff"), asy
   const orderId = Number(req.params.id);
   if (!Number.isInteger(orderId) || orderId <= 0) throw new HttpError(400, "A valid order ID is required.");
   await query("UPDATE order_live_locations SET is_live = FALSE, stopped_at = NOW() WHERE order_id = :orderId", { orderId });
-  const payload = { order_id: orderId, is_live: false, status: "stopped", stopped_at: new Date().toISOString() };
+  const payload = { order_id: orderId, is_live: false, trackingActive: false, status: "stopped", stopped_at: new Date().toISOString(), updatedAt: new Date().toISOString() };
   req.app.get("io")?.to(`order-live:${orderId}`).emit("live-location:stopped", payload);
   req.app.get("io")?.to("admin").emit("live-location:stopped", payload);
   res.json(payload);

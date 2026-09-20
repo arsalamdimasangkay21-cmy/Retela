@@ -8,7 +8,7 @@ import "swiper/css";
 import "swiper/css/effect-fade";
 import "swiper/css/navigation";
 import "swiper/css/pagination";
-import { api, API_URL, cachedGet, clearGetCache } from "../api/client";
+import { api, API_URL, cachedGet, clearGetCache, getStoredAuthToken } from "../api/client";
 import { fetchFeaturedApparel } from "../api/customer";
 import { ChangePasswordForm } from "../components/ChangePasswordForm";
 import ConfirmDialog from "../components/ConfirmDialog";
@@ -3724,6 +3724,12 @@ function ReturnForm({ orders, returnRequests, onSaved }) {
 
   async function submit(event) {
     event.preventDefault();
+    const token = getStoredAuthToken();
+    if (!token) {
+      showToast("error", "Please log in again before submitting a return request.");
+      console.warn("[returns] submission blocked: missing or invalid auth token");
+      return;
+    }
     if (!form.order_id || !form.reason_category || !form.refund_type || form.description.trim().length < 10) {
       showToast("error", "Complete the order, reason, refund type, and description fields.");
       return;
@@ -3739,6 +3745,13 @@ function ReturnForm({ orders, returnRequests, onSaved }) {
     payload.append("description", form.description.trim());
     payload.append("shipping_fee", String(shippingFee));
     images.forEach((image) => payload.append("images", image));
+    console.info("[returns] submitting", {
+      orderId: form.order_id,
+      returnReason: form.reason_category,
+      refundType: form.refund_type,
+      imagesCount: images.length,
+      formDataKeys: Array.from(payload.keys())
+    });
     setSubmitting(true);
     try {
       await api.post("/returns", payload, { headers: { "Content-Type": "multipart/form-data" } });
@@ -3750,6 +3763,11 @@ function ReturnForm({ orders, returnRequests, onSaved }) {
       setOrderDetails(null);
       await onSaved?.();
     } catch (error) {
+      console.error("[returns] submission failed", {
+        status: error?.response?.status || null,
+        message: error?.response?.data?.message || error?.message || "Unknown return submission error",
+        error: error?.response?.data?.error || null
+      });
       showToast("error", error?.response?.data?.message || "Could not submit return request.");
     } finally {
       setSubmitting(false);

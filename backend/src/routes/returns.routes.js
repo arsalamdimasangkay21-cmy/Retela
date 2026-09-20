@@ -37,6 +37,50 @@ function parseImageList(value, fallback = null) {
   return fallback ? [fallback] : [];
 }
 
+function returnCreationErrorMessage(error) {
+  if (error?.name === "ZodError") return error.issues?.[0]?.message || "Invalid return request.";
+  return error?.sqlMessage || error?.message || "Unknown return creation error";
+}
+
+function returnCreationErrorStatus(error) {
+  if (error?.name === "ZodError") return 400;
+  if (error instanceof HttpError || error?.status || error?.statusCode) return error.status || error.statusCode;
+  if (error?.name === "MulterError" || error?.message?.includes("Only jpg")) return 400;
+  return 500;
+}
+
+function logReturnCreationError(error, req, context = {}) {
+  console.error("[returns:create] Return creation failed", {
+    route: req.originalUrl,
+    method: req.method,
+    userId: req.user?.id || null,
+    role: req.user?.role || null,
+    code: error?.code || null,
+    errno: error?.errno || null,
+    sqlState: error?.sqlState || null,
+    sqlMessage: error?.sqlMessage || null,
+    message: error?.message || null,
+    issues: error?.issues || null,
+    ...context
+  });
+}
+
+function sendReturnCreationError(res, error) {
+  res.status(returnCreationErrorStatus(error)).json({
+    success: false,
+    message: "Return creation failed",
+    error: returnCreationErrorMessage(error)
+  });
+}
+
+function handleReturnImagesUpload(req, res, next) {
+  upload.array("images", 10)(req, res, (error) => {
+    if (!error) return next();
+    logReturnCreationError(error, req, { phase: "upload" });
+    return sendReturnCreationError(res, error);
+  });
+}
+
 async function ensureReturnColumns() {
   returnColumnsReady ||= (async () => {
     const rows = await query(
@@ -184,89 +228,104 @@ router.get("/", requireAuth, asyncHandler(async (req, res) => {
   })));
 }));
 
-router.post("/", requireAuth, requireApproved, upload.array("images", 10), asyncHandler(async (req, res) => {
-  await ensureReturnColumns();
-  await ensureReturnNotificationTypes();
-  const schema = z.object({
-    order_id: z.coerce.number().int().positive(),
-    reason_category: z.enum(returnReasons),
-    refund_type: z.enum(refundTypes),
-    shipping_fee: z.coerce.number().min(0).max(10000).optional().default(0),
-    description: z.string().trim().min(10).max(1200)
-  });
-  const input = schema.parse(req.body);
-  const orders = await query(
-    `SELECT o.id, o.status, o.payment_status, o.total_amount, o.created_at, o.updated_at,
-       oi.product_id AS first_product_id,
-       p.name AS first_product_name,
-       p.brand AS first_brand_name
-     FROM orders o
-     LEFT JOIN order_items oi ON oi.order_id = o.id
-     LEFT JOIN products p ON p.id = oi.product_id
-     WHERE o.id = :orderId AND o.user_id = :userId
-     ORDER BY oi.id ASC
-     LIMIT 1`,
-    { orderId: input.order_id, userId: req.user.id }
-  );
-  if (!orders.length) throw new HttpError(404, "Order not found");
-  if (orders[0].payment_status === "refunded") throw new HttpError(400, "Order Already Refunded");
-  if (orders[0].status !== "completed") throw new HttpError(400, "Order Not Delivered");
-  const receivedAt = new Date(orders[0].updated_at);
-  if (Date.now() - receivedAt.getTime() > 7 * 24 * 60 * 60 * 1000) {
-    throw new HttpError(400, "Return Window Expired");
-  }
-  const refunded = await query(
-    "SELECT id FROM returns WHERE order_id = :orderId AND user_id = :userId AND status = 'refunded' LIMIT 1",
-    { orderId: input.order_id, userId: req.user.id }
-  );
-  if (refunded.length) throw new HttpError(409, "Order Already Refunded");
-  const duplicates = await query(
-    "SELECT id FROM returns WHERE order_id = :orderId AND user_id = :userId AND status IN ('pending','under_review','approved') LIMIT 1",
-    { orderId: input.order_id, userId: req.user.id }
-  );
-  if (duplicates.length) throw new HttpError(409, "Order Already Returned");
-
-  const imageUrls = (req.files || []).slice(0, 10).map((file) => `/uploads/${file.filename}`);
-  const orderYear = orders[0].created_at ? new Date(orders[0].created_at).getFullYear() : new Date().getFullYear();
-  const orderNumber = `#ORD-${orderYear}-${String(orders[0].id).padStart(5, "0")}`;
-  const shippingFee = Number(input.shipping_fee || 0);
-  const estimatedRefund = Math.max(0, Number(orders[0].total_amount || 0) - shippingFee);
-  await query(
-    `INSERT INTO returns (order_id, user_id, customer_id, product_id, brand_id, brand_name, product_name, order_number, amount, reason, reason_category, refund_type, shipping_fee, estimated_refund, image_url, proof_images, status)
-     VALUES (:orderId, :userId, :customerId, :productId, :brandId, :brandName, :productName, :orderNumber, :amount, :reason, :reasonCategory, :refundType, :shippingFee, :estimatedRefund, :imageUrl, :proofImages, 'pending')`,
-    {
-      orderId: input.order_id,
+router.post("/", requireAuth, requireApproved, handleReturnImagesUpload, async (req, res) => {
+  try {
+    if (!req.user?.id) throw new HttpError(401, "Authenticated user is required.");
+    await ensureReturnColumns();
+    await ensureReturnNotificationTypes();
+    const schema = z.object({
+      order_id: z.coerce.number().int().positive(),
+      reason_category: z.enum(returnReasons),
+      refund_type: z.enum(refundTypes),
+      shipping_fee: z.coerce.number().min(0).max(10000).optional().default(0),
+      description: z.string().trim().min(10).max(1200)
+    });
+    const input = schema.parse(req.body);
+    console.info("[returns:create] request received", {
       userId: req.user.id,
-      customerId: req.user.id,
-      productId: orders[0].first_product_id || null,
-      brandId: null,
-      brandName: orders[0].first_brand_name || null,
-      productName: orders[0].first_product_name || null,
-      orderNumber,
-      amount: orders[0].total_amount,
-      reason: input.description,
-      reasonCategory: input.reason_category,
+      orderId: input.order_id,
+      returnReason: input.reason_category,
       refundType: input.refund_type,
-      shippingFee,
-      estimatedRefund,
-      imageUrl: imageUrls[0] || null,
-      proofImages: imageUrls.length ? JSON.stringify(imageUrls) : null
+      imageCount: (req.files || []).length,
+      fields: Object.keys(req.body || {})
+    });
+    const orders = await query(
+      `SELECT o.id, o.user_id, o.status, o.payment_status, o.total_amount, o.created_at, o.updated_at,
+         oi.product_id AS first_product_id,
+         p.name AS first_product_name,
+         p.brand AS first_brand_name
+       FROM orders o
+       LEFT JOIN order_items oi ON oi.order_id = o.id
+       LEFT JOIN products p ON p.id = oi.product_id
+       WHERE o.id = :orderId AND o.user_id = :userId
+       ORDER BY oi.id ASC
+       LIMIT 1`,
+      { orderId: input.order_id, userId: req.user.id }
+    );
+    if (!orders.length) throw new HttpError(404, "Order not found or does not belong to this customer.");
+    if (Number(orders[0].user_id) !== Number(req.user.id)) throw new HttpError(403, "Order does not belong to this customer.");
+    if (orders[0].payment_status === "refunded") throw new HttpError(400, "Order Already Refunded");
+    if (orders[0].status !== "completed") throw new HttpError(400, "Order Not Delivered");
+    const receivedAt = new Date(orders[0].updated_at);
+    if (Date.now() - receivedAt.getTime() > 7 * 24 * 60 * 60 * 1000) {
+      throw new HttpError(400, "Return Window Expired");
     }
-  );
-  await createAdminNotification({
-    type: "return",
-    title: "New return request",
-    body: `${req.user.username} requested ${input.refund_type} for Order #${input.order_id}.`,
-    customerId: req.user.id,
-    app: req.app
-  });
-  req.app.get("io")?.to("admin").emit("return:new", {
-    order_id: input.order_id,
-    reason: input.reason_category,
-    refund_type: input.refund_type
-  });
-  res.status(201).json({ message: "Return/refund request submitted" });
-}));
+    const refunded = await query(
+      "SELECT id FROM returns WHERE order_id = :orderId AND user_id = :userId AND status = 'refunded' LIMIT 1",
+      { orderId: input.order_id, userId: req.user.id }
+    );
+    if (refunded.length) throw new HttpError(409, "Order Already Refunded");
+    const duplicates = await query(
+      "SELECT id FROM returns WHERE order_id = :orderId AND user_id = :userId AND status IN ('pending','under_review','approved') LIMIT 1",
+      { orderId: input.order_id, userId: req.user.id }
+    );
+    if (duplicates.length) throw new HttpError(409, "Order Already Returned");
+
+    const imageUrls = (req.files || []).slice(0, 10).map((file) => `/uploads/${file.filename}`);
+    const orderYear = orders[0].created_at ? new Date(orders[0].created_at).getFullYear() : new Date().getFullYear();
+    const orderNumber = `#ORD-${orderYear}-${String(orders[0].id).padStart(5, "0")}`;
+    const shippingFee = Number(input.shipping_fee || 0);
+    const estimatedRefund = Math.max(0, Number(orders[0].total_amount || 0) - shippingFee);
+    await query(
+      `INSERT INTO returns (order_id, user_id, customer_id, product_id, brand_id, brand_name, product_name, order_number, amount, reason, reason_category, refund_type, shipping_fee, estimated_refund, image_url, proof_images, status)
+       VALUES (:orderId, :userId, :customerId, :productId, :brandId, :brandName, :productName, :orderNumber, :amount, :reason, :reasonCategory, :refundType, :shippingFee, :estimatedRefund, :imageUrl, :proofImages, 'pending')`,
+      {
+        orderId: input.order_id,
+        userId: req.user.id,
+        customerId: req.user.id,
+        productId: orders[0].first_product_id || null,
+        brandId: null,
+        brandName: orders[0].first_brand_name || null,
+        productName: orders[0].first_product_name || null,
+        orderNumber,
+        amount: orders[0].total_amount,
+        reason: input.description,
+        reasonCategory: input.reason_category,
+        refundType: input.refund_type,
+        shippingFee,
+        estimatedRefund,
+        imageUrl: imageUrls[0] || null,
+        proofImages: imageUrls.length ? JSON.stringify(imageUrls) : null
+      }
+    );
+    await createAdminNotification({
+      type: "return",
+      title: "New return request",
+      body: `${req.user.username} requested ${input.refund_type} for Order #${input.order_id}.`,
+      customerId: req.user.id,
+      app: req.app
+    });
+    req.app.get("io")?.to("admin").emit("return:new", {
+      order_id: input.order_id,
+      reason: input.reason_category,
+      refund_type: input.refund_type
+    });
+    res.status(201).json({ success: true, message: "Return/refund request submitted" });
+  } catch (error) {
+    logReturnCreationError(error, req, { phase: "create" });
+    sendReturnCreationError(res, error);
+  }
+});
 
 router.patch("/:id/decision", requireAuth, requireRole("admin"), asyncHandler(async (req, res) => {
   await ensureReturnColumns();
