@@ -129,10 +129,8 @@ async function fetchDrivingRoute(origin, destination, { signal, cache } = {}) {
   const key = routeCacheKey(origin, destination);
   if (cache?.has(key)) return cache.get(key);
   if (signal?.aborted) throw routeAbortError();
-  console.log("Route request:", {
-    origin: { latitude: Number(origin.latitude), longitude: Number(origin.longitude) },
-    destination: { latitude: Number(destination.latitude), longitude: Number(destination.longitude) }
-  });
+  console.log("ROUTE START:", { lat: Number(origin.latitude), lng: Number(origin.longitude) });
+  console.log("ROUTE END:", { lat: Number(destination.latitude), lng: Number(destination.longitude) });
   const response = await fetch(routeUrl(origin, destination), { signal });
   if (!response.ok) throw new Error("Road route is temporarily unavailable.");
   const data = await response.json();
@@ -153,6 +151,7 @@ async function fetchDrivingRoute(origin, destination, { signal, cache } = {}) {
     distanceText: Number.isFinite(distanceMeters) ? `${(distanceMeters / 1000).toFixed(1)} km` : "",
     durationText: Number.isFinite(durationSeconds) ? `${Math.max(1, Math.round(durationSeconds / 60))} minutes` : ""
   };
+  console.log("ROUTE SUCCESS:", { distance: route.distanceText, duration: route.durationText });
   if (cache && key) cache.set(key, route);
   return route;
 }
@@ -428,6 +427,8 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
       : liveLocation;
     if (!routeVisible || !liveRouteUsable || !routeOrigin) return undefined;
     const now = Date.now();
+    const lastRequest = liveRouteRefreshRef.current;
+    if (lastRequest.point && now - lastRequest.at < 10000) return undefined;
     liveRouteRefreshRef.current = { point: routeOrigin, at: now };
     const requestId = routeRequestRef.current + 1;
     routeRequestRef.current = requestId;
@@ -486,7 +487,7 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
       accuracy: Number.isFinite(coords.accuracy) ? coords.accuracy : null
     };
     if (!validMapCoordinate(point.latitude, point.longitude)) return;
-    console.log("Current rider location:", point.latitude, point.longitude);
+    console.log("REAL RIDER LOCATION:", point.latitude, point.longitude);
     const now = Date.now();
     const previous = lastPublishedRef.current.point;
     lastPublishedRef.current = { point, at: now };
@@ -502,7 +503,6 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
       heading,
       shared_at: payload.timestamp
     };
-    console.log("MAP RIDER POSITION:", nextRiderPosition);
     setRiderPosition(nextRiderPosition);
     applyLiveLocation({ ...payload, heading, speed: point.speed, accuracy: point.accuracy, order_id: Number(order.id), user_id: 0, source_type: "rider", is_live: true, shared_at: new Date().toISOString() });
     api.post(`/live-locations/orders/${order.id}`, {
@@ -516,7 +516,27 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
     });
   }
 
-  async function startLiveTracking() {
+  function getFreshDevicePosition() {
+    return new Promise((resolve, reject) => {
+      navigator.geolocation.getCurrentPosition(resolve, reject, {
+        enableHighAccuracy: true,
+        maximumAge: 3000,
+        timeout: 10000
+      });
+    });
+  }
+
+  function showGpsError(geoError) {
+    console.error("GPS ERROR:", geoError);
+    const messages = {
+      1: "Location permission is required for delivery tracking.",
+      2: "Live location is unavailable on this device.",
+      3: "Live location timed out. Try again when GPS is ready."
+    };
+    setLiveError(messages[geoError?.code] || "Could not read live location.");
+  }
+
+  async function startLiveTracking({ requireFreshPosition = false } = {}) {
     if (!order?.id || locating || trackingActive) return;
     setLiveError("");
     if (!liveRouteUsable) {
@@ -532,19 +552,22 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
     setLocating(true);
     joinLiveSocket();
     console.log("GPS started");
+    if (requireFreshPosition) {
+      try {
+        publishPosition(await getFreshDevicePosition());
+      } catch (geoError) {
+        showGpsError(geoError);
+        stopLiveTracking({ notifyServer: false });
+      }
+      if (!trackingActiveRef.current) return;
+    }
     watchIdRef.current = navigator.geolocation.watchPosition(
       publishPosition,
       (geoError) => {
-        console.error("GPS Error:", geoError);
+        showGpsError(geoError);
         setLocating(false);
-        const messages = {
-          1: "Location permission is required for delivery tracking.",
-          2: "Live location is unavailable on this device.",
-          3: "Live location timed out. Try again when GPS is ready."
-        };
-        setLiveError(messages[geoError?.code] || "Could not read live location.");
       },
-      { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 }
+      { enableHighAccuracy: true, maximumAge: 3000, timeout: 10000 }
     );
   }
 
@@ -575,7 +598,7 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
     lastPublishedRef.current = { point: null, at: 0 };
   }
 
-  function toggleRouteVisibility() {
+  async function toggleRouteVisibility() {
     setLiveError("");
     if (routeVisible) {
       setRouteVisible(false);
@@ -583,6 +606,19 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
     }
     setRouteVisible(true);
     setRouteRequested(true);
+    if (canShareLiveLocation) {
+      if (trackingActiveRef.current) {
+        setLocating(true);
+        try {
+          publishPosition(await getFreshDevicePosition());
+        } catch (geoError) {
+          showGpsError(geoError);
+          setLocating(false);
+        }
+      } else {
+        await startLiveTracking({ requireFreshPosition: true });
+      }
+    }
   }
 
   const activeRoute = routeVisible ? (liveRoute || (liveRouteEnabled ? null : route)) : null;
@@ -646,7 +682,7 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
                   <span>{displayedLiveLocation ? `Live - Updated ${updatedText}` : "Rider location temporarily unavailable."}</span>
                 </div>
                 <div className="retela-live-route-actions">
-                  <button type="button" onClick={toggleRouteVisibility} disabled={loadingRoute && routeVisible}>
+                  <button type="button" onClick={() => void toggleRouteVisibility()} disabled={loadingRoute && routeVisible}>
                     {loadingRoute && routeVisible ? <Loader2 size={15} className="animate-spin" /> : <Route size={15} />}
                     {routeButtonLabel}
                   </button>
