@@ -194,41 +194,19 @@ async function fetchDrivingRoute(origin, destination, { signal, cache } = {}) {
         return;
       }
       const legs = result.routes[0].legs || [];
+      const primaryLeg = legs[0] || {};
       resolve({
         provider: "google",
         directions: result,
         coordinates: (result.routes[0].overview_path || []).map((point) => ({ latitude: point.lat(), longitude: point.lng() })),
         distanceMeters: legs.reduce((sum, leg) => sum + Number(leg.distance?.value || 0), 0),
-        durationSeconds: legs.reduce((sum, leg) => sum + Number(leg.duration?.value || 0), 0)
+        durationSeconds: legs.reduce((sum, leg) => sum + Number(leg.duration?.value || 0), 0),
+        distanceText: primaryLeg.distance?.text || "",
+        durationText: primaryLeg.duration?.text || ""
       });
     });
   });
   if (cache && key) cache.set(key, route);
-  return route;
-}
-
-function normalizeBackendRoute(data = {}) {
-  const coordinates = Array.isArray(data.routeCoordinates)
-    ? data.routeCoordinates
-      .map((point) => ({
-        latitude: finiteCoordinate(point.latitude),
-        longitude: finiteCoordinate(point.longitude)
-      }))
-      .filter((point) => validMapCoordinate(point.latitude, point.longitude))
-    : [];
-  return {
-    provider: data.provider || "retela",
-    directions: null,
-    coordinates,
-    distanceMeters: Number.isFinite(Number(data.distanceMeters)) ? Number(data.distanceMeters) : null,
-    durationSeconds: Number.isFinite(Number(data.durationSeconds)) ? Number(data.durationSeconds) : null
-  };
-}
-
-async function fetchOrderLiveRoute(orderId, { signal } = {}) {
-  const { data } = await api.get(`/orders/${orderId}/route`, { signal });
-  const route = normalizeBackendRoute(data);
-  if (!route.coordinates.length) throw new Error("Live route coordinates are unavailable.");
   return route;
 }
 
@@ -277,6 +255,7 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
   const [route, setRoute] = useState(null);
   const [liveRoute, setLiveRoute] = useState(null);
   const [liveLocation, setLiveLocation] = useState(null);
+  const [riderPosition, setRiderPosition] = useState(null);
   const [displayedLiveLocation, setDisplayedLiveLocation] = useState(null);
   const [trackingActive, setTrackingActive] = useState(false);
   const [routeVisible, setRouteVisible] = useState(Boolean(routeInitiallyVisible));
@@ -319,6 +298,7 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
     setRouteRequested(true);
     setLiveRoute(null);
     setLiveLocation(null);
+    setRiderPosition(null);
     setDisplayedLiveLocation(null);
     liveRouteRefreshRef.current = { point: null, at: 0 };
   }, [order?.id, routeInitiallyVisible]);
@@ -333,9 +313,18 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
     if (next.source_type !== "rider") return;
     if (!next.is_live) {
       setLiveLocation(null);
+      setRiderPosition(null);
       setLiveRoute(null);
       return;
     }
+    const markerPosition = {
+      lat: next.latitude,
+      lng: next.longitude,
+      heading: next.heading,
+      shared_at: next.shared_at
+    };
+    console.log("MAP RIDER POSITION:", markerPosition);
+    setRiderPosition(markerPosition);
     setLiveLocation(next);
     setLocating(false);
   }, [order?.id]);
@@ -482,17 +471,20 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
   }, [liveRoute, onRouteMetrics, route]);
 
   useEffect(() => {
-    if (!routeVisible || !liveRouteUsable || !liveLocation) return undefined;
+    const routeOrigin = riderPosition && validMapCoordinate(riderPosition.lat, riderPosition.lng)
+      ? { latitude: riderPosition.lat, longitude: riderPosition.lng, heading: riderPosition.heading, shared_at: riderPosition.shared_at }
+      : liveLocation;
+    if (!routeVisible || !liveRouteUsable || !routeOrigin) return undefined;
     const previous = liveRouteRefreshRef.current.point;
     const now = Date.now();
-    const movedMeters = previous ? distanceMetersBetween(previous, liveLocation) : Infinity;
-    if (liveRoute && movedMeters < 90 && now - liveRouteRefreshRef.current.at < 45000) return undefined;
-    liveRouteRefreshRef.current = { point: liveLocation, at: now };
+    const movedMeters = previous ? distanceMetersBetween(previous, routeOrigin) : Infinity;
+    if (liveRoute && movedMeters < 25 && now - liveRouteRefreshRef.current.at < 15000) return undefined;
+    liveRouteRefreshRef.current = { point: routeOrigin, at: now };
     const requestId = routeRequestRef.current + 1;
     routeRequestRef.current = requestId;
     const controller = new AbortController();
-    fetchOrderLiveRoute(order.id, { signal: controller.signal })
-      .catch(() => fetchDrivingRoute(liveLocation, destinationSnapshot, { signal: controller.signal, cache: routeCacheRef.current }))
+    console.log("ROUTE ORIGIN:", riderPosition || routeOrigin);
+    fetchDrivingRoute(routeOrigin, destinationSnapshot, { signal: controller.signal, cache: routeCacheRef.current })
       .then((routeData) => {
         if (requestId !== routeRequestRef.current) return;
         setLiveRoute(routeData);
@@ -502,7 +494,7 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
         if (requestError?.name !== "AbortError") setLiveError("Live road route is temporarily unavailable.");
       });
     return () => controller.abort();
-  }, [destinationSnapshot.latitude, destinationSnapshot.longitude, liveLocation, liveRoute, liveRouteUsable, order?.id, routeVisible]);
+  }, [destinationSnapshot, liveLocation, liveRoute, liveRouteUsable, riderPosition, routeVisible]);
 
   useEffect(() => {
     if (!liveLocation) return;
@@ -546,9 +538,9 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
       accuracy: Number.isFinite(coords.accuracy) ? coords.accuracy : null
     };
     if (!validMapCoordinate(point.latitude, point.longitude)) return;
+    console.log("REAL RIDER GPS:", point.latitude, point.longitude);
     const now = Date.now();
     const previous = lastPublishedRef.current.point;
-    if (previous && now - lastPublishedRef.current.at < 3500 && distanceMetersBetween(previous, point) < 8) return;
     lastPublishedRef.current = { point, at: now };
     const heading = point.heading ?? bearingBetween(previous, point) ?? headingRef.current;
     const payload = {
@@ -556,6 +548,14 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
       longitude: point.longitude,
       timestamp: new Date().toISOString()
     };
+    const nextRiderPosition = {
+      lat: point.latitude,
+      lng: point.longitude,
+      heading,
+      shared_at: payload.timestamp
+    };
+    console.log("MAP RIDER POSITION:", nextRiderPosition);
+    setRiderPosition(nextRiderPosition);
     applyLiveLocation({ ...payload, heading, speed: point.speed, accuracy: point.accuracy, order_id: Number(order.id), user_id: 0, source_type: "rider", is_live: true, shared_at: new Date().toISOString() });
     api.post(`/orders/${order.id}/location`, payload).catch((requestError) => {
       setLiveError(getApiErrorMessage(requestError, "Could not publish live location."));
@@ -577,7 +577,6 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
     setTrackingActive(true);
     setLocating(true);
     joinLiveSocket();
-    fetchLatestLiveLocation();
     watchIdRef.current = navigator.geolocation.watchPosition(
       publishPosition,
       (geoError) => {
@@ -589,7 +588,7 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
         };
         setLiveError(messages[geoError?.code] || "Could not read live location.");
       },
-      { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 }
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
     );
   }
 
@@ -630,10 +629,16 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
     setRouteRequested(true);
   }
 
-  const activeRoute = routeVisible ? (liveRoute || route) : null;
+  const activeRoute = routeVisible ? (liveRoute || (liveRouteEnabled ? null : route)) : null;
   const showLiveLocation = liveRouteEnabled ? displayedLiveLocation : null;
   const updatedText = displayedLiveLocation ? formatUpdatedAgo(displayedLiveLocation.shared_at) : "Waiting for live location";
   const routeButtonLabel = loadingRoute && routeVisible ? "Loading Route..." : routeVisible ? "Hide Route" : "Show Routes";
+  const distanceValue = activeRoute
+    ? activeRoute.distanceText || (Number.isFinite(activeRoute.distanceMeters) ? `${(activeRoute.distanceMeters / 1000).toFixed(1)} km` : "Unavailable")
+    : loadingRoute || locating ? "Loading..." : "Unavailable";
+  const durationValue = activeRoute
+    ? activeRoute.durationText || (Number.isFinite(activeRoute.durationSeconds) ? `${Math.max(1, Math.round(activeRoute.durationSeconds / 60))} min` : "Unavailable")
+    : loadingRoute || locating ? "Loading..." : "Unavailable";
 
   return <div className="retela-inline-route">
         <div className="retela-route-summary">
@@ -667,12 +672,12 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
               shop={shop}
               destination={destinationSnapshot}
               route={activeRoute}
-              liveLocation={showLiveLocation}
+              riderPosition={riderPosition}
               followRider={followRider}
             />
             <div className="retela-route-metrics">
-              <RouteMetric label="Distance" value={activeRoute ? `${(activeRoute.distanceMeters / 1000).toFixed(1)} km` : loadingRoute || locating ? "Loading..." : "Unavailable"} />
-              <RouteMetric label="Estimated travel" value={activeRoute ? `${Math.max(1, Math.round(activeRoute.durationSeconds / 60))} min` : loadingRoute || locating ? "Loading..." : "Unavailable"} />
+              <RouteMetric label="Distance" value={distanceValue} />
+              <RouteMetric label="Estimated travel" value={durationValue} />
             </div>
             {liveRouteEnabled ? (
               <div className="retela-live-route-panel">
@@ -732,7 +737,7 @@ function RouteMetric({ label, value }) {
   );
 }
 
-function DeliveryRouteMap({ shop, destination, route, liveLocation = null, followRider = false }) {
+function DeliveryRouteMap({ shop, destination, route, riderPosition = null, followRider = false }) {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
   const directionsRendererRef = useRef(null);
@@ -752,7 +757,7 @@ function DeliveryRouteMap({ shop, destination, route, liveLocation = null, follo
     const bounds = new google.maps.LatLngBounds();
     bounds.extend({ lat: Number(shop.latitude), lng: Number(shop.longitude) });
     bounds.extend({ lat: Number(destination.latitude), lng: Number(destination.longitude) });
-    if (includeRider && liveLocation) bounds.extend({ lat: Number(liveLocation.latitude), lng: Number(liveLocation.longitude) });
+    if (includeRider && riderPosition) bounds.extend({ lat: Number(riderPosition.lat), lng: Number(riderPosition.lng) });
     route?.directions?.routes?.[0]?.overview_path?.forEach((point) => bounds.extend(point));
     route?.coordinates?.forEach((point) => bounds.extend({ lat: Number(point.latitude), lng: Number(point.longitude) }));
     lastBoundsRef.current = bounds;
@@ -761,7 +766,7 @@ function DeliveryRouteMap({ shop, destination, route, liveLocation = null, follo
       if (map.getZoom() > 17) map.setZoom(17);
       if (map.getZoom() < 10) map.setZoom(10);
     }, 60);
-  }, [destination.latitude, destination.longitude, liveLocation, route, shop.latitude, shop.longitude]);
+  }, [destination.latitude, destination.longitude, riderPosition, route, shop.latitude, shop.longitude]);
 
   useEffect(() => {
     const node = containerRef.current;
@@ -802,7 +807,7 @@ function DeliveryRouteMap({ shop, destination, route, liveLocation = null, follo
         shopMarkerRef.current = createDeliveryMarker(google, map, shop, "shop");
         customerMarkerRef.current = createDeliveryMarker(google, map, destination, "customer");
         setMapState("ready");
-        window.setTimeout(() => fitMap(Boolean(liveLocation)), 120);
+        window.setTimeout(() => fitMap(Boolean(riderPosition)), 120);
       })
       .catch((error) => {
         if (!active) return;
@@ -846,8 +851,8 @@ function DeliveryRouteMap({ shop, destination, route, liveLocation = null, follo
     if (!google?.maps || !mapRef.current) return;
     shopMarkerRef.current?.setPosition({ lat: Number(shop.latitude), lng: Number(shop.longitude) });
     customerMarkerRef.current?.setPosition({ lat: Number(destination.latitude), lng: Number(destination.longitude) });
-    fitMap(Boolean(liveLocation));
-  }, [destination.latitude, destination.longitude, fitMap, liveLocation, shop.latitude, shop.longitude]);
+    fitMap(false);
+  }, [destination.latitude, destination.longitude, shop.latitude, shop.longitude]);
 
   useEffect(() => {
     const google = window.google;
@@ -859,7 +864,7 @@ function DeliveryRouteMap({ shop, destination, route, liveLocation = null, follo
     if (route?.directions) {
       renderer.setMap(map);
       renderer.setDirections(route.directions);
-      window.setTimeout(() => fitMap(Boolean(liveLocation)), 80);
+      window.setTimeout(() => fitMap(Boolean(riderPosition)), 80);
     } else if (route?.coordinates?.length) {
       renderer.setMap(null);
       routePolylineRef.current = new google.maps.Polyline({
@@ -870,31 +875,35 @@ function DeliveryRouteMap({ shop, destination, route, liveLocation = null, follo
         strokeOpacity: 0.92,
         strokeWeight: 5
       });
-      window.setTimeout(() => fitMap(Boolean(liveLocation)), 80);
+      window.setTimeout(() => fitMap(Boolean(riderPosition)), 80);
     } else {
       renderer.setMap(null);
       renderer.setMap(map);
-      fitMap(Boolean(liveLocation));
+      fitMap(Boolean(riderPosition));
     }
-  }, [fitMap, liveLocation, route]);
+  }, [route]);
 
   useEffect(() => {
     const google = window.google;
     const map = mapRef.current;
     if (!google?.maps || !map) return;
-    if (!liveLocation) {
+    if (!riderPosition) {
       riderMarkerRef.current?.setMap(null);
       riderMarkerRef.current = null;
       return;
     }
-    const position = { lat: Number(liveLocation.latitude), lng: Number(liveLocation.longitude) };
+    console.log("MAP RIDER POSITION:", riderPosition);
+    const position = { lat: Number(riderPosition.lat), lng: Number(riderPosition.lng) };
     if (!riderMarkerRef.current) {
-      riderMarkerRef.current = createDeliveryMarker(google, map, liveLocation, "rider");
+      riderMarkerRef.current = createDeliveryMarker(google, map, { latitude: riderPosition.lat, longitude: riderPosition.lng, heading: riderPosition.heading }, "rider");
     }
     riderMarkerRef.current.setPosition(position);
-    riderMarkerRef.current.setIcon(deliveryMarkerIcon(google, "rider", liveLocation.heading));
-    if (followRider) map.panTo(position);
-  }, [followRider, liveLocation]);
+    riderMarkerRef.current.setIcon(deliveryMarkerIcon(google, "rider", riderPosition.heading));
+    if (followRider) {
+      map.panTo(position);
+      if (Number(map.getZoom() || 0) < 16) map.setZoom(16);
+    }
+  }, [followRider, riderPosition]);
 
   function zoomBy(delta) {
     const map = mapRef.current;
@@ -910,7 +919,7 @@ function DeliveryRouteMap({ shop, destination, route, liveLocation = null, follo
       <div className="retela-route-map-tools">
         <button type="button" onClick={() => zoomBy(1)} aria-label="Zoom in">+</button>
         <button type="button" onClick={() => zoomBy(-1)} aria-label="Zoom out">-</button>
-        <button type="button" onClick={() => fitMap(Boolean(liveLocation))} aria-label="Recenter Map" title="Recenter Map"><LocateFixed size={14} /></button>
+        <button type="button" onClick={() => fitMap(Boolean(riderPosition))} aria-label="Recenter Map" title="Recenter Map"><LocateFixed size={14} /></button>
         <button type="button" onClick={() => fitMap(true)} aria-label="Reset Route View" title="Reset Route View"><RotateCcw size={14} /></button>
       </div>
     </div>
