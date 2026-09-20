@@ -544,7 +544,7 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
         };
         setLiveError(messages[geoError?.code] || "Could not read live location.");
       },
-      { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 }
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 }
     );
   }
 

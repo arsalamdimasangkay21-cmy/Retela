@@ -173,7 +173,7 @@ export default function StructuredLocationPicker({
         setResolving(false);
         setSearchError("Current location could not be accessed. Search for an address or use the manual fallback.");
       },
-      { enableHighAccuracy: true, timeout: 12000, maximumAge: 60000 }
+      { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 }
     );
   }
 
