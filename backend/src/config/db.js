@@ -763,6 +763,14 @@ async function ensureCoreTables() {
       payment_review_note VARCHAR(255) NULL,
       tracking_number VARCHAR(120) NULL,
       fulfillment_method ENUM('delivery','pickup') NOT NULL DEFAULT 'delivery',
+      delivery_status ENUM('Pending','Accepted','Out for Delivery','Completed') NOT NULL DEFAULT 'Pending',
+      rider_id INT NULL,
+      rider_name VARCHAR(160) NULL,
+      rider_latitude DECIMAL(10,7) NULL,
+      rider_longitude DECIMAL(10,7) NULL,
+      customer_latitude DECIMAL(10,7) NULL,
+      customer_longitude DECIMAL(10,7) NULL,
+      location_updated_at DATETIME NULL,
       delivery_address VARCHAR(500) NULL,
       delivery_latitude DECIMAL(10,7) NULL,
       delivery_longitude DECIMAL(10,7) NULL,
@@ -825,6 +833,14 @@ async function ensureCoreTables() {
   await ensureColumn("orders", "payment_review_note", "payment_review_note VARCHAR(255) NULL AFTER payment_review_required_at");
   await ensureColumn("orders", "tracking_number", "tracking_number VARCHAR(120) NULL AFTER checkout_url");
   await ensureColumn("orders", "fulfillment_method", "fulfillment_method ENUM('delivery','pickup') NOT NULL DEFAULT 'delivery' AFTER tracking_number");
+  await ensureColumn("orders", "delivery_status", "delivery_status ENUM('Pending','Accepted','Out for Delivery','Completed') NOT NULL DEFAULT 'Pending' AFTER fulfillment_method");
+  await ensureColumn("orders", "rider_id", "rider_id INT NULL AFTER delivery_status");
+  await ensureColumn("orders", "rider_name", "rider_name VARCHAR(160) NULL AFTER rider_id");
+  await ensureColumn("orders", "rider_latitude", "rider_latitude DECIMAL(10,7) NULL AFTER rider_name");
+  await ensureColumn("orders", "rider_longitude", "rider_longitude DECIMAL(10,7) NULL AFTER rider_latitude");
+  await ensureColumn("orders", "customer_latitude", "customer_latitude DECIMAL(10,7) NULL AFTER rider_longitude");
+  await ensureColumn("orders", "customer_longitude", "customer_longitude DECIMAL(10,7) NULL AFTER customer_latitude");
+  await ensureColumn("orders", "location_updated_at", "location_updated_at DATETIME NULL AFTER customer_longitude");
   await ensureColumn("orders", "delivery_address", "delivery_address VARCHAR(500) NULL AFTER fulfillment_method");
   await ensureColumn("orders", "delivery_latitude", "delivery_latitude DECIMAL(10,7) NULL AFTER delivery_address");
   await ensureColumn("orders", "delivery_longitude", "delivery_longitude DECIMAL(10,7) NULL AFTER delivery_latitude");

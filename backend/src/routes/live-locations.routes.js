@@ -8,7 +8,7 @@ import { haversineDistanceKm, validCoordinates } from "../utils/shippingCalculat
 const router = Router();
 let liveLocationTableReady;
 
-const activeTrackingStatuses = new Set(["approved", "processing", "ready", "paid"]);
+const activeTrackingStatuses = new Set(["ready"]);
 const terminalStatuses = new Set(["completed", "cancelled", "payment_failed", "rejected"]);
 
 export async function ensureLiveLocationTable() {
@@ -119,7 +119,7 @@ async function loadOrderForLiveLocation(orderId, user) {
 function assertTrackableOrder(order) {
   const status = normalizeStatus(order.status);
   if (terminalStatuses.has(status)) throw new HttpError(409, "Live route tracking is stopped for this order status.");
-  if (!activeTrackingStatuses.has(status)) throw new HttpError(409, "Live route tracking is available after the order is accepted or out for delivery.");
+  if (!activeTrackingStatuses.has(status)) throw new HttpError(409, "Live route tracking starts when the order is Out for Delivery.");
   if (String(order.fulfillment_method || "delivery").toLowerCase() !== "delivery") {
     throw new HttpError(409, "Live route tracking is only available for delivery orders.");
   }
@@ -210,6 +210,28 @@ router.post("/orders/:id", requireAuth, requireApproved, asyncHandler(async (req
       accuracy: input.accuracy ?? null
     }
   );
+  if (sourceType === "rider") {
+    const riderName = String(req.user.display_name || req.user.username || "Rider").trim().slice(0, 160);
+    await query(
+      `UPDATE orders
+       SET delivery_status = 'Out for Delivery',
+           rider_id = :riderId,
+           rider_name = :riderName,
+           rider_latitude = :latitude,
+           rider_longitude = :longitude,
+           customer_latitude = COALESCE(customer_latitude, delivery_latitude),
+           customer_longitude = COALESCE(customer_longitude, delivery_longitude),
+           location_updated_at = NOW()
+       WHERE id = :orderId`,
+      {
+        orderId,
+        riderId: req.user.id,
+        riderName,
+        latitude: input.latitude,
+        longitude: input.longitude
+      }
+    );
+  }
   const payload = serializeLiveLocation({
     order_id: orderId,
     user_id: req.user.id,

@@ -17,6 +17,7 @@ import { haversineDistanceKm, normalizeMunicipality, validCoordinates } from "..
 const router = Router();
 const orderStatusEnumSql = "ENUM('pending','awaiting_payment','paid','approved','processing','ready','completed','cancelled','payment_failed','rejected')";
 const paymentStatusEnumSql = "ENUM('unpaid','awaiting_payment','paid','failed','expired','cancelled','refunded')";
+const deliveryStatusEnumSql = "ENUM('Pending','Accepted','Out for Delivery','Completed')";
 const statuses = ["pending", "awaiting_payment", "paid", "approved", "processing", "ready", "completed", "cancelled", "payment_failed", "rejected"];
 const terminalStatuses = new Set(["completed", "cancelled", "payment_failed", "rejected"]);
 const customerCancellableStatuses = new Set(["pending", "awaiting_payment"]);
@@ -253,6 +254,14 @@ function orderStatusForStorage(status) {
   return normalized;
 }
 
+function deliveryStatusForOrderStatus(status) {
+  const normalized = normalizeOrderStatus(status);
+  if (normalized === "approved" || normalized === "accepted" || normalized === "processing") return "Accepted";
+  if (normalized === "ready" || normalized === "out_for_delivery") return "Out for Delivery";
+  if (normalized === "completed") return "Completed";
+  return "Pending";
+}
+
 function isCustomerCancellableStatus(status) {
   return customerCancellableStatuses.has(normalizeOrderStatus(status));
 }
@@ -262,6 +271,110 @@ function nullableCoordinate(min, max) {
     (value) => (value === "" || value === null ? null : value),
     z.coerce.number().min(min).max(max).nullable()
   ).optional();
+}
+
+function finiteCoordinate(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function serializeCoordinatePoint(latitude, longitude) {
+  const lat = finiteCoordinate(latitude);
+  const lng = finiteCoordinate(longitude);
+  if (!validCoordinates(lat, lng)) return null;
+  return { latitude: lat, longitude: lng };
+}
+
+function formatRouteDistance(meters) {
+  const value = Number(meters);
+  if (!Number.isFinite(value) || value < 0) return null;
+  if (value < 1000) return `${Math.round(value)} m`;
+  return `${(value / 1000).toFixed(value < 10000 ? 1 : 0)} km`;
+}
+
+function formatRouteDuration(seconds) {
+  const value = Number(seconds);
+  if (!Number.isFinite(value) || value < 0) return null;
+  const minutes = Math.max(1, Math.round(value / 60));
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  const remainder = minutes % 60;
+  return remainder ? `${hours} hr ${remainder} min` : `${hours} hr`;
+}
+
+function decodeGooglePolyline(encoded = "") {
+  const points = [];
+  let index = 0;
+  let latitude = 0;
+  let longitude = 0;
+  while (index < encoded.length) {
+    let byte = null;
+    let shift = 0;
+    let result = 0;
+    do {
+      byte = encoded.charCodeAt(index++) - 63;
+      result |= (byte & 0x1f) << shift;
+      shift += 5;
+    } while (byte >= 0x20 && index < encoded.length);
+    latitude += (result & 1) ? ~(result >> 1) : (result >> 1);
+
+    shift = 0;
+    result = 0;
+    do {
+      byte = encoded.charCodeAt(index++) - 63;
+      result |= (byte & 0x1f) << shift;
+      shift += 5;
+    } while (byte >= 0x20 && index < encoded.length);
+    longitude += (result & 1) ? ~(result >> 1) : (result >> 1);
+    points.push({ latitude: latitude / 1e5, longitude: longitude / 1e5 });
+  }
+  return points;
+}
+
+function fallbackRouteInfo(riderLocation, customerLocation) {
+  const distanceKm = haversineDistanceKm(riderLocation, customerLocation);
+  const distanceMeters = distanceKm === null ? null : Math.round(distanceKm * 1000);
+  const durationSeconds = distanceMeters === null ? null : Math.max(60, Math.round((distanceMeters / 1000 / 25) * 3600));
+  return {
+    provider: "estimated",
+    distanceMeters,
+    durationSeconds,
+    distance: formatRouteDistance(distanceMeters),
+    duration: formatRouteDuration(durationSeconds),
+    routeCoordinates: [riderLocation, customerLocation]
+  };
+}
+
+async function googleDirectionsRouteInfo(riderLocation, customerLocation) {
+  const apiKey = String(process.env.GOOGLE_MAPS_SERVER_API_KEY || process.env.GOOGLE_DIRECTIONS_API_KEY || process.env.GOOGLE_MAPS_API_KEY || "").trim();
+  if (!apiKey) return fallbackRouteInfo(riderLocation, customerLocation);
+  const url = new URL("https://maps.googleapis.com/maps/api/directions/json");
+  url.searchParams.set("origin", `${riderLocation.latitude},${riderLocation.longitude}`);
+  url.searchParams.set("destination", `${customerLocation.latitude},${customerLocation.longitude}`);
+  url.searchParams.set("mode", "driving");
+  url.searchParams.set("key", apiKey);
+  try {
+    const response = await fetch(url);
+    if (!response.ok) return fallbackRouteInfo(riderLocation, customerLocation);
+    const data = await response.json();
+    const route = Array.isArray(data.routes) ? data.routes[0] : null;
+    if (data.status !== "OK" || !route) return fallbackRouteInfo(riderLocation, customerLocation);
+    const legs = Array.isArray(route.legs) ? route.legs : [];
+    const distanceMeters = legs.reduce((sum, leg) => sum + Number(leg.distance?.value || 0), 0);
+    const durationSeconds = legs.reduce((sum, leg) => sum + Number(leg.duration?.value || 0), 0);
+    const routeCoordinates = route.overview_polyline?.points ? decodeGooglePolyline(route.overview_polyline.points) : [];
+    return {
+      provider: "google",
+      distanceMeters,
+      durationSeconds,
+      distance: formatRouteDistance(distanceMeters),
+      duration: formatRouteDuration(durationSeconds),
+      routeCoordinates: routeCoordinates.length ? routeCoordinates : [riderLocation, customerLocation]
+    };
+  } catch {
+    return fallbackRouteInfo(riderLocation, customerLocation);
+  }
 }
 
 function sleep(ms) {
@@ -303,7 +416,7 @@ async function ensureOrderColumns() {
        FROM INFORMATION_SCHEMA.COLUMNS
        WHERE TABLE_SCHEMA = DATABASE()
          AND TABLE_NAME = 'orders'
-         AND COLUMN_NAME IN ('tracking_number', 'fulfillment_method', 'delivery_address', 'delivery_latitude', 'delivery_longitude', 'delivery_municipality', 'delivery_province', 'delivery_region', 'delivery_postal_code', 'delivery_place_id', 'delivery_landmark', 'delivery_notes', 'meeting_place', 'meeting_latitude', 'meeting_longitude', 'meetup_date', 'meetup_time', 'meetup_confirmation_status', 'meetup_confirmed_at', 'meetup_customer_note', 'meetup_admin_note', 'meetup_24h_reminder_sent_at', 'meetup_1h_reminder_sent_at', 'subtotal_amount', 'coupon_discount', 'sale_discount', 'shipping_fee', 'shipping_zone', 'shipping_distance_km', 'shipping_rule', 'coupon_code', 'payment_status', 'payment_reference', 'transaction_id', 'paid_at', 'inventory_deducted_at', 'payment_provider', 'checkout_session_id', 'checkout_url', 'payment_intent_id', 'payment_method_id', 'qr_code_url', 'payment_expires_at', 'rejection_reason', 'rejected_at', 'payment_review_required_at', 'payment_review_note', 'order_channel', 'cash_received', 'change_amount', 'pos_cashier_id')`
+         AND COLUMN_NAME IN ('tracking_number', 'fulfillment_method', 'delivery_status', 'rider_id', 'rider_name', 'rider_latitude', 'rider_longitude', 'customer_latitude', 'customer_longitude', 'location_updated_at', 'delivery_address', 'delivery_latitude', 'delivery_longitude', 'delivery_municipality', 'delivery_province', 'delivery_region', 'delivery_postal_code', 'delivery_place_id', 'delivery_landmark', 'delivery_notes', 'meeting_place', 'meeting_latitude', 'meeting_longitude', 'meetup_date', 'meetup_time', 'meetup_confirmation_status', 'meetup_confirmed_at', 'meetup_customer_note', 'meetup_admin_note', 'meetup_24h_reminder_sent_at', 'meetup_1h_reminder_sent_at', 'subtotal_amount', 'coupon_discount', 'sale_discount', 'shipping_fee', 'shipping_zone', 'shipping_distance_km', 'shipping_rule', 'coupon_code', 'payment_status', 'payment_reference', 'transaction_id', 'paid_at', 'inventory_deducted_at', 'payment_provider', 'checkout_session_id', 'checkout_url', 'payment_intent_id', 'payment_method_id', 'qr_code_url', 'payment_expires_at', 'rejection_reason', 'rejected_at', 'payment_review_required_at', 'payment_review_note', 'order_channel', 'cash_received', 'change_amount', 'pos_cashier_id')`
     );
     const columns = new Set(rows.map((row) => row.COLUMN_NAME));
     await safeModifyColumn("orders", "status", "status enum update", `ALTER TABLE orders MODIFY status ${orderStatusEnumSql} NOT NULL DEFAULT 'pending'`);
@@ -317,6 +430,14 @@ async function ensureOrderColumns() {
     if (!columns.has("fulfillment_method")) {
       await query("ALTER TABLE orders ADD COLUMN fulfillment_method ENUM('delivery','pickup') NOT NULL DEFAULT 'delivery' AFTER tracking_number");
     }
+    if (!columns.has("delivery_status")) await query(`ALTER TABLE orders ADD COLUMN delivery_status ${deliveryStatusEnumSql} NOT NULL DEFAULT 'Pending' AFTER fulfillment_method`);
+    if (!columns.has("rider_id")) await query("ALTER TABLE orders ADD COLUMN rider_id INT NULL AFTER delivery_status");
+    if (!columns.has("rider_name")) await query("ALTER TABLE orders ADD COLUMN rider_name VARCHAR(160) NULL AFTER rider_id");
+    if (!columns.has("rider_latitude")) await query("ALTER TABLE orders ADD COLUMN rider_latitude DECIMAL(10,7) NULL AFTER rider_name");
+    if (!columns.has("rider_longitude")) await query("ALTER TABLE orders ADD COLUMN rider_longitude DECIMAL(10,7) NULL AFTER rider_latitude");
+    if (!columns.has("customer_latitude")) await query("ALTER TABLE orders ADD COLUMN customer_latitude DECIMAL(10,7) NULL AFTER rider_longitude");
+    if (!columns.has("customer_longitude")) await query("ALTER TABLE orders ADD COLUMN customer_longitude DECIMAL(10,7) NULL AFTER customer_latitude");
+    if (!columns.has("location_updated_at")) await query("ALTER TABLE orders ADD COLUMN location_updated_at DATETIME NULL AFTER customer_longitude");
     if (!columns.has("delivery_address")) await query("ALTER TABLE orders ADD COLUMN delivery_address VARCHAR(500) NULL AFTER fulfillment_method");
     if (!columns.has("delivery_latitude")) await query("ALTER TABLE orders ADD COLUMN delivery_latitude DECIMAL(10,7) NULL AFTER delivery_address");
     if (!columns.has("delivery_longitude")) await query("ALTER TABLE orders ADD COLUMN delivery_longitude DECIMAL(10,7) NULL AFTER delivery_latitude");
@@ -390,7 +511,9 @@ async function loadDecoratedOrder(orderId, userContext = {}) {
        o.checkout_session_id, o.payment_intent_id, o.qr_code_url, o.payment_expires_at,
        o.rejection_reason, o.rejected_at, o.payment_review_required_at, o.payment_review_note,
        o.cash_received, o.change_amount,
-       o.tracking_number, o.fulfillment_method, o.delivery_address, o.delivery_latitude,
+       o.tracking_number, o.fulfillment_method, o.delivery_status, o.rider_id, o.rider_name,
+       o.rider_latitude, o.rider_longitude, o.customer_latitude, o.customer_longitude,
+       o.location_updated_at, o.delivery_address, o.delivery_latitude,
        o.delivery_longitude, o.delivery_municipality, o.delivery_province, o.delivery_region,
        o.delivery_postal_code, o.delivery_place_id, o.delivery_landmark, o.delivery_notes,
        o.meeting_place, o.meeting_latitude, o.meeting_longitude, o.meetup_date, o.meetup_time,
@@ -440,6 +563,14 @@ router.get("/", requireAuth, requireApproved, asyncHandler(async (req, res) => {
     o.change_amount,
     o.tracking_number,
     o.fulfillment_method,
+    o.delivery_status,
+    o.rider_id,
+    o.rider_name,
+    o.rider_latitude,
+    o.rider_longitude,
+    o.customer_latitude,
+    o.customer_longitude,
+    o.location_updated_at,
     o.delivery_address,
     o.delivery_latitude,
     o.delivery_longitude,
@@ -531,6 +662,14 @@ GROUP BY
     o.change_amount,
     o.tracking_number,
     o.fulfillment_method,
+    o.delivery_status,
+    o.rider_id,
+    o.rider_name,
+    o.rider_latitude,
+    o.rider_longitude,
+    o.customer_latitude,
+    o.customer_longitude,
+    o.location_updated_at,
     o.delivery_address,
     o.delivery_latitude,
     o.delivery_longitude,
@@ -569,6 +708,165 @@ ORDER BY o.created_at DESC`,
     userId: req.user.id,
 });
   res.json(await decorateMeetupEligibility(orders));
+}));
+
+async function loadOrderForTracking(orderId, userContext = {}) {
+  const ownershipFilter = userContext.role === "customer" ? "AND o.user_id = :userId" : "";
+  const rows = await query(
+    `SELECT o.id, o.user_id, o.status, o.fulfillment_method, o.delivery_status,
+            o.delivery_address, o.delivery_latitude, o.delivery_longitude,
+            o.customer_latitude, o.customer_longitude,
+            o.rider_id, o.rider_name, o.rider_latitude, o.rider_longitude, o.location_updated_at
+     FROM orders o
+     WHERE o.id = :orderId
+       ${ownershipFilter}
+     LIMIT 1`,
+    { orderId, userId: userContext.id }
+  );
+  const order = rows[0];
+  if (!order) throw new HttpError(404, "Order not found");
+  if (userContext.role !== "customer" && !["admin", "staff"].includes(userContext.role)) {
+    throw new HttpError(403, "Forbidden");
+  }
+  return order;
+}
+
+function assertDeliveryOrderTrackable(order) {
+  if (String(order.fulfillment_method || "delivery").toLowerCase() !== "delivery") {
+    throw new HttpError(409, "Live tracking is only available for delivery orders.");
+  }
+  const status = normalizeOrderStatus(order.status);
+  if (terminalStatuses.has(status)) throw new HttpError(409, "Live delivery tracking is stopped for this order.");
+  if (status !== "ready" && normalizeOrderStatus(order.delivery_status) !== "out_for_delivery") {
+    throw new HttpError(409, "Live delivery tracking starts when the order is Out for Delivery.");
+  }
+}
+
+function trackingCustomerLocation(order) {
+  return serializeCoordinatePoint(order.customer_latitude ?? order.delivery_latitude, order.customer_longitude ?? order.delivery_longitude)
+    || serializeCoordinatePoint(order.delivery_latitude, order.delivery_longitude);
+}
+
+async function latestRiderLocation(orderId, order = null) {
+  const rows = await query(
+    `SELECT latitude, longitude, shared_at
+     FROM order_live_locations
+     WHERE order_id = :orderId
+       AND source_type = 'rider'
+       AND is_live = TRUE
+     ORDER BY shared_at DESC
+     LIMIT 1`,
+    { orderId }
+  );
+  const row = rows[0];
+  const livePoint = row ? serializeCoordinatePoint(row.latitude, row.longitude) : null;
+  if (livePoint) return { ...livePoint, updatedAt: row.shared_at };
+  const savedPoint = order ? serializeCoordinatePoint(order.rider_latitude, order.rider_longitude) : null;
+  return savedPoint ? { ...savedPoint, updatedAt: order.location_updated_at || null } : null;
+}
+
+router.post("/:id/location", requireAuth, requireApproved, requireRole("admin", "staff"), asyncHandler(async (req, res) => {
+  await ensureOrderColumns();
+  await ensureLiveLocationTable();
+  const orderId = Number(req.params.id);
+  if (!Number.isInteger(orderId) || orderId <= 0) throw new HttpError(400, "A valid order ID is required.");
+  const input = z.object({
+    latitude: z.coerce.number().min(-90).max(90),
+    longitude: z.coerce.number().min(-180).max(180),
+    timestamp: z.string().trim().optional()
+  }).parse(req.body);
+  if (!validCoordinates(input.latitude, input.longitude)) throw new HttpError(400, "A valid rider location is required.");
+  const order = await loadOrderForTracking(orderId, req.user);
+  assertDeliveryOrderTrackable(order);
+  const customerLocation = trackingCustomerLocation(order);
+  if (!customerLocation) throw new HttpError(409, "Customer delivery coordinates are unavailable for this order.");
+  const riderName = String(req.user.display_name || req.user.username || "Rider").trim().slice(0, 160);
+  await query(
+    `INSERT INTO order_live_locations
+       (order_id, user_id, source_type, latitude, longitude, is_live, shared_at, stopped_at)
+     VALUES
+       (:orderId, :userId, 'rider', :latitude, :longitude, TRUE, NOW(), NULL)
+     ON DUPLICATE KEY UPDATE
+       latitude = VALUES(latitude),
+       longitude = VALUES(longitude),
+       is_live = TRUE,
+       shared_at = NOW(),
+       stopped_at = NULL`,
+    { orderId, userId: req.user.id, latitude: input.latitude, longitude: input.longitude }
+  );
+  await query(
+    `UPDATE orders
+     SET delivery_status = 'Out for Delivery',
+         rider_id = :riderId,
+         rider_name = :riderName,
+         rider_latitude = :latitude,
+         rider_longitude = :longitude,
+         customer_latitude = :customerLatitude,
+         customer_longitude = :customerLongitude,
+         location_updated_at = NOW()
+     WHERE id = :orderId`,
+    {
+      orderId,
+      riderId: req.user.id,
+      riderName,
+      latitude: input.latitude,
+      longitude: input.longitude,
+      customerLatitude: customerLocation.latitude,
+      customerLongitude: customerLocation.longitude
+    }
+  );
+  const updatedOrder = await loadDecoratedOrder(orderId, { role: "admin" });
+  const payload = {
+    order_id: orderId,
+    user_id: Number(req.user.id),
+    source_type: "rider",
+    latitude: Number(input.latitude),
+    longitude: Number(input.longitude),
+    updatedAt: new Date().toISOString(),
+    shared_at: new Date().toISOString(),
+    is_live: true
+  };
+  req.app.get("io")?.to(`order-live:${orderId}`).emit("live-location:update", payload);
+  req.app.get("io")?.to("admin").emit("live-location:update", payload);
+  if (order.user_id) req.app.get("io")?.to(`user:${order.user_id}`).emit("order:update", updatedOrder || { id: orderId, delivery_status: "Out for Delivery", rider_latitude: input.latitude, rider_longitude: input.longitude });
+  res.status(201).json({ latitude: Number(input.latitude), longitude: Number(input.longitude), updatedAt: payload.updatedAt, order: updatedOrder });
+}));
+
+router.get("/:id/location", requireAuth, requireApproved, asyncHandler(async (req, res) => {
+  await ensureOrderColumns();
+  await ensureLiveLocationTable();
+  const orderId = Number(req.params.id);
+  if (!Number.isInteger(orderId) || orderId <= 0) throw new HttpError(400, "A valid order ID is required.");
+  const order = await loadOrderForTracking(orderId, req.user);
+  const location = await latestRiderLocation(orderId, order);
+  if (!location) throw new HttpError(404, "Rider location is not available yet.");
+  res.json(location);
+}));
+
+router.get("/:id/route", requireAuth, requireApproved, asyncHandler(async (req, res) => {
+  await ensureOrderColumns();
+  await ensureLiveLocationTable();
+  const orderId = Number(req.params.id);
+  if (!Number.isInteger(orderId) || orderId <= 0) throw new HttpError(400, "A valid order ID is required.");
+  const order = await loadOrderForTracking(orderId, req.user);
+  const riderLocation = await latestRiderLocation(orderId, order);
+  if (!riderLocation) throw new HttpError(404, "Rider location is not available yet.");
+  const customerLocation = trackingCustomerLocation(order);
+  if (!customerLocation) throw new HttpError(409, "Customer delivery coordinates are unavailable for this order.");
+  const route = await googleDirectionsRouteInfo(
+    { latitude: riderLocation.latitude, longitude: riderLocation.longitude },
+    customerLocation
+  );
+  res.json({
+    riderLocation,
+    customerLocation,
+    distance: route.distance || "Unavailable",
+    duration: route.duration || "Unavailable",
+    distanceMeters: route.distanceMeters,
+    durationSeconds: route.durationSeconds,
+    routeCoordinates: route.routeCoordinates,
+    provider: route.provider
+  });
 }));
 
 router.get("/:id/items", requireAuth, requireApproved, asyncHandler(async (req, res) => {
@@ -1020,6 +1318,7 @@ async function rejectOrderWithReason(orderId, reason) {
     await conn.execute(
       `UPDATE orders
        SET status = 'rejected',
+           delivery_status = 'Pending',
            payment_status = ?,
            rejection_reason = ?,
            rejected_at = NOW(),
@@ -1302,8 +1601,32 @@ router.patch("/:id/status", requireAuth, requireRole("admin"), asyncHandler(asyn
   const inventoryResult = status === "completed" && currentStatus !== "completed"
     ? await markOrderCompletedAndDeductInventory(orderId)
     : { inventoryUpdates: [], outOfStockProducts: [] };
+  const nextDeliveryStatus = deliveryStatusForOrderStatus(status);
   if (status !== "completed" || currentStatus === "completed") {
-    await query("UPDATE orders SET status = :status WHERE id = :id", { id: orderId, status });
+    if (status === "ready") {
+      await query(
+        `UPDATE orders
+         SET status = :status,
+             delivery_status = :deliveryStatus,
+             rider_id = COALESCE(rider_id, :riderId),
+             rider_name = COALESCE(rider_name, :riderName),
+             customer_latitude = COALESCE(customer_latitude, delivery_latitude),
+             customer_longitude = COALESCE(customer_longitude, delivery_longitude),
+             location_updated_at = COALESCE(location_updated_at, NOW())
+         WHERE id = :id`,
+        {
+          id: orderId,
+          status,
+          deliveryStatus: nextDeliveryStatus,
+          riderId: req.user.id,
+          riderName: String(req.user.display_name || req.user.username || "Rider").trim().slice(0, 160)
+        }
+      );
+    } else {
+      await query("UPDATE orders SET status = :status, delivery_status = :deliveryStatus WHERE id = :id", { id: orderId, status, deliveryStatus: nextDeliveryStatus });
+    }
+  } else if (status === "completed" && currentStatus !== "completed") {
+    await query("UPDATE orders SET delivery_status = 'Completed' WHERE id = :id", { id: orderId });
   }
   const updatedOrder = await loadDecoratedOrder(orderId, { role: "admin" });
   const title = status === "approved" ? "Order accepted by rider" : status === "ready" ? "Rider is on the way" : status === "completed" ? "Order received" : "Order update";

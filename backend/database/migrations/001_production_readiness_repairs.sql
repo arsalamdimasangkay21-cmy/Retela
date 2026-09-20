@@ -134,6 +134,14 @@ CALL retela_add_column_if_missing('orders', 'rejected_at', 'rejected_at DATETIME
 CALL retela_add_column_if_missing('orders', 'payment_review_required_at', 'payment_review_required_at DATETIME NULL');
 CALL retela_add_column_if_missing('orders', 'payment_review_note', 'payment_review_note VARCHAR(255) NULL');
 CALL retela_add_column_if_missing('orders', 'tracking_number', 'tracking_number VARCHAR(120) NULL');
+CALL retela_add_column_if_missing('orders', 'delivery_status', 'delivery_status ENUM(''Pending'',''Accepted'',''Out for Delivery'',''Completed'') NOT NULL DEFAULT ''Pending''');
+CALL retela_add_column_if_missing('orders', 'rider_id', 'rider_id INT NULL');
+CALL retela_add_column_if_missing('orders', 'rider_name', 'rider_name VARCHAR(160) NULL');
+CALL retela_add_column_if_missing('orders', 'rider_latitude', 'rider_latitude DECIMAL(10,7) NULL');
+CALL retela_add_column_if_missing('orders', 'rider_longitude', 'rider_longitude DECIMAL(10,7) NULL');
+CALL retela_add_column_if_missing('orders', 'customer_latitude', 'customer_latitude DECIMAL(10,7) NULL');
+CALL retela_add_column_if_missing('orders', 'customer_longitude', 'customer_longitude DECIMAL(10,7) NULL');
+CALL retela_add_column_if_missing('orders', 'location_updated_at', 'location_updated_at DATETIME NULL');
 
 CREATE TABLE IF NOT EXISTS order_live_locations (
   id INT AUTO_INCREMENT PRIMARY KEY,

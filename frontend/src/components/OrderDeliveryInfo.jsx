@@ -207,7 +207,32 @@ async function fetchDrivingRoute(origin, destination, { signal, cache } = {}) {
   return route;
 }
 
-export default function OrderDeliveryInfo({ order, title = "Delivery Information", mapLabel = "View Location", routeEnabled = true, liveRouteEnabled = false, canShareLiveLocation = false, routeInitiallyVisible = true, onRouteMetrics }) {
+function normalizeBackendRoute(data = {}) {
+  const coordinates = Array.isArray(data.routeCoordinates)
+    ? data.routeCoordinates
+      .map((point) => ({
+        latitude: finiteCoordinate(point.latitude),
+        longitude: finiteCoordinate(point.longitude)
+      }))
+      .filter((point) => validMapCoordinate(point.latitude, point.longitude))
+    : [];
+  return {
+    provider: data.provider || "retela",
+    directions: null,
+    coordinates,
+    distanceMeters: Number.isFinite(Number(data.distanceMeters)) ? Number(data.distanceMeters) : null,
+    durationSeconds: Number.isFinite(Number(data.durationSeconds)) ? Number(data.durationSeconds) : null
+  };
+}
+
+async function fetchOrderLiveRoute(orderId, { signal } = {}) {
+  const { data } = await api.get(`/orders/${orderId}/route`, { signal });
+  const route = normalizeBackendRoute(data);
+  if (!route.coordinates.length) throw new Error("Live route coordinates are unavailable.");
+  return route;
+}
+
+export default function OrderDeliveryInfo({ order, title = "Delivery Information", mapLabel = "View Location", routeEnabled = true, liveRouteEnabled = false, canShareLiveLocation = false, autoStartTracking = false, routeInitiallyVisible = true, onRouteMetrics }) {
   const snapshot = orderDeliverySnapshot(order);
   const mapUrl = deliveryMapUrl(snapshot);
   return (
@@ -237,7 +262,7 @@ export default function OrderDeliveryInfo({ order, title = "Delivery Information
           </div>
         ) : null}
       </div>
-      {routeEnabled ? <InlineDeliveryRoute order={order} snapshot={snapshot} liveRouteEnabled={liveRouteEnabled} canShareLiveLocation={canShareLiveLocation} routeInitiallyVisible={routeInitiallyVisible} onRouteMetrics={onRouteMetrics} /> : mapUrl ? (
+      {routeEnabled ? <InlineDeliveryRoute order={order} snapshot={snapshot} liveRouteEnabled={liveRouteEnabled} canShareLiveLocation={canShareLiveLocation} autoStartTracking={autoStartTracking} routeInitiallyVisible={routeInitiallyVisible} onRouteMetrics={onRouteMetrics} /> : mapUrl ? (
         <a className="order-delivery-map-button" href={mapUrl} target="_blank" rel="noreferrer">
           <MapPin size={15} /> {mapLabel}
         </a>
@@ -246,7 +271,7 @@ export default function OrderDeliveryInfo({ order, title = "Delivery Information
   );
 }
 
-function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canShareLiveLocation = false, routeInitiallyVisible = true, onRouteMetrics }) {
+function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canShareLiveLocation = false, autoStartTracking = false, routeInitiallyVisible = true, onRouteMetrics }) {
   const [destinationSnapshot, setDestinationSnapshot] = useState(snapshot);
   const [settings, setSettings] = useState(null);
   const [route, setRoute] = useState(null);
@@ -274,12 +299,16 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
   const routeRequestRef = useRef(0);
   const routeCacheRef = useRef(new Map());
   const liveRouteRefreshRef = useRef({ point: null, at: 0 });
+  const autoStartedRef = useRef(null);
 
   const shop = useMemo(() => normalizeShopLocation(settings || {}), [settings]);
   const hasShopCoordinates = shop.latitude !== null && shop.longitude !== null;
   const hasDestinationCoordinates = validMapCoordinate(destinationSnapshot.latitude, destinationSnapshot.longitude);
   const terminalOrder = ["completed", "cancelled", "payment_failed", "rejected"].includes(String(order?.status || "").toLowerCase());
-  const liveRouteUsable = liveRouteEnabled && !terminalOrder && hasDestinationCoordinates;
+  const orderStatus = String(order?.status || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+  const deliveryStatus = String(order?.delivery_status || order?.deliveryStatus || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+  const outForDelivery = orderStatus === "ready" || orderStatus === "out_for_delivery" || deliveryStatus === "out_for_delivery";
+  const liveRouteUsable = liveRouteEnabled && outForDelivery && !terminalOrder && hasDestinationCoordinates;
 
   useEffect(() => {
     currentOrderIdRef.current = Number(order?.id || 0) || null;
@@ -310,6 +339,23 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
     setLiveLocation(next);
     setLocating(false);
   }, [order?.id]);
+
+  const fetchLatestLiveLocation = useCallback(() => {
+    if (!liveRouteEnabled || !order?.id) return Promise.resolve(null);
+    return api.get(`/orders/${order.id}/location`)
+      .then(({ data }) => {
+        const payload = {
+          ...data,
+          order_id: Number(order.id),
+          source_type: "rider",
+          is_live: true,
+          shared_at: data?.updatedAt || data?.updated_at || data?.shared_at || new Date().toISOString()
+        };
+        applyLiveLocation(payload);
+        return payload;
+      })
+      .catch(() => null);
+  }, [applyLiveLocation, liveRouteEnabled, order?.id]);
 
   const leaveLiveSocket = useCallback(() => {
     const socket = socketRef.current;
@@ -346,17 +392,13 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
   useEffect(() => {
     if (!liveRouteEnabled || !order?.id) return undefined;
     joinLiveSocket();
-    api.get(`/live-locations/orders/${order.id}`)
-      .then(({ data }) => {
-        const rows = Array.isArray(data?.locations) ? data.locations : [];
-        const rider = rows.find((row) => row.source_type === "rider");
-        if (rider) applyLiveLocation(rider);
-      })
-      .catch(() => {});
+    fetchLatestLiveLocation();
+    const intervalId = window.setInterval(fetchLatestLiveLocation, 5000);
     return () => {
+      window.clearInterval(intervalId);
       leaveLiveSocket();
     };
-  }, [applyLiveLocation, joinLiveSocket, leaveLiveSocket, liveRouteEnabled, order?.id]);
+  }, [fetchLatestLiveLocation, joinLiveSocket, leaveLiveSocket, liveRouteEnabled, order?.id]);
 
   useEffect(() => {
     setDestinationSnapshot(snapshot);
@@ -432,11 +474,12 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
   }, [destinationSnapshot.latitude, destinationSnapshot.longitude, hasDestinationCoordinates, hasShopCoordinates, loadingSettings, routeRequested, shop.latitude, shop.longitude]);
 
   useEffect(() => {
-    if (!route || typeof onRouteMetrics !== "function") return;
-    const distanceKm = Number.isFinite(route.distanceMeters) ? Math.round((route.distanceMeters / 1000) * 10) / 10 : null;
-    const durationMinutes = Number.isFinite(route.durationSeconds) ? Math.max(1, Math.round(route.durationSeconds / 60)) : null;
+    const metricsRoute = liveRoute || route;
+    if (!metricsRoute || typeof onRouteMetrics !== "function") return;
+    const distanceKm = Number.isFinite(metricsRoute.distanceMeters) ? Math.round((metricsRoute.distanceMeters / 1000) * 10) / 10 : null;
+    const durationMinutes = Number.isFinite(metricsRoute.durationSeconds) ? Math.max(1, Math.round(metricsRoute.durationSeconds / 60)) : null;
     onRouteMetrics({ distanceKm, durationMinutes });
-  }, [onRouteMetrics, route]);
+  }, [liveRoute, onRouteMetrics, route]);
 
   useEffect(() => {
     if (!routeVisible || !liveRouteUsable || !liveLocation) return undefined;
@@ -448,7 +491,8 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
     const requestId = routeRequestRef.current + 1;
     routeRequestRef.current = requestId;
     const controller = new AbortController();
-    fetchDrivingRoute(liveLocation, destinationSnapshot, { signal: controller.signal, cache: routeCacheRef.current })
+    fetchOrderLiveRoute(order.id, { signal: controller.signal })
+      .catch(() => fetchDrivingRoute(liveLocation, destinationSnapshot, { signal: controller.signal, cache: routeCacheRef.current }))
       .then((routeData) => {
         if (requestId !== routeRequestRef.current) return;
         setLiveRoute(routeData);
@@ -458,7 +502,7 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
         if (requestError?.name !== "AbortError") setLiveError("Live road route is temporarily unavailable.");
       });
     return () => controller.abort();
-  }, [destinationSnapshot.latitude, destinationSnapshot.longitude, liveLocation, liveRoute, liveRouteUsable, routeVisible]);
+  }, [destinationSnapshot.latitude, destinationSnapshot.longitude, liveLocation, liveRoute, liveRouteUsable, order?.id, routeVisible]);
 
   useEffect(() => {
     if (!liveLocation) return;
@@ -508,15 +552,12 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
     lastPublishedRef.current = { point, at: now };
     const heading = point.heading ?? bearingBetween(previous, point) ?? headingRef.current;
     const payload = {
-      source_type: "rider",
       latitude: point.latitude,
       longitude: point.longitude,
-      heading,
-      speed: point.speed,
-      accuracy: point.accuracy
+      timestamp: new Date().toISOString()
     };
-    applyLiveLocation({ ...payload, order_id: Number(order.id), user_id: 0, is_live: true, shared_at: new Date().toISOString() });
-    api.post(`/live-locations/orders/${order.id}`, payload).catch((requestError) => {
+    applyLiveLocation({ ...payload, heading, speed: point.speed, accuracy: point.accuracy, order_id: Number(order.id), user_id: 0, source_type: "rider", is_live: true, shared_at: new Date().toISOString() });
+    api.post(`/orders/${order.id}/location`, payload).catch((requestError) => {
       setLiveError(getApiErrorMessage(requestError, "Could not publish live location."));
     });
   }
@@ -536,19 +577,13 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
     setTrackingActive(true);
     setLocating(true);
     joinLiveSocket();
-    api.get(`/live-locations/orders/${order.id}`)
-      .then(({ data }) => {
-        const rows = Array.isArray(data?.locations) ? data.locations : [];
-        const rider = rows.find((row) => row.source_type === "rider");
-        if (rider) applyLiveLocation(rider);
-      })
-      .catch(() => {});
+    fetchLatestLiveLocation();
     watchIdRef.current = navigator.geolocation.watchPosition(
       publishPosition,
       (geoError) => {
         setLocating(false);
         const messages = {
-          1: "Location permission denied. Allow location access to share the rider live route.",
+          1: "Location permission is required for delivery tracking.",
           2: "Live location is unavailable on this device.",
           3: "Live location timed out. Try again when GPS is ready."
         };
@@ -557,6 +592,14 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
       { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 }
     );
   }
+
+  useEffect(() => {
+    const orderId = Number(order?.id || 0);
+    if (!autoStartTracking || !canShareLiveLocation || !liveRouteUsable || trackingActive || locating || !orderId) return;
+    if (autoStartedRef.current === orderId) return;
+    autoStartedRef.current = orderId;
+    startLiveTracking();
+  }, [autoStartTracking, canShareLiveLocation, liveRouteUsable, locating, order?.id, trackingActive]);
 
   function stopLiveTracking({ notifyServer = true } = {}) {
     if (watchIdRef.current !== null && navigator.geolocation) {
@@ -693,6 +736,7 @@ function DeliveryRouteMap({ shop, destination, route, liveLocation = null, follo
   const containerRef = useRef(null);
   const mapRef = useRef(null);
   const directionsRendererRef = useRef(null);
+  const routePolylineRef = useRef(null);
   const shopMarkerRef = useRef(null);
   const customerMarkerRef = useRef(null);
   const riderMarkerRef = useRef(null);
@@ -710,6 +754,7 @@ function DeliveryRouteMap({ shop, destination, route, liveLocation = null, follo
     bounds.extend({ lat: Number(destination.latitude), lng: Number(destination.longitude) });
     if (includeRider && liveLocation) bounds.extend({ lat: Number(liveLocation.latitude), lng: Number(liveLocation.longitude) });
     route?.directions?.routes?.[0]?.overview_path?.forEach((point) => bounds.extend(point));
+    route?.coordinates?.forEach((point) => bounds.extend({ lat: Number(point.latitude), lng: Number(point.longitude) }));
     lastBoundsRef.current = bounds;
     map.fitBounds(bounds, { top: 64, right: 48, bottom: 58, left: 48 });
     window.setTimeout(() => {
@@ -770,10 +815,12 @@ function DeliveryRouteMap({ shop, destination, route, liveLocation = null, follo
       resizeObserverRef.current?.disconnect();
       resizeObserverRef.current = null;
       directionsRendererRef.current?.setMap(null);
+      routePolylineRef.current?.setMap(null);
       shopMarkerRef.current?.setMap(null);
       customerMarkerRef.current?.setMap(null);
       riderMarkerRef.current?.setMap(null);
       directionsRendererRef.current = null;
+      routePolylineRef.current = null;
       shopMarkerRef.current = null;
       customerMarkerRef.current = null;
       riderMarkerRef.current = null;
@@ -803,14 +850,30 @@ function DeliveryRouteMap({ shop, destination, route, liveLocation = null, follo
   }, [destination.latitude, destination.longitude, fitMap, liveLocation, shop.latitude, shop.longitude]);
 
   useEffect(() => {
+    const google = window.google;
     const renderer = directionsRendererRef.current;
-    if (!renderer) return;
+    const map = mapRef.current;
+    if (!renderer || !google?.maps || !map) return;
+    routePolylineRef.current?.setMap(null);
+    routePolylineRef.current = null;
     if (route?.directions) {
+      renderer.setMap(map);
       renderer.setDirections(route.directions);
+      window.setTimeout(() => fitMap(Boolean(liveLocation)), 80);
+    } else if (route?.coordinates?.length) {
+      renderer.setMap(null);
+      routePolylineRef.current = new google.maps.Polyline({
+        map,
+        path: route.coordinates.map((point) => ({ lat: Number(point.latitude), lng: Number(point.longitude) })),
+        geodesic: true,
+        strokeColor: "#0b8f59",
+        strokeOpacity: 0.92,
+        strokeWeight: 5
+      });
       window.setTimeout(() => fitMap(Boolean(liveLocation)), 80);
     } else {
       renderer.setMap(null);
-      renderer.setMap(mapRef.current);
+      renderer.setMap(map);
       fitMap(Boolean(liveLocation));
     }
   }, [fitMap, liveLocation, route]);

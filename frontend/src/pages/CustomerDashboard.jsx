@@ -3109,7 +3109,7 @@ function CustomerOrderModal({ loading, selectedOrder, onPay, payingOrderId, onMe
   const order = selectedOrder?.order;
   const cancelled = isOrderCancelled(order);
   const deliveryTrackingEnabled = Boolean(order?.fulfillment_method === "delivery"
-    && ["approved", "processing", "ready", "paid"].includes(normalizeOrderStatus(order?.status)));
+    && (normalizeOrderStatus(order?.status) === "ready" || normalizeOrderStatus(order?.delivery_status || order?.deliveryStatus) === "out_for_delivery"));
   const meetingPlace = String(order?.meeting_place || "").trim();
   const meetupScheduleSaved = Boolean(meetingPlace && order?.meetup_date && order?.meetup_time);
   const meetupEligibility = orderMeetupEligibility(order);
