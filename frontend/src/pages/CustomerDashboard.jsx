@@ -179,12 +179,23 @@ function deliveryLocationFromOrder(order) {
 function deliveryMapUrl(location) {
   const normalized = normalizeDeliveryLocation(location);
   if (hasDeliveryCoordinates(normalized)) {
-    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${normalized.latitude},${normalized.longitude}`)}`;
+    return `https://www.openstreetmap.org/?mlat=${encodeURIComponent(normalized.latitude)}&mlon=${encodeURIComponent(normalized.longitude)}#map=16/${encodeURIComponent(normalized.latitude)}/${encodeURIComponent(normalized.longitude)}`;
   }
   if (normalized.address) {
-    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(normalized.address)}`;
+    return `https://www.openstreetmap.org/search?query=${encodeURIComponent(normalized.address)}`;
   }
   return "";
+}
+
+function openStreetMapEmbedUrl(latitude, longitude) {
+  const lat = Number(latitude);
+  const lng = Number(longitude);
+  const valid = Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180;
+  const centerLat = valid ? lat : 7.1907;
+  const centerLng = valid ? lng : 124.5308;
+  const delta = 0.006;
+  const bbox = [centerLng - delta, centerLat - delta, centerLng + delta, centerLat + delta].map((value) => value.toFixed(6)).join(",");
+  return `https://www.openstreetmap.org/export/embed.html?bbox=${encodeURIComponent(bbox)}&layer=mapnik&marker=${encodeURIComponent(`${centerLat},${centerLng}`)}`;
 }
 
 function deliverySafetyPolicyFromShop(shop) {
@@ -3442,7 +3453,7 @@ function AboutShop({ shop }) {
   const stats = shop?.stats || {};
   const description = general.shopDescription || "AI-assisted thrift ecommerce for curated apparel and customer support.";
   const address = about.fullAddress || general.shopAddress || "Tela to Pera Thrift Shop, Philippines";
-  const mapSrc = `https://www.google.com/maps?q=${encodeURIComponent(address)}&output=embed`;
+  const mapSrc = openStreetMapEmbedUrl(general.shopLatitude, general.shopLongitude);
   const instagramLabel = about.instagramLink ? instagramDisplayLabel(about.instagramLink) : "Not set";
   const locationLabel = about.landmark || address;
 

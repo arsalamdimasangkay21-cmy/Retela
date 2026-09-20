@@ -1,60 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
 import { LocateFixed, Loader2, MapPin, Radio, RotateCcw, Route, Square } from "lucide-react";
+import { MapContainer, Marker, Polyline, TileLayer, useMap } from "react-leaflet";
 import { api, cachedGet, getApiErrorMessage, getStoredAuthToken } from "../api/client";
 import { acquireSocket, releaseSocket } from "../api/socket";
-import { validMapCoordinate } from "../config/maps";
-
-const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || "";
-let googleMapsPromise;
-
-function loadGoogleMaps() {
-  if (!GOOGLE_MAPS_API_KEY) return Promise.reject(new Error("Google Maps API key is not configured."));
-  if (window.google?.maps?.DirectionsService) return Promise.resolve(window.google);
-  if (googleMapsPromise) return googleMapsPromise;
-
-  let createdScriptId = "";
-  googleMapsPromise = new Promise((resolve, reject) => {
-    const existing = document.getElementById("retela-google-maps-places") || document.getElementById("retela-google-maps-delivery");
-    let timeoutId;
-    const onReady = () => {
-      window.clearTimeout(timeoutId);
-      if (window.google?.maps?.DirectionsService) resolve(window.google);
-      else reject(new Error("Google Maps did not load."));
-    };
-    const onError = () => {
-      window.clearTimeout(timeoutId);
-      reject(new Error("Google Maps failed to load."));
-    };
-
-    if (existing) {
-      if (window.google?.maps?.DirectionsService) {
-        resolve(window.google);
-        return;
-      }
-      existing.addEventListener("load", onReady, { once: true });
-      existing.addEventListener("error", onError, { once: true });
-      timeoutId = window.setTimeout(onError, 12000);
-      return;
-    }
-
-    const script = document.createElement("script");
-    script.id = "retela-google-maps-places";
-    createdScriptId = script.id;
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(GOOGLE_MAPS_API_KEY)}&libraries=places&v=weekly`;
-    script.async = true;
-    script.defer = true;
-    script.addEventListener("load", onReady, { once: true });
-    script.addEventListener("error", onError, { once: true });
-    timeoutId = window.setTimeout(onError, 12000);
-    document.head.appendChild(script);
-  }).catch((error) => {
-    if (createdScriptId) document.getElementById(createdScriptId)?.remove();
-    googleMapsPromise = undefined;
-    throw error;
-  });
-
-  return googleMapsPromise;
-}
+import { OSM_ATTRIBUTION, OSM_TILE_URL, routeUrl, validMapCoordinate } from "../config/maps";
 
 function finiteCoordinate(value) {
   const number = Number(value);
@@ -79,10 +30,10 @@ function orderDeliverySnapshot(order = {}) {
 
 function deliveryMapUrl(snapshot) {
   if (snapshot.latitude !== null && snapshot.longitude !== null) {
-    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${snapshot.latitude},${snapshot.longitude}`)}`;
+    return `https://www.openstreetmap.org/?mlat=${encodeURIComponent(snapshot.latitude)}&mlon=${encodeURIComponent(snapshot.longitude)}#map=16/${encodeURIComponent(snapshot.latitude)}/${encodeURIComponent(snapshot.longitude)}`;
   }
   if (snapshot.address) {
-    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(snapshot.address)}`;
+    return `https://www.openstreetmap.org/search?query=${encodeURIComponent(snapshot.address)}`;
   }
   return "";
 }
@@ -177,41 +128,31 @@ function routeAbortError() {
 async function fetchDrivingRoute(origin, destination, { signal, cache } = {}) {
   const key = routeCacheKey(origin, destination);
   if (cache?.has(key)) return cache.get(key);
-  const google = await loadGoogleMaps();
   if (signal?.aborted) throw routeAbortError();
   console.log("Route request:", {
     origin: { latitude: Number(origin.latitude), longitude: Number(origin.longitude) },
     destination: { latitude: Number(destination.latitude), longitude: Number(destination.longitude) }
   });
-  const route = await new Promise((resolve, reject) => {
-    const service = new google.maps.DirectionsService();
-    const abort = () => reject(routeAbortError());
-    signal?.addEventListener("abort", abort, { once: true });
-    service.route({
-      origin: { lat: Number(origin.latitude), lng: Number(origin.longitude) },
-      destination: { lat: Number(destination.latitude), lng: Number(destination.longitude) },
-      travelMode: google.maps.TravelMode.DRIVING,
-      provideRouteAlternatives: false
-    }, (result, status) => {
-      signal?.removeEventListener("abort", abort);
-      if (signal?.aborted) return reject(routeAbortError());
-      if (status !== google.maps.DirectionsStatus.OK || !result?.routes?.[0]) {
-        reject(new Error(status === google.maps.DirectionsStatus.ZERO_RESULTS ? "No driving route is available for these locations." : `Google Directions failed: ${status}`));
-        return;
-      }
-      const legs = result.routes[0].legs || [];
-      const primaryLeg = legs[0] || {};
-      resolve({
-        provider: "google",
-        directions: result,
-        coordinates: (result.routes[0].overview_path || []).map((point) => ({ latitude: point.lat(), longitude: point.lng() })),
-        distanceMeters: legs.reduce((sum, leg) => sum + Number(leg.distance?.value || 0), 0),
-        durationSeconds: legs.reduce((sum, leg) => sum + Number(leg.duration?.value || 0), 0),
-        distanceText: primaryLeg.distance?.text || "",
-        durationText: primaryLeg.duration?.text || ""
-      });
-    });
-  });
+  const response = await fetch(routeUrl(origin, destination), { signal });
+  if (!response.ok) throw new Error("Road route is temporarily unavailable.");
+  const data = await response.json();
+  const [primaryRoute] = Array.isArray(data.routes) ? data.routes : [];
+  const coordinates = primaryRoute?.geometry?.coordinates;
+  if (data.code !== "Ok" || !Array.isArray(coordinates) || !coordinates.length) {
+    throw new Error(data.message || "No driving route is available for these locations.");
+  }
+  const distanceMeters = Number(primaryRoute.distance);
+  const durationSeconds = Number(primaryRoute.duration);
+  const route = {
+    provider: "osrm",
+    coordinates: coordinates
+      .map(([longitude, latitude]) => ({ latitude: Number(latitude), longitude: Number(longitude) }))
+      .filter((point) => validMapCoordinate(point.latitude, point.longitude)),
+    distanceMeters,
+    durationSeconds,
+    distanceText: Number.isFinite(distanceMeters) ? `${(distanceMeters / 1000).toFixed(1)} km` : "",
+    durationText: Number.isFinite(durationSeconds) ? `${Math.max(1, Math.round(durationSeconds / 60))} minutes` : ""
+  };
   if (cache && key) cache.set(key, route);
   return route;
 }
@@ -429,7 +370,7 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
     if (import.meta.env.DEV && hasShopCoordinates && hasDestinationCoordinates) {
       console.info("[delivery-map] shop", { latitude: shop.latitude, longitude: shop.longitude });
       console.info("[delivery-map] customer", { latitude: destinationSnapshot.latitude, longitude: destinationSnapshot.longitude });
-      console.info("[route] provider", GOOGLE_MAPS_API_KEY ? "Google Directions" : "Google Maps key missing");
+      console.info("[route] provider", "OSRM");
     }
   }, [destinationSnapshot.latitude, destinationSnapshot.longitude, hasDestinationCoordinates, hasShopCoordinates, shop.latitude, shop.longitude]);
 
@@ -646,6 +587,9 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
 
   const activeRoute = routeVisible ? (liveRoute || (liveRouteEnabled ? null : route)) : null;
   const showLiveLocation = liveRouteEnabled ? displayedLiveLocation : null;
+  const mapRiderPosition = showLiveLocation
+    ? { lat: showLiveLocation.latitude, lng: showLiveLocation.longitude, heading: showLiveLocation.heading, shared_at: showLiveLocation.shared_at }
+    : riderPosition;
   const updatedText = displayedLiveLocation ? formatUpdatedAgo(displayedLiveLocation.shared_at) : "Waiting for live location";
   const routeButtonLabel = loadingRoute && routeVisible ? "Loading Route..." : routeVisible ? "Hide Route" : "Show Routes";
   const distanceValue = activeRoute
@@ -687,12 +631,12 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
               shop={shop}
               destination={destinationSnapshot}
               route={activeRoute}
-              riderPosition={riderPosition}
+              riderPosition={mapRiderPosition}
               followRider={followRider}
             />
             <div className="retela-route-metrics">
               <RouteMetric label="Distance" value={distanceValue} />
-              <RouteMetric label="Estimated travel" value={durationValue} />
+              <RouteMetric label="Estimated arrival" value={durationValue} />
             </div>
             {liveRouteEnabled ? (
               <div className="retela-live-route-panel">
@@ -753,184 +697,64 @@ function RouteMetric({ label, value }) {
 }
 
 function DeliveryRouteMap({ shop, destination, route, riderPosition = null, followRider = false }) {
-  const containerRef = useRef(null);
   const mapRef = useRef(null);
-  const directionsRendererRef = useRef(null);
-  const routePolylineRef = useRef(null);
-  const shopMarkerRef = useRef(null);
-  const customerMarkerRef = useRef(null);
-  const riderMarkerRef = useRef(null);
-  const resizeObserverRef = useRef(null);
-  const lastBoundsRef = useRef(null);
-  const [mapState, setMapState] = useState("loading");
-  const [mapError, setMapError] = useState("");
+  const shopPosition = useMemo(() => [Number(shop.latitude), Number(shop.longitude)], [shop.latitude, shop.longitude]);
+  const destinationPosition = useMemo(() => [Number(destination.latitude), Number(destination.longitude)], [destination.latitude, destination.longitude]);
+  const riderLatLng = riderPosition && validMapCoordinate(riderPosition.lat, riderPosition.lng)
+    ? [Number(riderPosition.lat), Number(riderPosition.lng)]
+    : null;
+  const routePositions = useMemo(() => (
+    Array.isArray(route?.coordinates)
+      ? route.coordinates
+        .filter((point) => validMapCoordinate(point.latitude, point.longitude))
+        .map((point) => [Number(point.latitude), Number(point.longitude)])
+      : []
+  ), [route]);
+  const shopIcon = useMemo(() => deliveryMarkerIcon("shop"), []);
+  const customerIcon = useMemo(() => deliveryMarkerIcon("customer"), []);
+  const riderIcon = useMemo(() => deliveryMarkerIcon("rider", riderPosition?.heading), [riderPosition?.heading]);
 
   const fitMap = useCallback((includeRider = false) => {
-    const google = window.google;
     const map = mapRef.current;
-    if (!google?.maps || !map) return;
-    const bounds = new google.maps.LatLngBounds();
-    bounds.extend({ lat: Number(shop.latitude), lng: Number(shop.longitude) });
-    bounds.extend({ lat: Number(destination.latitude), lng: Number(destination.longitude) });
-    if (includeRider && riderPosition) bounds.extend({ lat: Number(riderPosition.lat), lng: Number(riderPosition.lng) });
-    route?.directions?.routes?.[0]?.overview_path?.forEach((point) => bounds.extend(point));
-    route?.coordinates?.forEach((point) => bounds.extend({ lat: Number(point.latitude), lng: Number(point.longitude) }));
-    lastBoundsRef.current = bounds;
-    map.fitBounds(bounds, { top: 64, right: 48, bottom: 58, left: 48 });
-    window.setTimeout(() => {
-      if (map.getZoom() > 17) map.setZoom(17);
-      if (map.getZoom() < 10) map.setZoom(10);
-    }, 60);
-  }, [destination.latitude, destination.longitude, riderPosition, route, shop.latitude, shop.longitude]);
-
-  useEffect(() => {
-    const node = containerRef.current;
-    if (!node) return undefined;
-    let active = true;
-    loadGoogleMaps()
-      .then((google) => {
-        if (!active || !node) return;
-        const center = { lat: Number(shop.latitude), lng: Number(shop.longitude) };
-        const map = new google.maps.Map(node, {
-          center,
-          zoom: 14,
-          clickableIcons: false,
-          fullscreenControl: false,
-          mapTypeControl: false,
-          streetViewControl: false,
-          rotateControl: false,
-          scaleControl: true,
-          zoomControl: false,
-          gestureHandling: "greedy",
-          backgroundColor: "#dfeee5",
-          styles: [
-            { featureType: "poi.business", stylers: [{ visibility: "simplified" }] },
-            { featureType: "transit", stylers: [{ visibility: "off" }] }
-          ]
-        });
-        mapRef.current = map;
-        directionsRendererRef.current = new google.maps.DirectionsRenderer({
-          map,
-          suppressMarkers: true,
-          preserveViewport: true,
-          polylineOptions: {
-            strokeColor: "#2563eb",
-            strokeOpacity: 0.92,
-            strokeWeight: 5
-          }
-        });
-        shopMarkerRef.current = createDeliveryMarker(google, map, shop, "shop");
-        customerMarkerRef.current = createDeliveryMarker(google, map, destination, "customer");
-        setMapState("ready");
-        window.setTimeout(() => fitMap(Boolean(riderPosition)), 120);
-      })
-      .catch((error) => {
-        if (!active) return;
-        setMapError(error?.message || "Google Maps could not be loaded.");
-        setMapState("error");
-      });
-
-    return () => {
-      active = false;
-      resizeObserverRef.current?.disconnect();
-      resizeObserverRef.current = null;
-      directionsRendererRef.current?.setMap(null);
-      routePolylineRef.current?.setMap(null);
-      shopMarkerRef.current?.setMap(null);
-      customerMarkerRef.current?.setMap(null);
-      riderMarkerRef.current?.setMap(null);
-      directionsRendererRef.current = null;
-      routePolylineRef.current = null;
-      shopMarkerRef.current = null;
-      customerMarkerRef.current = null;
-      riderMarkerRef.current = null;
-      mapRef.current = null;
-    };
-  }, []);
-
-  useEffect(() => {
-    const node = containerRef.current;
-    const map = mapRef.current;
-    if (!node || !map || typeof window.ResizeObserver === "undefined") return undefined;
-    const observer = new window.ResizeObserver(() => {
-      window.google?.maps?.event?.trigger(map, "resize");
-      if (lastBoundsRef.current) map.fitBounds(lastBoundsRef.current, { top: 64, right: 48, bottom: 58, left: 48 });
-    });
-    observer.observe(node);
-    resizeObserverRef.current = observer;
-    return () => observer.disconnect();
-  }, [mapState]);
-
-  useEffect(() => {
-    const google = window.google;
-    if (!google?.maps || !mapRef.current) return;
-    shopMarkerRef.current?.setPosition({ lat: Number(shop.latitude), lng: Number(shop.longitude) });
-    customerMarkerRef.current?.setPosition({ lat: Number(destination.latitude), lng: Number(destination.longitude) });
-    fitMap(false);
-  }, [destination.latitude, destination.longitude, shop.latitude, shop.longitude]);
-
-  useEffect(() => {
-    const google = window.google;
-    const renderer = directionsRendererRef.current;
-    const map = mapRef.current;
-    if (!renderer || !google?.maps || !map) return;
-    routePolylineRef.current?.setMap(null);
-    routePolylineRef.current = null;
-    if (route?.directions) {
-      renderer.setMap(map);
-      renderer.setDirections(route.directions);
-      window.setTimeout(() => fitMap(Boolean(riderPosition)), 80);
-    } else if (route?.coordinates?.length) {
-      renderer.setMap(null);
-      routePolylineRef.current = new google.maps.Polyline({
-        map,
-        path: route.coordinates.map((point) => ({ lat: Number(point.latitude), lng: Number(point.longitude) })),
-        geodesic: true,
-        strokeColor: "#2563eb",
-        strokeOpacity: 0.92,
-        strokeWeight: 5
-      });
-      window.setTimeout(() => fitMap(Boolean(riderPosition)), 80);
-    } else {
-      renderer.setMap(null);
-      renderer.setMap(map);
-      fitMap(Boolean(riderPosition));
-    }
-  }, [route]);
-
-  useEffect(() => {
-    const google = window.google;
-    const map = mapRef.current;
-    if (!google?.maps || !map) return;
-    if (!riderPosition) {
-      riderMarkerRef.current?.setMap(null);
-      riderMarkerRef.current = null;
-      return;
-    }
-    console.log("MAP RIDER POSITION:", riderPosition);
-    const position = { lat: Number(riderPosition.lat), lng: Number(riderPosition.lng) };
-    if (!riderMarkerRef.current) {
-      riderMarkerRef.current = createDeliveryMarker(google, map, { latitude: riderPosition.lat, longitude: riderPosition.lng, heading: riderPosition.heading }, "rider");
-    }
-    riderMarkerRef.current.setPosition(position);
-    riderMarkerRef.current.setIcon(deliveryMarkerIcon(google, "rider", riderPosition.heading));
-    if (followRider) {
-      map.panTo(position);
-      if (Number(map.getZoom() || 0) < 16) map.setZoom(16);
-    }
-  }, [followRider, riderPosition]);
+    if (!map) return;
+    const points = [shopPosition, destinationPosition, ...routePositions];
+    if (includeRider && riderLatLng) points.push(riderLatLng);
+    const bounds = L.latLngBounds(points);
+    if (!bounds.isValid()) return;
+    map.fitBounds(bounds, { paddingTopLeft: [48, 64], paddingBottomRight: [48, 58], maxZoom: 17 });
+  }, [destinationPosition, riderLatLng, routePositions, shopPosition]);
 
   function zoomBy(delta) {
     const map = mapRef.current;
     if (!map) return;
-    map.setZoom(Math.max(3, Math.min(20, Number(map.getZoom() || 14) + delta)));
+    map.setZoom(Math.max(3, Math.min(19, Number(map.getZoom() || 14) + delta)));
   }
 
   return (
     <div className="retela-route-map-shell" onWheel={(event) => event.stopPropagation()} onTouchMove={(event) => event.stopPropagation()}>
-      <div ref={containerRef} className="retela-route-map" aria-label="Delivery route map" />
-      {mapState === "loading" ? <div className="retela-map-status-overlay is-loading"><Loader2 size={16} className="animate-spin" /> Loading Google Map...</div> : null}
-      {mapState === "error" ? <div className="retela-map-status-overlay"><span>{mapError}</span></div> : null}
+      <MapContainer
+        center={riderLatLng || shopPosition}
+        zoom={14}
+        className="retela-route-map"
+        zoomControl={false}
+        scrollWheelZoom
+        attributionControl
+        ref={mapRef}
+        aria-label="Delivery route map"
+      >
+        <TileLayer attribution={OSM_ATTRIBUTION} url={OSM_TILE_URL} />
+        {routePositions.length ? <Polyline positions={routePositions} pathOptions={{ color: "#2563eb", opacity: 0.92, weight: 5 }} /> : null}
+        <Marker position={shopPosition} icon={shopIcon} />
+        <Marker position={destinationPosition} icon={customerIcon} />
+        {riderLatLng ? <Marker position={riderLatLng} icon={riderIcon} zIndexOffset={800} /> : null}
+        <DeliveryRouteMapController
+          shopPosition={shopPosition}
+          destinationPosition={destinationPosition}
+          riderPosition={riderLatLng}
+          routePositions={routePositions}
+          followRider={followRider}
+        />
+      </MapContainer>
       <div className="retela-route-map-tools">
         <button type="button" onClick={() => zoomBy(1)} aria-label="Zoom in">+</button>
         <button type="button" onClick={() => zoomBy(-1)} aria-label="Zoom out">-</button>
@@ -941,44 +765,43 @@ function DeliveryRouteMap({ shop, destination, route, riderPosition = null, foll
   );
 }
 
-function createDeliveryMarker(google, map, point, type) {
-  return new google.maps.Marker({
-    map,
-    position: { lat: Number(point.latitude), lng: Number(point.longitude) },
-    title: type === "shop" ? "RETELA Shop" : type === "customer" ? "Customer Delivery Location" : "Rider",
-    label: type === "rider" ? null : {
-      text: type === "shop" ? "Shop" : "Customer",
-      color: type === "shop" ? "#ffffff" : "#123526",
-      fontSize: "11px",
-      fontWeight: "800"
-    },
-    icon: deliveryMarkerIcon(google, type, point.heading),
-    optimized: true
-  });
+function DeliveryRouteMapController({ shopPosition, destinationPosition, riderPosition, routePositions, followRider }) {
+  const map = useMap();
+
+  useEffect(() => {
+    window.setTimeout(() => map.invalidateSize(), 80);
+  }, [map]);
+
+  useEffect(() => {
+    const points = [shopPosition, destinationPosition, ...routePositions];
+    if (riderPosition) points.push(riderPosition);
+    const bounds = L.latLngBounds(points);
+    if (bounds.isValid()) map.fitBounds(bounds, { paddingTopLeft: [48, 64], paddingBottomRight: [48, 58], maxZoom: 17 });
+  }, [destinationPosition, map, riderPosition, routePositions, shopPosition]);
+
+  useEffect(() => {
+    if (!followRider || !riderPosition) return;
+    map.panTo(riderPosition);
+    if (Number(map.getZoom() || 0) < 16) map.setZoom(16);
+  }, [followRider, map, riderPosition]);
+
+  return null;
 }
 
-function deliveryMarkerIcon(google, type, heading = 0) {
+function deliveryMarkerIcon(type, heading = 0) {
   if (type === "rider") {
-    return {
-      path: google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
-      rotation: Number(heading || 0),
-      scale: 5.4,
-      fillColor: "#2563eb",
-      fillOpacity: 1,
-      strokeColor: "#ffffff",
-      strokeWeight: 2,
-      anchor: new google.maps.Point(0, 2)
-    };
+    return L.divIcon({
+      className: "retela-leaflet-rider-icon",
+      html: `<span style="transform: rotate(${Number(heading || 0)}deg)"></span>`,
+      iconSize: [34, 34],
+      iconAnchor: [17, 17]
+    });
   }
-  const color = type === "shop" ? "#0b8f59" : "#2563eb";
-  return {
-    path: "M12 2C7.6 2 4 5.6 4 10c0 5.4 8 12 8 12s8-6.6 8-12c0-4.4-3.6-8-8-8zm0 11.2A3.2 3.2 0 1 1 12 6.8a3.2 3.2 0 0 1 0 6.4z",
-    fillColor: color,
-    fillOpacity: 1,
-    strokeColor: "#ffffff",
-    strokeWeight: 2,
-    scale: 1.55,
-    labelOrigin: new google.maps.Point(12, -4),
-    anchor: new google.maps.Point(12, 22)
-  };
+  return L.divIcon({
+    className: `retela-leaflet-pin-icon is-${type}`,
+    html: `<span></span><strong>${type === "shop" ? "Shop" : "Customer"}</strong>`,
+    iconSize: [72, 46],
+    iconAnchor: [18, 40],
+    popupAnchor: [0, -36]
+  });
 }

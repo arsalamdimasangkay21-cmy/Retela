@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
 import { AnimatePresence, motion } from "framer-motion";
 import { Bar, Doughnut, Line, Pie } from "react-chartjs-2";
 import { Chart as ChartJS, ArcElement, BarElement, CategoryScale, Filler, LinearScale, LineElement, PointElement, Tooltip, Legend } from "chart.js";
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip as RechartsTooltip, XAxis, YAxis } from "recharts";
 import { Activity, Archive, Barcode, Bot, Camera, Check, CheckCircle2, ChevronLeft, ChevronRight, Clock3, Download, Edit3, Eye, FileSpreadsheet, Loader2, MapPin, Megaphone, MessageSquare, PackageCheck, PackagePlus, Plus, Printer, ReceiptText, RotateCcw, Save, Search, Send, Shirt, ShoppingBag, SlidersHorizontal, Sparkles, Star, Tags, Trash2, TrendingUp, Upload, UserRound, WalletCards, X, Zap } from "lucide-react";
+import { MapContainer, Marker, Polyline, TileLayer, useMap } from "react-leaflet";
 import { api, API_URL, cachedGet, clearGetCache, getApiErrorMessage, getStoredAuthToken } from "../api/client";
 import JsBarcode from "jsbarcode";
 import { jsPDF } from "jspdf";
@@ -41,6 +44,7 @@ import { exportSalesReportExcel } from "../reports/ExportExcel";
 import { exportSalesReportPdf } from "../reports/ExportPDF";
 import { openPrintReportWindow, previewSalesReport, printSalesReport, writePrintReportError } from "../reports/PrintReport";
 import { defaultReportOptions, fetchSalesReport, reportDateRangeLabel, reportOptionsParams, reportRanges } from "../reports/ReportService";
+import { OSM_ATTRIBUTION, OSM_TILE_URL, routeUrl, validMapCoordinate } from "../config/maps";
 
 const chartGlowPlugin = {
   id: "retelaGlow",
@@ -81,7 +85,7 @@ const fallbackApparelOptions = {
 const blankProduct = { name: "", brand: "", category: "", gender: "", size: "", color: "", price: "", stock: "1", condition: "", description: "", image_url: "" };
 const defaultCustomerFilters = { search: "", status: "all", customerStatus: "all", sort: "newest" };
 const SHOP_LOCATION = "Tela to Pera Thrift Shop, Midsayap, Cotabato, Philippines";
-const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || "";
+const SHOP_LOCATION_COORDINATES = { latitude: 7.1907, longitude: 124.5308 };
 const commonCustomerLocations = ["Davao", "Cotabato", "Midsayap", "Kidapawan", "General Santos"];
 const chartScales = {
   x: { ticks: { color: "#64748b" }, grid: { color: "#E5E7EB" } },
@@ -6081,17 +6085,9 @@ function AdminLocations({ users }) {
 
   const selectedOrigin = selectedCustomer?.location || "";
   const hasSelectedOrigin = Boolean(normalizeLocationText(selectedOrigin));
-  const directionsMapUrl = hasSelectedOrigin && GOOGLE_MAPS_API_KEY
-    ? `https://www.google.com/maps/embed/v1/directions?key=${GOOGLE_MAPS_API_KEY}&origin=${encodeURIComponent(selectedOrigin)}&destination=${encodeURIComponent(SHOP_LOCATION)}&mode=driving`
-    : "";
-  const fallbackDirectionsMapUrl = hasSelectedOrigin
-    ? `https://maps.google.com/maps?saddr=${encodeURIComponent(selectedOrigin)}&daddr=${encodeURIComponent(SHOP_LOCATION)}&output=embed`
-    : "";
-  const shopMapUrl = `https://www.google.com/maps?q=${encodeURIComponent(SHOP_LOCATION)}&output=embed`;
-  const activeMapUrl = hasSelectedOrigin ? directionsMapUrl || fallbackDirectionsMapUrl : shopMapUrl;
   const externalRouteUrl = hasSelectedOrigin
-    ? `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(selectedOrigin)}&destination=${encodeURIComponent(SHOP_LOCATION)}&travelmode=driving`
-    : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(SHOP_LOCATION)}`;
+    ? `https://www.openstreetmap.org/search?query=${encodeURIComponent(selectedOrigin)}`
+    : `https://www.openstreetmap.org/?mlat=${SHOP_LOCATION_COORDINATES.latitude}&mlon=${SHOP_LOCATION_COORDINATES.longitude}#map=16/${SHOP_LOCATION_COORDINATES.latitude}/${SHOP_LOCATION_COORDINATES.longitude}`;
 
   useEffect(() => {
     setRouteError(false);
@@ -6187,9 +6183,104 @@ function AdminLocations({ users }) {
               <div className="rounded-2xl border border-rose-300/20 bg-rose-300/10 p-3 text-sm font-semibold text-rose-100">Unable to calculate route. Please check the customer location.</div>
             ) : null}
           </div>
-          <iframe className="h-[520px] w-full border-0 grayscale-[0.1] hue-rotate-[55deg]" src={activeMapUrl} loading="lazy" title={hasSelectedOrigin ? "Customer route to Tela to Pera Thrift Shop" : "Tela to Pera Thrift Shop destination map"} onError={() => setRouteError(true)} />
+          <AdminCustomerRouteMap origin={selectedOrigin} onErrorChange={setRouteError} />
         </Card>
       </div>
+    </div>
+  );
+}
+
+const adminRouteIcons = {
+  shop: L.divIcon({
+    className: "retela-leaflet-pin-icon is-shop",
+    html: "<span></span><strong>Shop</strong>",
+    iconSize: [72, 46],
+    iconAnchor: [18, 40]
+  }),
+  customer: L.divIcon({
+    className: "retela-leaflet-pin-icon is-customer",
+    html: "<span></span><strong>Customer</strong>",
+    iconSize: [72, 46],
+    iconAnchor: [18, 40]
+  })
+};
+
+async function geocodeAdminRouteLocation(address, signal) {
+  const text = String(address || "").trim();
+  if (!text) return null;
+  const response = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=ph&q=${encodeURIComponent(text)}`, { signal });
+  if (!response.ok) throw new Error("Location could not be resolved.");
+  const rows = await response.json();
+  const [first] = Array.isArray(rows) ? rows : [];
+  const latitude = Number(first?.lat);
+  const longitude = Number(first?.lon);
+  if (!validMapCoordinate(latitude, longitude)) return null;
+  return { latitude, longitude };
+}
+
+function AdminRouteMapController({ points, routePositions }) {
+  const map = useMap();
+
+  useEffect(() => {
+    window.setTimeout(() => map.invalidateSize(), 80);
+  }, [map]);
+
+  useEffect(() => {
+    const bounds = L.latLngBounds([...points, ...routePositions]);
+    if (bounds.isValid()) map.fitBounds(bounds, { paddingTopLeft: [44, 52], paddingBottomRight: [44, 52], maxZoom: 17 });
+  }, [map, points, routePositions]);
+
+  return null;
+}
+
+function AdminCustomerRouteMap({ origin, onErrorChange }) {
+  const [customerPoint, setCustomerPoint] = useState(null);
+  const [routePositions, setRoutePositions] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const shopPoint = SHOP_LOCATION_COORDINATES;
+  const hasOrigin = Boolean(normalizeLocationText(origin));
+  const shopPosition = [shopPoint.latitude, shopPoint.longitude];
+  const customerPosition = customerPoint ? [customerPoint.latitude, customerPoint.longitude] : null;
+  const mapPoints = customerPosition ? [shopPosition, customerPosition] : [shopPosition];
+
+  useEffect(() => {
+    onErrorChange?.(false);
+    setRoutePositions([]);
+    setCustomerPoint(null);
+    if (!hasOrigin) return undefined;
+    const controller = new AbortController();
+    setLoading(true);
+    geocodeAdminRouteLocation(origin, controller.signal)
+      .then(async (point) => {
+        if (!point) throw new Error("Customer location could not be resolved.");
+        setCustomerPoint(point);
+        const response = await fetch(routeUrl(point, shopPoint), { signal: controller.signal });
+        if (!response.ok) throw new Error("Route could not be calculated.");
+        const data = await response.json();
+        const [route] = Array.isArray(data.routes) ? data.routes : [];
+        const coordinates = route?.geometry?.coordinates;
+        if (data.code !== "Ok" || !Array.isArray(coordinates)) throw new Error("Route could not be calculated.");
+        setRoutePositions(coordinates.map(([longitude, latitude]) => [Number(latitude), Number(longitude)]).filter(([latitude, longitude]) => validMapCoordinate(latitude, longitude)));
+      })
+      .catch((error) => {
+        if (error?.name !== "AbortError") onErrorChange?.(true);
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
+    return () => controller.abort();
+  }, [hasOrigin, onErrorChange, origin]);
+
+  return (
+    <div className="retela-route-map-shell h-[520px] min-h-[520px] rounded-none border-0">
+      <MapContainer center={customerPosition || shopPosition} zoom={hasOrigin ? 12 : 16} className="retela-route-map" zoomControl scrollWheelZoom>
+        <TileLayer attribution={OSM_ATTRIBUTION} url={OSM_TILE_URL} />
+        {routePositions.length ? <Polyline positions={routePositions} pathOptions={{ color: "#22c55e", opacity: 0.92, weight: 5 }} /> : null}
+        <Marker position={shopPosition} icon={adminRouteIcons.shop} />
+        {customerPosition ? <Marker position={customerPosition} icon={adminRouteIcons.customer} /> : null}
+        <AdminRouteMapController points={mapPoints} routePositions={routePositions} />
+      </MapContainer>
+      {loading ? <div className="retela-map-status-overlay is-loading"><Loader2 size={16} className="animate-spin" /> Loading route...</div> : null}
     </div>
   );
 }

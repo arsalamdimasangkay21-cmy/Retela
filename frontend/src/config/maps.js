@@ -1,11 +1,9 @@
-const OSM_TILE_HOSTS = ["a", "b", "c"];
-
-export const OSM_ATTRIBUTION = "© OpenStreetMap contributors";
+export const OSM_ATTRIBUTION = "OpenStreetMap contributors";
+export const OSM_TILE_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
 export const OSRM_ROUTE_ENDPOINT = "https://router.project-osrm.org/route/v1/driving";
 
-export function osmTileUrl(zoom, x, y, version = 0) {
-  const host = OSM_TILE_HOSTS[Math.abs(Number(x) + Number(y)) % OSM_TILE_HOSTS.length];
-  return `https://${host}.tile.openstreetmap.org/${zoom}/${x}/${y}.png?v=${version}`;
+export function osmTileUrl(zoom, x, y) {
+  return `https://tile.openstreetmap.org/${zoom}/${x}/${y}.png`;
 }
 
 export function validMapCoordinate(latitude, longitude) {

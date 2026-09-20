@@ -303,35 +303,6 @@ function formatRouteDuration(seconds) {
   return remainder ? `${hours} hr ${remainder} min` : `${hours} hr`;
 }
 
-function decodeGooglePolyline(encoded = "") {
-  const points = [];
-  let index = 0;
-  let latitude = 0;
-  let longitude = 0;
-  while (index < encoded.length) {
-    let byte = null;
-    let shift = 0;
-    let result = 0;
-    do {
-      byte = encoded.charCodeAt(index++) - 63;
-      result |= (byte & 0x1f) << shift;
-      shift += 5;
-    } while (byte >= 0x20 && index < encoded.length);
-    latitude += (result & 1) ? ~(result >> 1) : (result >> 1);
-
-    shift = 0;
-    result = 0;
-    do {
-      byte = encoded.charCodeAt(index++) - 63;
-      result |= (byte & 0x1f) << shift;
-      shift += 5;
-    } while (byte >= 0x20 && index < encoded.length);
-    longitude += (result & 1) ? ~(result >> 1) : (result >> 1);
-    points.push({ latitude: latitude / 1e5, longitude: longitude / 1e5 });
-  }
-  return points;
-}
-
 function fallbackRouteInfo(riderLocation, customerLocation) {
   const distanceKm = haversineDistanceKm(riderLocation, customerLocation);
   const distanceMeters = distanceKm === null ? null : Math.round(distanceKm * 1000);
@@ -346,26 +317,24 @@ function fallbackRouteInfo(riderLocation, customerLocation) {
   };
 }
 
-async function googleDirectionsRouteInfo(riderLocation, customerLocation) {
-  const apiKey = String(process.env.GOOGLE_MAPS_SERVER_API_KEY || process.env.GOOGLE_DIRECTIONS_API_KEY || process.env.GOOGLE_MAPS_API_KEY || "").trim();
-  if (!apiKey) return fallbackRouteInfo(riderLocation, customerLocation);
-  const url = new URL("https://maps.googleapis.com/maps/api/directions/json");
-  url.searchParams.set("origin", `${riderLocation.latitude},${riderLocation.longitude}`);
-  url.searchParams.set("destination", `${customerLocation.latitude},${customerLocation.longitude}`);
-  url.searchParams.set("mode", "driving");
-  url.searchParams.set("key", apiKey);
+async function osrmRouteInfo(riderLocation, customerLocation) {
+  const url = new URL(`https://router.project-osrm.org/route/v1/driving/${riderLocation.longitude},${riderLocation.latitude};${customerLocation.longitude},${customerLocation.latitude}`);
+  url.searchParams.set("overview", "full");
+  url.searchParams.set("geometries", "geojson");
   try {
     const response = await fetch(url);
     if (!response.ok) return fallbackRouteInfo(riderLocation, customerLocation);
     const data = await response.json();
     const route = Array.isArray(data.routes) ? data.routes[0] : null;
-    if (data.status !== "OK" || !route) return fallbackRouteInfo(riderLocation, customerLocation);
-    const legs = Array.isArray(route.legs) ? route.legs : [];
-    const distanceMeters = legs.reduce((sum, leg) => sum + Number(leg.distance?.value || 0), 0);
-    const durationSeconds = legs.reduce((sum, leg) => sum + Number(leg.duration?.value || 0), 0);
-    const routeCoordinates = route.overview_polyline?.points ? decodeGooglePolyline(route.overview_polyline.points) : [];
+    if (data.code !== "Ok" || !route) return fallbackRouteInfo(riderLocation, customerLocation);
+    const distanceMeters = Number(route.distance);
+    const durationSeconds = Number(route.duration);
+    const coordinates = Array.isArray(route.geometry?.coordinates) ? route.geometry.coordinates : [];
+    const routeCoordinates = coordinates
+      .map(([longitude, latitude]) => serializeCoordinatePoint(latitude, longitude))
+      .filter(Boolean);
     return {
-      provider: "google",
+      provider: "osrm",
       distanceMeters,
       durationSeconds,
       distance: formatRouteDistance(distanceMeters),
@@ -853,7 +822,7 @@ router.get("/:id/route", requireAuth, requireApproved, asyncHandler(async (req, 
   if (!riderLocation) throw new HttpError(404, "Rider location is not available yet.");
   const customerLocation = trackingCustomerLocation(order);
   if (!customerLocation) throw new HttpError(409, "Customer delivery coordinates are unavailable for this order.");
-  const route = await googleDirectionsRouteInfo(
+  const route = await osrmRouteInfo(
     { latitude: riderLocation.latitude, longitude: riderLocation.longitude },
     customerLocation
   );

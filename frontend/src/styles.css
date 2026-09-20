@@ -8802,6 +8802,91 @@ button {
   white-space: nowrap;
 }
 
+.retela-route-map.leaflet-container {
+  z-index: 1;
+  font-family: inherit;
+}
+
+.retela-route-map.leaflet-container .leaflet-pane,
+.retela-route-map.leaflet-container .leaflet-tile,
+.retela-route-map.leaflet-container .leaflet-marker-icon,
+.retela-route-map.leaflet-container .leaflet-marker-shadow,
+.retela-route-map.leaflet-container .leaflet-tile-container {
+  position: absolute;
+}
+
+.retela-route-map.leaflet-container .leaflet-tile {
+  width: 256px;
+  height: 256px;
+  max-width: none;
+  user-select: none;
+  -webkit-user-drag: none;
+  pointer-events: auto;
+}
+
+.retela-route-map.leaflet-container .leaflet-overlay-pane svg {
+  position: absolute;
+  inset: auto;
+  width: auto;
+  height: auto;
+}
+
+.retela-route-map.leaflet-container .leaflet-overlay-pane path {
+  filter: drop-shadow(0 2px 4px rgba(15, 23, 42, 0.24));
+}
+
+.retela-leaflet-pin-icon,
+.retela-leaflet-rider-icon {
+  background: transparent;
+  border: 0;
+}
+
+.retela-leaflet-pin-icon span {
+  display: block;
+  width: 30px;
+  height: 30px;
+  border: 2px solid #ffffff;
+  border-radius: 50% 50% 50% 6px;
+  box-shadow: 0 14px 28px rgba(15, 23, 42, 0.28);
+  transform: rotate(-45deg);
+}
+
+.retela-leaflet-pin-icon.is-shop span {
+  background: #0b8f59;
+}
+
+.retela-leaflet-pin-icon.is-customer span {
+  background: #2563eb;
+}
+
+.retela-leaflet-pin-icon strong {
+  position: absolute;
+  left: 18px;
+  top: -5px;
+  max-width: 76px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.96);
+  padding: 3px 7px;
+  color: #123526;
+  font-size: 0.68rem;
+  font-weight: 900;
+  line-height: 1;
+  white-space: nowrap;
+  box-shadow: 0 10px 20px rgba(15, 23, 42, 0.14);
+}
+
+.retela-leaflet-rider-icon span {
+  position: absolute;
+  inset: 4px;
+  display: block;
+  clip-path: polygon(50% 0, 85% 92%, 50% 72%, 15% 92%);
+  background: #2563eb;
+  border: 2px solid #ffffff;
+  filter: drop-shadow(0 12px 18px rgba(37, 99, 235, 0.34));
+  transform-origin: center;
+}
+
 .retela-route-map-tools {
   position: absolute;
   right: 12px;

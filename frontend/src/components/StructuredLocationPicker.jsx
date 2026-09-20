@@ -9,81 +9,6 @@ import {
 } from "../utils/location";
 
 const defaultMapCenter = { latitude: 7.1907, longitude: 124.5308 };
-let googlePlacesPromise;
-
-function loadGooglePlaces(apiKey) {
-  if (!apiKey) return Promise.reject(new Error("Google Maps key is not configured"));
-  if (window.google?.maps?.places) return Promise.resolve(window.google);
-  if (googlePlacesPromise) return googlePlacesPromise;
-
-  googlePlacesPromise = new Promise((resolve, reject) => {
-    const existing = document.getElementById("retela-google-maps-places");
-    let timeoutId;
-    const onReady = () => {
-      window.clearTimeout(timeoutId);
-      if (window.google?.maps?.places) resolve(window.google);
-      else reject(new Error("Google Places did not load"));
-    };
-    const onError = () => {
-      window.clearTimeout(timeoutId);
-      reject(new Error("Google Places failed to load"));
-    };
-
-    if (existing) {
-      if (window.google?.maps && !window.google.maps.places) {
-        reject(new Error("Google Places is unavailable"));
-        return;
-      }
-      existing.addEventListener("load", onReady, { once: true });
-      existing.addEventListener("error", onError, { once: true });
-      timeoutId = window.setTimeout(onError, 12000);
-      return;
-    }
-
-    const script = document.createElement("script");
-    script.id = "retela-google-maps-places";
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}&libraries=places&v=weekly`;
-    script.async = true;
-    script.defer = true;
-    script.addEventListener("load", onReady, { once: true });
-    script.addEventListener("error", onError, { once: true });
-    timeoutId = window.setTimeout(onError, 12000);
-    document.head.appendChild(script);
-  }).catch((error) => {
-    document.getElementById("retela-google-maps-places")?.remove();
-    googlePlacesPromise = undefined;
-    throw error;
-  });
-
-  return googlePlacesPromise;
-}
-
-function componentValue(components, ...types) {
-  for (const type of types) {
-    const component = components.find((item) => item.types?.includes(type));
-    if (component?.long_name) return component.long_name;
-  }
-  return "";
-}
-
-function locationFromGooglePlace(place) {
-  const components = Array.isArray(place?.address_components) ? place.address_components : [];
-  const latitude = place?.geometry?.location?.lat?.();
-  const longitude = place?.geometry?.location?.lng?.();
-  const formattedAddress = String(place?.formatted_address || place?.name || "").trim();
-  return normalizeStructuredLocation({
-    formattedAddress,
-    barangay: componentValue(components, "sublocality_level_1", "sublocality", "neighborhood", "administrative_area_level_4"),
-    municipality: componentValue(components, "locality", "postal_town", "administrative_area_level_3", "administrative_area_level_2"),
-    province: componentValue(components, "administrative_area_level_2"),
-    region: componentValue(components, "administrative_area_level_1"),
-    postalCode: componentValue(components, "postal_code"),
-    latitude,
-    longitude,
-    placeId: place?.place_id || "",
-    locationSource: "google"
-  });
-}
 
 function locationFromNominatim(item, source = "nominatim") {
   const address = item?.address || {};
@@ -119,37 +44,6 @@ async function reverseNominatim(latitude, longitude, signal) {
   return response.json();
 }
 
-function googlePredictions(query) {
-  return new Promise((resolve, reject) => {
-    const service = new window.google.maps.places.AutocompleteService();
-    service.getPlacePredictions({ input: query, componentRestrictions: { country: "ph" } }, (rows, status) => {
-      const statuses = window.google.maps.places.PlacesServiceStatus;
-      if (status === statuses.ZERO_RESULTS) return resolve([]);
-      if (status !== statuses.OK) return reject(new Error("Google location suggestions are unavailable"));
-      resolve((rows || []).map((item) => ({
-        id: item.place_id,
-        label: item.description,
-        provider: "google",
-        raw: item
-      })));
-    });
-  });
-}
-
-function googlePlaceDetails(placeId) {
-  return new Promise((resolve, reject) => {
-    const service = new window.google.maps.places.PlacesService(document.createElement("div"));
-    service.getDetails({
-      placeId,
-      fields: ["place_id", "formatted_address", "name", "geometry", "address_components"]
-    }, (place, status) => {
-      const statuses = window.google.maps.places.PlacesServiceStatus;
-      if (status !== statuses.OK || !place) return reject(new Error("Location details could not be loaded"));
-      resolve(place);
-    });
-  });
-}
-
 export default function StructuredLocationPicker({
   value,
   onChange,
@@ -163,36 +57,13 @@ export default function StructuredLocationPicker({
   const inputId = useId();
   const normalized = useMemo(() => normalizeStructuredLocation(value), [value]);
   const [query, setQuery] = useState(normalized.formattedAddress);
-  const [provider, setProvider] = useState("loading");
   const [suggestions, setSuggestions] = useState([]);
   const [searching, setSearching] = useState(false);
   const [resolving, setResolving] = useState(false);
   const [attemptedSearch, setAttemptedSearch] = useState(false);
   const [searchError, setSearchError] = useState("");
-  const [providerNotice, setProviderNotice] = useState("");
   const searchAbortRef = useRef(null);
   const reverseAbortRef = useRef(null);
-  const mapsKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || "";
-
-  useEffect(() => {
-    let active = true;
-    if (!mapsKey) {
-      setProvider("nominatim");
-      return undefined;
-    }
-    loadGooglePlaces(mapsKey)
-      .then(() => {
-        if (active) setProvider("google");
-      })
-      .catch(() => {
-        if (!active) return;
-        setProvider("nominatim");
-        setProviderNotice("Google location suggestions are unavailable. Alternative suggestions are active.");
-      });
-    return () => {
-      active = false;
-    };
-  }, [mapsKey]);
 
   useEffect(() => {
     if (normalized.formattedAddress !== query && isResolvedLocation(normalized)) {
@@ -202,7 +73,7 @@ export default function StructuredLocationPicker({
 
   useEffect(() => {
     const text = query.trim();
-    if (provider === "loading" || text.length < 3 || (isResolvedLocation(normalized) && text === normalized.formattedAddress)) {
+    if (text.length < 3 || (isResolvedLocation(normalized) && text === normalized.formattedAddress)) {
       setSuggestions([]);
       setSearching(false);
       return undefined;
@@ -216,18 +87,7 @@ export default function StructuredLocationPicker({
       setSearchError("");
       setAttemptedSearch(true);
       try {
-        let rows;
-        if (provider === "google") {
-          try {
-            rows = await googlePredictions(text);
-          } catch {
-            setProvider("nominatim");
-            setProviderNotice("Google location suggestions are unavailable. Alternative suggestions are active.");
-            rows = await searchNominatim(text, controller.signal);
-          }
-        } else {
-          rows = await searchNominatim(text, controller.signal);
-        }
+        const rows = await searchNominatim(text, controller.signal);
         if (!controller.signal.aborted) setSuggestions(rows);
       } catch (requestError) {
         if (requestError?.name !== "AbortError") {
@@ -240,7 +100,7 @@ export default function StructuredLocationPicker({
     }, 350);
 
     return () => window.clearTimeout(timer);
-  }, [normalized, provider, query]);
+  }, [normalized, query]);
 
   useEffect(() => () => {
     searchAbortRef.current?.abort();
@@ -259,9 +119,7 @@ export default function StructuredLocationPicker({
     setResolving(true);
     setSearchError("");
     try {
-      const next = suggestion.provider === "google"
-        ? locationFromGooglePlace(await googlePlaceDetails(suggestion.id))
-        : locationFromNominatim(suggestion.raw);
+      const next = locationFromNominatim(suggestion.raw);
       setQuery(next.formattedAddress);
       setSuggestions([]);
       onChange(next);
@@ -347,7 +205,7 @@ export default function StructuredLocationPicker({
             onChange={(event) => changeQuery(event.target.value)}
             onBlur={onBlur}
           />
-          {searching || resolving || provider === "loading" ? <Loader2 size={16} className="animate-spin" /> : isResolvedLocation(normalized) ? <CheckCircle2 size={17} /> : null}
+          {searching || resolving ? <Loader2 size={16} className="animate-spin" /> : isResolvedLocation(normalized) ? <CheckCircle2 size={17} /> : null}
         </span>
       </label>
 
@@ -369,7 +227,6 @@ export default function StructuredLocationPicker({
         </button>
       ) : null}
 
-      {providerNotice ? <p className="retela-structured-location-notice"><TriangleAlert size={14} /> {providerNotice}</p> : null}
       {searchError ? <p className="retela-structured-location-notice is-warning"><TriangleAlert size={14} /> {searchError}</p> : null}
       {error ? <p className="retela-structured-location-error">{error}</p> : null}
 
