@@ -8131,12 +8131,43 @@ button {
   cursor: crosshair;
 }
 
-.retela-structured-map img {
+.retela-structured-map > img {
   position: absolute;
   width: 256px;
   height: 256px;
   max-width: none;
   user-select: none;
+}
+
+.retela-structured-leaflet-map {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  min-height: inherit;
+  width: 100%;
+  height: 100%;
+  font-family: inherit;
+}
+
+.retela-structured-leaflet-map .leaflet-tile {
+  filter: saturate(1.05) contrast(1.02);
+}
+
+.retela-structured-leaflet-map .leaflet-control-zoom {
+  overflow: hidden;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 12px;
+  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.14);
+}
+
+.retela-structured-leaflet-map .leaflet-control-zoom a {
+  border-color: rgba(15, 23, 42, 0.08);
+  color: #123526;
+  font-weight: 950;
+}
+
+.retela-structured-leaflet-pin strong {
+  max-width: 96px;
 }
 
 .retela-structured-map-wrap > p {

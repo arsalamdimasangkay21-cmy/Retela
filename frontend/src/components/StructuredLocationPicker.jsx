@@ -1,6 +1,9 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
 import { CheckCircle2, Loader2, LocateFixed, MapPin, Search, TriangleAlert } from "lucide-react";
-import { osmTileUrl } from "../config/maps";
+import { OSM_ATTRIBUTION, OSM_TILE_URL, validMapCoordinate } from "../config/maps";
+import { MapContainer, Marker, TileLayer, useMap, useMapEvents } from "react-leaflet";
 import {
   hasLocationCoordinates,
   isResolvedLocation,
@@ -9,6 +12,14 @@ import {
 } from "../utils/location";
 
 const defaultMapCenter = { latitude: 7.1907, longitude: 124.5308 };
+const gpsOptions = { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 };
+const deliveryPinIcon = L.divIcon({
+  className: "retela-leaflet-pin-icon is-customer retela-structured-leaflet-pin",
+  html: "<span></span><strong>Delivery Pin</strong>",
+  iconSize: [92, 46],
+  iconAnchor: [18, 40],
+  popupAnchor: [0, -36]
+});
 
 function locationFromNominatim(item, source = "nominatim") {
   const address = item?.address || {};
@@ -44,6 +55,13 @@ async function reverseNominatim(latitude, longitude, signal) {
   return response.json();
 }
 
+function gpsErrorMessage(error) {
+  if (error?.code === 1) return "Location permission was denied. You can still search for an address or place the pin manually on the map.";
+  if (error?.code === 2) return `GPS is unavailable on this device right now.${error?.message ? ` ${error.message}` : ""} You can place the pin manually.`;
+  if (error?.code === 3) return `GPS timed out before a fresh location was found.${error?.message ? ` ${error.message}` : ""} Try again or place the pin manually.`;
+  return error?.message || "Current location could not be accessed. Search for an address or place the pin manually.";
+}
+
 export default function StructuredLocationPicker({
   value,
   onChange,
@@ -73,6 +91,11 @@ export default function StructuredLocationPicker({
 
   useEffect(() => {
     const text = query.trim();
+    if (resolving) {
+      setSuggestions([]);
+      setSearching(false);
+      return undefined;
+    }
     if (text.length < 3 || (isResolvedLocation(normalized) && text === normalized.formattedAddress)) {
       setSuggestions([]);
       setSearching(false);
@@ -100,7 +123,7 @@ export default function StructuredLocationPicker({
     }, 350);
 
     return () => window.clearTimeout(timer);
-  }, [normalized, query]);
+  }, [normalized, query, resolving]);
 
   useEffect(() => () => {
     searchAbortRef.current?.abort();
@@ -131,25 +154,30 @@ export default function StructuredLocationPicker({
   }
 
   async function resolveCoordinates(latitude, longitude, source) {
+    const nextLatitude = Number(latitude);
+    const nextLongitude = Number(longitude);
+    if (!validMapCoordinate(nextLatitude, nextLongitude)) {
+      setSearchError("That map position is not valid. Please choose another pin location.");
+      return;
+    }
     reverseAbortRef.current?.abort();
     const controller = new AbortController();
     reverseAbortRef.current = controller;
     setResolving(true);
     setSearchError("");
     try {
-      const item = await reverseNominatim(latitude, longitude, controller.signal);
-      const next = locationFromNominatim({ ...item, lat: latitude, lon: longitude }, source);
+      const item = await reverseNominatim(nextLatitude, nextLongitude, controller.signal);
+      const next = locationFromNominatim({ ...item, lat: nextLatitude, lon: nextLongitude }, source);
       setQuery(next.formattedAddress);
       setSuggestions([]);
       onChange(next);
     } catch (requestError) {
       if (requestError?.name === "AbortError") return;
-      const fallbackAddress = normalized.formattedAddress || `Pinned location (${latitude.toFixed(6)}, ${longitude.toFixed(6)})`;
+      const fallbackAddress = `Pinned location (${nextLatitude.toFixed(6)}, ${nextLongitude.toFixed(6)})`;
       const next = normalizeStructuredLocation({
-        ...normalized,
         formattedAddress: fallbackAddress,
-        latitude,
-        longitude,
+        latitude: nextLatitude,
+        longitude: nextLongitude,
         placeId: "",
         locationSource: source
       });
@@ -167,13 +195,17 @@ export default function StructuredLocationPicker({
       return;
     }
     setResolving(true);
+    setSearchError("");
+    setQuery("Finding your current GPS location...");
+    setSuggestions([]);
     navigator.geolocation.getCurrentPosition(
       (position) => void resolveCoordinates(Number(position.coords.latitude), Number(position.coords.longitude), "geolocation"),
-      () => {
+      (geoError) => {
         setResolving(false);
-        setSearchError("Current location could not be accessed. Search for an address or use the manual fallback.");
+        setSearchError(gpsErrorMessage(geoError));
+        setQuery(normalized.formattedAddress || "");
       },
-      { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 }
+      gpsOptions
     );
   }
 
@@ -244,96 +276,69 @@ export default function StructuredLocationPicker({
         </div>
       ) : null}
 
-      {hasLocationCoordinates(normalized) ? (
-        <StructuredLocationMap
-          location={normalized}
-          compact={compact}
-          resolving={resolving}
-          onSelect={(latitude, longitude) => void resolveCoordinates(latitude, longitude, "map")}
-        />
-      ) : null}
+      <StructuredLocationMap
+        location={normalized}
+        resolving={resolving}
+        onSelect={(latitude, longitude) => void resolveCoordinates(latitude, longitude, "map")}
+      />
     </div>
   );
 }
 
-function StructuredLocationMap({ location, compact, resolving, onSelect }) {
-  const [zoom, setZoom] = useState(compact ? 15 : 16);
-  const [tileState, setTileState] = useState("loading");
-  const [tileVersion, setTileVersion] = useState(0);
-  const latitude = location.latitude ?? defaultMapCenter.latitude;
-  const longitude = location.longitude ?? defaultMapCenter.longitude;
-  const center = projectToTile(latitude, longitude, zoom);
-  const tileX = Math.floor(center.x);
-  const tileY = Math.floor(center.y);
-  const offsetX = center.x - tileX;
-  const offsetY = center.y - tileY;
-  const tiles = [];
-  for (let y = -1; y <= 1; y += 1) {
-    for (let x = -1; x <= 1; x += 1) tiles.push({ x, y, tileX: tileX + x, tileY: tileY + y });
-  }
-
-  useEffect(() => {
-    setTileState("loading");
-  }, [latitude, longitude, zoom]);
-
-  function handleMapClick(event) {
-    const rect = event.currentTarget.getBoundingClientRect();
-    const dx = (event.clientX - rect.left - rect.width / 2) / 256;
-    const dy = (event.clientY - rect.top - rect.height / 2) / 256;
-    const next = unprojectFromTile(center.x + dx, center.y + dy, zoom);
-    onSelect(next.latitude, next.longitude);
-  }
+function StructuredLocationMap({ location, resolving, onSelect }) {
+  const hasCoordinates = hasLocationCoordinates(location);
+  const latitude = hasCoordinates ? Number(location.latitude) : defaultMapCenter.latitude;
+  const longitude = hasCoordinates ? Number(location.longitude) : defaultMapCenter.longitude;
+  const center = useMemo(() => [latitude, longitude], [latitude, longitude]);
 
   return (
     <div className="retela-structured-map-wrap">
-      <div className="retela-structured-map" onClick={handleMapClick} role="button" tabIndex={0} aria-label="Tap map to move location pin">
-        {tileState !== "error" && tiles.map((tile) => (
-          <img
-            key={`${tile.tileX}-${tile.tileY}-${zoom}-${tileVersion}`}
-            src={osmTileUrl(zoom, tile.tileX, tile.tileY, tileVersion)}
-            alt=""
-            loading="lazy"
-            onLoad={() => setTileState((state) => state === "loading" ? "ready" : state)}
-            onError={() => setTileState("error")}
-            style={{
-              left: `calc(50% + ${(tile.x - offsetX) * 256}px)`,
-              top: `calc(50% + ${(tile.y - offsetY) * 256}px)`
-            }}
+      <div className="retela-structured-map" aria-label="Delivery location map">
+        <MapContainer center={center} zoom={hasCoordinates ? 17 : 14} className="retela-structured-leaflet-map" zoomControl scrollWheelZoom>
+          <TileLayer attribution={OSM_ATTRIBUTION} url={OSM_TILE_URL} />
+          {hasCoordinates ? (
+            <Marker
+              position={center}
+              icon={deliveryPinIcon}
+              draggable
+              eventHandlers={{
+                dragend: (event) => {
+                  const marker = event.target;
+                  const next = marker.getLatLng();
+                  onSelect(next.lat, next.lng);
+                }
+              }}
+            />
+          ) : null}
+          <StructuredLocationMapController
+            center={center}
+            hasCoordinates={hasCoordinates}
+            onSelect={onSelect}
           />
-        ))}
-        {tileState === "error" ? (
-          <div className="retela-map-status-overlay">
-            <span>Map could not be loaded.</span>
-            <button type="button" onClick={(event) => { event.stopPropagation(); setTileState("loading"); setTileVersion((version) => version + 1); }}>Retry</button>
-          </div>
-        ) : null}
-        {tileState === "loading" ? <div className="retela-map-status-overlay is-loading"><Loader2 size={16} className="animate-spin" /> Loading map...</div> : null}
-        {tileState === "ready" ? <span className="retela-delivery-map-pin"><MapPin size={compact ? 25 : 30} /></span> : null}
-        <div className="retela-delivery-map-tools">
-          <button type="button" aria-label="Zoom in" onClick={(event) => { event.stopPropagation(); setZoom((value) => Math.min(18, value + 1)); }}>+</button>
-          <button type="button" aria-label="Zoom out" onClick={(event) => { event.stopPropagation(); setZoom((value) => Math.max(12, value - 1)); }}>-</button>
-        </div>
+        </MapContainer>
         {resolving ? <span className="retela-delivery-map-status"><Loader2 size={14} className="animate-spin" /> Resolving address</span> : null}
       </div>
-      <p>Tap the map to fine-tune the delivery pin.</p>
+      <p>{hasCoordinates ? "Drag the pin or tap the map to fine-tune the delivery point." : "Search, use GPS, or tap the map to place the delivery pin manually."}</p>
     </div>
   );
 }
 
-function projectToTile(latitude, longitude, zoom) {
-  const clampedLatitude = Math.max(-85, Math.min(85, latitude));
-  const latRad = (clampedLatitude * Math.PI) / 180;
-  const scale = 2 ** zoom;
-  return {
-    x: ((longitude + 180) / 360) * scale,
-    y: ((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * scale
-  };
-}
+function StructuredLocationMapController({ center, hasCoordinates, onSelect }) {
+  const map = useMap();
+  useMapEvents({
+    click(event) {
+      onSelect(event.latlng.lat, event.latlng.lng);
+    }
+  });
 
-function unprojectFromTile(x, y, zoom) {
-  const scale = 2 ** zoom;
-  return {
-    longitude: (x / scale) * 360 - 180,
-    latitude: (Math.atan(Math.sinh(Math.PI * (1 - (2 * y) / scale))) * 180) / Math.PI
-  };
+  useEffect(() => {
+    window.setTimeout(() => map.invalidateSize(), 80);
+  }, [map]);
+
+  useEffect(() => {
+    if (!hasCoordinates) return;
+    map.flyTo(center, Math.max(Number(map.getZoom() || 16), 16), { animate: true, duration: 0.5 });
+  }, [center, hasCoordinates, map]);
+
+  return null;
 }

@@ -1377,19 +1377,47 @@ router.post("/", requireAuth, requireApproved, asyncHandler(async (req, res) => 
     delivery_address: z.string().trim().max(500).optional().default(""),
     delivery_latitude: nullableCoordinate(-90, 90),
     delivery_longitude: nullableCoordinate(-180, 180),
+    delivery_barangay: z.string().trim().max(160).optional().default(""),
+    delivery_municipality: z.string().trim().max(160).optional().default(""),
+    delivery_province: z.string().trim().max(160).optional().default(""),
+    delivery_region: z.string().trim().max(160).optional().default(""),
+    delivery_postal_code: z.string().trim().max(20).optional().default(""),
+    delivery_place_id: z.string().trim().max(255).optional().default(""),
+    delivery_location_source: z.string().trim().max(40).optional().default(""),
     delivery_landmark: z.string().trim().max(255).optional().default(""),
     delivery_notes: z.string().trim().max(1000).optional().default(""),
     items: z.array(z.object({ product_id: z.coerce.number().int().positive(), quantity: z.coerce.number().int().positive() })).min(1)
   });
   const input = schema.parse(req.body);
   const savedLocation = await loadCustomerDeliveryLocation(req.user.id);
-  if (input.fulfillment_method === "delivery" && !savedLocation?.formattedAddress) {
-    throw new HttpError(400, "Please save your delivery location before checkout.");
+  const submittedDeliveryLocation = input.fulfillment_method === "delivery" ? {
+    formattedAddress: input.delivery_address,
+    address: input.delivery_address,
+    barangay: input.delivery_barangay || null,
+    municipality: input.delivery_municipality || null,
+    province: input.delivery_province || null,
+    region: input.delivery_region || null,
+    postalCode: input.delivery_postal_code || null,
+    placeId: input.delivery_place_id || null,
+    latitude: input.delivery_latitude ?? null,
+    longitude: input.delivery_longitude ?? null,
+    landmark: input.delivery_landmark || null,
+    notes: input.delivery_notes || null,
+    source: input.delivery_location_source || null,
+    deliveryAreaOverride: savedLocation?.deliveryAreaOverride || null
+  } : null;
+  if (input.fulfillment_method === "delivery") {
+    if (!submittedDeliveryLocation.formattedAddress) {
+      throw new HttpError(400, "Please confirm your delivery address before checkout.");
+    }
+    if (!validCoordinates(submittedDeliveryLocation.latitude, submittedDeliveryLocation.longitude)) {
+      throw new HttpError(400, "Please place the delivery pin on the map before checkout.");
+    }
   }
   if (input.payment_method === "cod") {
     const explicitDeliveryArea = String(savedLocation?.deliveryAreaOverride || "").trim().toLowerCase();
     const shippingQuote = input.fulfillment_method === "delivery"
-      ? await calculateShippingQuote(savedLocation || {}, { fulfillmentMethod: "delivery" })
+      ? await calculateShippingQuote(submittedDeliveryLocation || {}, { fulfillmentMethod: "delivery" })
       : null;
     if (explicitDeliveryArea === "outside" || (input.fulfillment_method === "delivery" && shippingQuote?.shippingZone !== "nearby")) {
       throw new HttpError(400, codMunicipalityError);
@@ -1397,23 +1425,23 @@ router.post("/", requireAuth, requireApproved, asyncHandler(async (req, res) => 
   }
   const trustedInput = input.fulfillment_method === "delivery" ? {
     ...input,
-    delivery_address: savedLocation.formattedAddress,
-    delivery_latitude: savedLocation.latitude,
-    delivery_longitude: savedLocation.longitude,
-    delivery_municipality: savedLocation.municipality,
-    delivery_province: savedLocation.province,
-    delivery_region: savedLocation.region,
-    delivery_postal_code: savedLocation.postalCode,
-    delivery_place_id: savedLocation.placeId,
-    delivery_landmark: savedLocation.landmark || "",
-    delivery_notes: savedLocation.notes || ""
+    delivery_address: submittedDeliveryLocation.formattedAddress,
+    delivery_latitude: submittedDeliveryLocation.latitude,
+    delivery_longitude: submittedDeliveryLocation.longitude,
+    delivery_municipality: submittedDeliveryLocation.municipality,
+    delivery_province: submittedDeliveryLocation.province,
+    delivery_region: submittedDeliveryLocation.region,
+    delivery_postal_code: submittedDeliveryLocation.postalCode,
+    delivery_place_id: submittedDeliveryLocation.placeId,
+    delivery_landmark: submittedDeliveryLocation.landmark || "",
+    delivery_notes: submittedDeliveryLocation.notes || ""
   } : input;
   const compactItems = compactOrderItems(input.items);
   const pricing = await calculateCheckoutPricing(
     compactItems,
     input.coupon_code,
     input.fulfillment_method,
-    { location: savedLocation }
+    { location: submittedDeliveryLocation || savedLocation }
   );
   if (input.coupon_code && !pricing.coupon) throw new HttpError(400, "Coupon is invalid or expired.");
   const result = await createOrderWithRetry(req, trustedInput, pricing);

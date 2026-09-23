@@ -147,10 +147,13 @@ export function registrationFieldsFromLocation(value) {
   };
 }
 
-export function locationValidationMessage(value) {
+export function locationValidationMessage(value, options = {}) {
   const location = normalizeStructuredLocation(value);
   if (!location.formattedAddress) return "Location is required.";
   if (!isResolvedLocation(location)) return "Please select a location from the suggestions.";
+  if (options.requireCoordinates && !hasLocationCoordinates(location)) {
+    return "Please place the delivery pin on the map so this order has exact coordinates.";
+  }
   return "";
 }
 

@@ -894,6 +894,14 @@ export default function CustomerDashboard({ active, onChange }) {
       return;
     }
     const selectedDeliveryLocation = normalizeDeliveryLocation(deliveryLocation);
+    if (fulfillmentMethod === "delivery") {
+      const locationMessage = locationValidationMessage(selectedDeliveryLocation, { requireCoordinates: true });
+      if (locationMessage) {
+        notifyCart(locationMessage, "warning");
+        setLocationSelectorOpen(true);
+        return;
+      }
+    }
     if (fulfillmentMethod === "delivery" && !hasDeliveryLocation(selectedDeliveryLocation)) {
       notifyCart("Please set your delivery location before checkout.", "warning");
       return;
@@ -941,6 +949,13 @@ export default function CustomerDashboard({ active, onChange }) {
         delivery_address: selectedDeliveryLocation.address,
         delivery_latitude: selectedDeliveryLocation.latitude,
         delivery_longitude: selectedDeliveryLocation.longitude,
+        delivery_barangay: selectedDeliveryLocation.barangay,
+        delivery_municipality: selectedDeliveryLocation.municipality,
+        delivery_province: selectedDeliveryLocation.province,
+        delivery_region: selectedDeliveryLocation.region,
+        delivery_postal_code: selectedDeliveryLocation.postalCode,
+        delivery_place_id: selectedDeliveryLocation.placeId,
+        delivery_location_source: selectedDeliveryLocation.locationSource,
         delivery_landmark: selectedDeliveryLocation.landmark,
         delivery_notes: selectedDeliveryLocation.notes,
         items: selectedCartItems.map(({ product_id, quantity }) => ({ product_id, quantity }))
@@ -1031,7 +1046,7 @@ export default function CustomerDashboard({ active, onChange }) {
 
   async function saveCheckoutDeliveryLocation(nextLocation) {
     const normalized = normalizeDeliveryLocation(nextLocation);
-    const validationMessage = locationValidationMessage(normalized);
+    const validationMessage = locationValidationMessage(normalized, { requireCoordinates: true });
     if (validationMessage) {
       notifyCart(validationMessage, "warning");
       return false;
@@ -2202,7 +2217,7 @@ function DeliveryLocationSelector({ initialLocation, onClose, onSave }) {
   async function submitLocation(event) {
     event.preventDefault();
     const next = normalizeDeliveryLocation(draft);
-    const message = locationValidationMessage(next);
+    const message = locationValidationMessage(next, { requireCoordinates: true });
     if (message) {
       setValidationError(message);
       return;
