@@ -80,6 +80,27 @@ function normalizeLiveLocation(value = {}) {
   };
 }
 
+function normalizeOrderRiderLocation(order = {}) {
+  const latitude = finiteCoordinate(order.rider_latitude ?? order.riderLatitude);
+  const longitude = finiteCoordinate(order.rider_longitude ?? order.riderLongitude);
+  if (!validMapCoordinate(latitude, longitude)) return null;
+  const sharedAt = order.location_updated_at || order.locationUpdatedAt || order.updated_at || order.updatedAt || new Date().toISOString();
+  return {
+    order_id: Number(order.id || 0) || null,
+    user_id: Number(order.rider_id ?? order.riderId ?? 0) || null,
+    source_type: "rider",
+    latitude,
+    longitude,
+    heading: null,
+    speed: null,
+    accuracy: null,
+    is_live: true,
+    trackingActive: true,
+    shared_at: sharedAt,
+    timestamp: sharedAt
+  };
+}
+
 function bearingBetween(start, end) {
   if (!start || !end || !validMapCoordinate(start.latitude, start.longitude) || !validMapCoordinate(end.latitude, end.longitude)) return null;
   const lat1 = start.latitude * Math.PI / 180;
@@ -238,6 +259,7 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
   const autoStartedRef = useRef(null);
 
   const shop = useMemo(() => normalizeShopLocation(settings || {}), [settings]);
+  const savedRiderLocation = useMemo(() => normalizeOrderRiderLocation(order), [order]);
   const hasShopCoordinates = shop.latitude !== null && shop.longitude !== null;
   const hasDestinationCoordinates = validMapCoordinate(destinationSnapshot.latitude, destinationSnapshot.longitude);
   const terminalOrder = ["completed", "cancelled", "payment_failed", "rejected"].includes(String(order?.status || "").toLowerCase());
@@ -312,6 +334,24 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
     setLocating(false);
   }, [order?.id]);
 
+  const applySavedRiderLocation = useCallback((message = "") => {
+    if (!savedRiderLocation || Number(savedRiderLocation.order_id) !== Number(order?.id || 0)) return false;
+    const markerPosition = {
+      lat: savedRiderLocation.latitude,
+      lng: savedRiderLocation.longitude,
+      heading: savedRiderLocation.heading,
+      accuracy: savedRiderLocation.accuracy,
+      shared_at: savedRiderLocation.shared_at
+    };
+    setRiderPosition(markerPosition);
+    setLiveLocation(savedRiderLocation);
+    setDisplayedLiveLocation(savedRiderLocation);
+    setFollowRider(true);
+    setLocating(false);
+    if (message) setLiveError(message);
+    return true;
+  }, [order?.id, savedRiderLocation]);
+
   const fetchLatestLiveLocation = useCallback(() => {
     if (!liveRouteEnabled || !order?.id) return Promise.resolve(null);
     return api.get(`/live-locations/orders/${order.id}`)
@@ -323,6 +363,11 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
       })
       .catch(() => null);
   }, [applyLiveLocation, liveRouteEnabled, order?.id]);
+
+  useEffect(() => {
+    if (!liveRouteEnabled || liveLocation || displayedLiveLocation || !savedRiderLocation) return;
+    applySavedRiderLocation();
+  }, [applySavedRiderLocation, displayedLiveLocation, liveLocation, liveRouteEnabled, savedRiderLocation]);
 
   const leaveLiveSocket = useCallback(() => {
     const socket = socketRef.current;
@@ -692,6 +737,17 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
     }
   }
 
+  async function showRiderOnMap() {
+    setLiveError("");
+    setRouteVisible(true);
+    setRouteRequested(true);
+    setFollowRider(true);
+    const latest = await fetchLatestLiveLocation();
+    if (latest) return;
+    const showedSaved = applySavedRiderLocation("No fresh live update yet. Showing the latest saved rider location.");
+    if (!showedSaved) setLiveError("Rider location is not available yet. Ask the admin to start Live Tracking and allow location permission.");
+  }
+
   const hasLiveRider = Boolean(
     displayedLiveLocation
       || liveLocation
@@ -774,6 +830,10 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
                       <LocateFixed size={14} /> {followRider ? "Following Rider" : "Follow Rider"}
                     </button>
                   ) : null}
+                  <button type="button" onClick={() => void showRiderOnMap()} disabled={locating}>
+                    {locating ? <Loader2 size={15} className="animate-spin" /> : <LocateFixed size={14} />}
+                    Show Rider
+                  </button>
                   {canShareLiveLocation ? !trackingActive ? (
                     <button type="button" onClick={() => startLiveTracking({ requireFreshPosition: true })} disabled={locating || !liveTrackingAllowed}>
                       {locating ? <Loader2 size={15} className="animate-spin" /> : <Radio size={15} />}
