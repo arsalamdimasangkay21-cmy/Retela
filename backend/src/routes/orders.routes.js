@@ -734,6 +734,10 @@ router.post("/:id/location", requireAuth, requireApproved, requireRole("admin", 
   if (!validCoordinates(input.latitude, input.longitude)) throw new HttpError(400, "A valid rider location is required.");
   const order = await loadOrderForTracking(orderId, req.user);
   assertDeliveryOrderTrackable(order);
+  if (!order.rider_id) throw new HttpError(409, "Assign a rider before live location sharing starts.");
+  if (Number(order.rider_id) !== Number(req.user.id)) {
+    throw new HttpError(403, "Only the rider assigned to this order can publish live location.");
+  }
   const customerLocation = trackingCustomerLocation(order);
   if (!customerLocation) throw new HttpError(409, "Customer delivery coordinates are unavailable for this order.");
   const riderName = String(req.user.display_name || req.user.username || "Rider").trim().slice(0, 160);

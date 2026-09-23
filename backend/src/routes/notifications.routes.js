@@ -118,6 +118,7 @@ async function attachCustomerNotificationDetails(rows) {
     return {
       id: row.id,
       user_id: row.user_id,
+      order_id: row.order_id === null || row.order_id === undefined ? null : Number(row.order_id),
       product_id: row.product_id,
       broadcast_id: row.broadcast_id,
       type: row.type,
@@ -155,9 +156,13 @@ async function ensureNotificationBroadcastSchema() {
        FROM INFORMATION_SCHEMA.COLUMNS
        WHERE TABLE_SCHEMA = DATABASE()
          AND TABLE_NAME = 'notifications'
-         AND COLUMN_NAME IN ('broadcast_id')`
+         AND COLUMN_NAME IN ('order_id', 'broadcast_id')`
     );
     const columns = new Set(rows.map((row) => row.COLUMN_NAME));
+    if (!columns.has("order_id")) {
+      await query("ALTER TABLE notifications ADD COLUMN order_id INT NULL AFTER product_id");
+      await query("CREATE INDEX idx_notifications_order ON notifications (order_id)").catch(() => {});
+    }
     if (!columns.has("broadcast_id")) {
       await query("ALTER TABLE notifications ADD COLUMN broadcast_id INT NULL AFTER product_id");
       await query("CREATE INDEX idx_notifications_broadcast ON notifications (broadcast_id)");

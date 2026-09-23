@@ -1000,7 +1000,7 @@ export default function AdminDashboard({ active, onChange }) {
   }
 
   if (active === "Orders") {
-    return <OrderManagement rows={orders} updateOrder={updateOrder} onNavigate={onChange} showToast={showProductToast} />;
+    return <OrderManagement rows={orders} currentUser={user} updateOrder={updateOrder} onNavigate={onChange} showToast={showProductToast} />;
   }
 
   if (active === "POS") {
@@ -4354,7 +4354,7 @@ function paymentLabel(method) {
   return "COD";
 }
 
-function OrderManagement({ rows, updateOrder, onNavigate, showToast }) {
+function OrderManagement({ rows, currentUser, updateOrder, onNavigate, showToast }) {
   const [selectedOrderId, setSelectedOrderId] = useState(null);
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [loadingOrderId, setLoadingOrderId] = useState(null);
@@ -4535,6 +4535,7 @@ function OrderManagement({ rows, updateOrder, onNavigate, showToast }) {
           <OrderDetailsModal
             loading={loadingOrderId}
             selectedOrder={selectedOrder}
+            currentUser={currentUser}
             trackingNumber={trackingNumber}
             setTrackingNumber={setTrackingNumber}
             saveTracking={saveTracking}
@@ -4887,7 +4888,7 @@ function orderMeetupEligibility(order, fallback = {}) {
   };
 }
 
-function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTrackingNumber, saveTracking, updateOrder, meetupScrollToken = 0, onStatusChanged, onMeetingPlaceSaved, onMessageCustomer, onClose }) {
+function OrderDetailsModal({ loading, selectedOrder, currentUser, trackingNumber, setTrackingNumber, saveTracking, updateOrder, meetupScrollToken = 0, onStatusChanged, onMeetingPlaceSaved, onMessageCustomer, onClose }) {
   const source = selectedOrder?.order;
   const [meetingPlaceDraft, setMeetingPlaceDraft] = useState("");
   const [meetupDateDraft, setMeetupDateDraft] = useState("");
@@ -4912,6 +4913,7 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
   const meetupScheduleSaved = Boolean(source?.meeting_place && source?.meetup_date && source?.meetup_time);
   const meetupAreaEligible = meetupEligibility.areaEligible;
   const isDeliveryOrder = meetupEligibility.deliveryOrder;
+  const canShareOrderLiveLocation = Boolean(source?.rider_id && currentUser?.id && Number(source.rider_id) === Number(currentUser.id));
   const showMeetupDetails = meetupEligibility.eligible;
   const showMeetupEditor = showMeetupDetails;
   const fulfillmentStatus = canonicalOrderStatus(source);
@@ -5132,7 +5134,7 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
                   <button type="button" onClick={saveTracking} className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-emerald-700">Save</button>
                 </div>
               </div>
-              {isDeliveryOrder ? <OrderDeliveryInfo order={source} title="Delivery Location" mapLabel="View Delivery Route" routeEnabled liveRouteEnabled canShareLiveLocation routeInitiallyVisible={false} onRouteMetrics={handleRouteMetrics} /> : null}
+              {isDeliveryOrder ? <OrderDeliveryInfo order={source} title="Delivery Location" mapLabel="View Delivery Route" routeEnabled liveRouteEnabled canShareLiveLocation={canShareOrderLiveLocation} routeInitiallyVisible={false} onRouteMetrics={handleRouteMetrics} /> : null}
               {showMeetupDetails ? <section ref={meetupSectionRef} className="admin-meeting-place-card">
                 <div>
                   <p className="text-xs font-bold uppercase tracking-[0.16em] text-emerald-700">COD meetup</p>

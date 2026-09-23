@@ -1132,6 +1132,7 @@ async function ensureCommunicationTables() {
       id INT AUTO_INCREMENT PRIMARY KEY,
       user_id INT NULL,
       product_id INT NULL,
+      order_id INT NULL,
       broadcast_id INT NULL,
       type ENUM('approval','customer_registration','registration','order','order_cancelled','payment','message','feedback','refund','return','new_product','inventory','system','broadcast') NOT NULL,
       title VARCHAR(160) NOT NULL,
@@ -1139,12 +1140,15 @@ async function ensureCommunicationTables() {
       is_read BOOLEAN NOT NULL DEFAULT FALSE,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       INDEX idx_notifications_user (user_id),
+      INDEX idx_notifications_order (order_id),
       INDEX idx_notifications_read (is_read),
       INDEX idx_notifications_broadcast (broadcast_id)
     )
   `);
   await ensureAutoIncrementId("notifications");
+  await ensureColumn("notifications", "order_id", "order_id INT NULL AFTER product_id");
   await ensureColumn("notifications", "broadcast_id", "broadcast_id INT NULL AFTER product_id");
+  await ensureIndex("notifications", "idx_notifications_order", "CREATE INDEX idx_notifications_order ON notifications (order_id)", ["order_id"]);
   await ensureIndex("notifications", "idx_notifications_broadcast", "CREATE INDEX idx_notifications_broadcast ON notifications (broadcast_id)", ["broadcast_id"]);
   await safeModifyColumn("notifications", "type", "type enum update", "ALTER TABLE notifications MODIFY type ENUM('approval','customer_registration','registration','order','order_cancelled','payment','message','feedback','refund','return','new_product','inventory','system','broadcast') NOT NULL");
 
