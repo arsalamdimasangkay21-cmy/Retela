@@ -10,6 +10,61 @@ function socketUrlFromApiUrl(apiUrl) {
 
 const productionBackendUrl = "https://api.retela.shop";
 
+function browserLocation() {
+  return typeof window === "undefined" ? null : window.location;
+}
+
+function isLocalHostname(hostname) {
+  return /^(localhost|127\.0\.0\.1|\[?::1\]?)$/i.test(String(hostname || ""));
+}
+
+function isRetelaFrontendHostname(hostname) {
+  return /^(www\.)?retela\.shop$/i.test(String(hostname || ""))
+    || /^retela\.vercel\.app$/i.test(String(hostname || ""));
+}
+
+function defaultBackendUrl() {
+  const location = browserLocation();
+  if (!location) return import.meta.env.PROD ? productionBackendUrl : "http://localhost:5000";
+
+  const hostname = location.hostname;
+  if (import.meta.env.PROD) {
+    if (isRetelaFrontendHostname(hostname)) return productionBackendUrl;
+    return location.origin;
+  }
+
+  if (isLocalHostname(hostname)) return "http://localhost:5000";
+
+  // When testing from a phone on the same Wi-Fi, the page host is the dev
+  // machine's LAN IP. Using localhost here would point at the phone itself.
+  return `${location.protocol}//${hostname}:5000`;
+}
+
+function normalizeBackendOrigin(value) {
+  const fallbackBackendUrl = defaultBackendUrl();
+  const configuredUrl = String(value || "").trim();
+  let raw = stripTrailingSlash(configuredUrl || fallbackBackendUrl);
+  const location = browserLocation();
+
+  if (raw.startsWith("/") && location) {
+    raw = `${location.origin}${raw}`;
+  }
+
+  try {
+    const parsed = new URL(raw);
+    if (import.meta.env.PROD && isLocalHostname(parsed.hostname)) {
+      raw = fallbackBackendUrl;
+    } else if (!import.meta.env.PROD && isLocalHostname(parsed.hostname) && location && !isLocalHostname(location.hostname)) {
+      parsed.hostname = location.hostname;
+      raw = stripTrailingSlash(parsed.toString());
+    }
+  } catch {
+    raw = fallbackBackendUrl;
+  }
+
+  return stripTrailingSlash(raw).replace(/(\/api)+$/, "");
+}
+
 export function getStoredAuthToken() {
   const token = String(localStorage.getItem("retela_token") || "").trim();
   if (!token || ["undefined", "null"].includes(token.toLowerCase())) return "";
@@ -26,21 +81,12 @@ export function getStoredAuthToken() {
 }
 
 function normalizeApiUrl(value) {
-  const fallbackApiUrl = import.meta.env.PROD ? productionBackendUrl : "http://localhost:5000";
-  const configuredUrl = String(value || "").trim();
-  let raw = stripTrailingSlash(configuredUrl || fallbackApiUrl);
-  try {
-    const parsed = new URL(raw);
-    if (import.meta.env.PROD && /^(localhost|127\.0\.0\.1)$/i.test(parsed.hostname)) raw = fallbackApiUrl;
-    if (import.meta.env.PROD && /(?:^|\.)onrender\.com$/i.test(parsed.hostname)) raw = productionBackendUrl;
-  } catch {
-    raw = fallbackApiUrl;
-  }
-  return `${raw.replace(/(\/api)+$/, "")}/api`;
+  return `${normalizeBackendOrigin(value)}/api`;
 }
 
+export const API_ORIGIN = normalizeBackendOrigin(import.meta.env.VITE_API_URL);
 export const API_URL = normalizeApiUrl(import.meta.env.VITE_API_URL);
-export const SOCKET_URL = socketUrlFromApiUrl(import.meta.env.VITE_SOCKET_URL || API_URL);
+export const SOCKET_URL = socketUrlFromApiUrl(normalizeBackendOrigin(import.meta.env.VITE_SOCKET_URL || API_ORIGIN));
 
 export const api = axios.create({
   baseURL: API_URL,
