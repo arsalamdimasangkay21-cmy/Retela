@@ -12,27 +12,39 @@ const activeTrackingStatuses = new Set(["ready"]);
 const terminalStatuses = new Set(["completed", "cancelled", "payment_failed", "rejected"]);
 
 export async function ensureLiveLocationTable() {
-  liveLocationTableReady ||= query(`
-    CREATE TABLE IF NOT EXISTS order_live_locations (
-      id INT AUTO_INCREMENT PRIMARY KEY,
-      order_id INT NOT NULL,
-      user_id INT NOT NULL,
-      source_type ENUM('rider','customer') NOT NULL DEFAULT 'rider',
-      latitude DECIMAL(10,7) NOT NULL,
-      longitude DECIMAL(10,7) NOT NULL,
-      heading DECIMAL(6,2) NULL,
-      speed DECIMAL(8,3) NULL,
-      accuracy DECIMAL(8,2) NULL,
-      is_live BOOLEAN NOT NULL DEFAULT TRUE,
-      shared_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      stopped_at DATETIME NULL,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-      UNIQUE KEY uq_order_live_source (order_id, user_id, source_type),
-      INDEX idx_order_live_order (order_id, source_type, is_live, shared_at),
-      INDEX idx_order_live_user (user_id, is_live)
-    )
-  `).catch((error) => {
+  liveLocationTableReady ||= (async () => {
+    await query(`
+      CREATE TABLE IF NOT EXISTS order_live_locations (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        order_id INT NOT NULL,
+        user_id INT NOT NULL,
+        source_type ENUM('rider','customer') NOT NULL DEFAULT 'rider',
+        latitude DECIMAL(10,7) NOT NULL,
+        longitude DECIMAL(10,7) NOT NULL,
+        heading DECIMAL(6,2) NULL,
+        speed DECIMAL(8,3) NULL,
+        accuracy DECIMAL(8,2) NULL,
+        is_live BOOLEAN NOT NULL DEFAULT TRUE,
+        shared_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        stopped_at DATETIME NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_order_live_source (order_id, user_id, source_type),
+        INDEX idx_order_live_order (order_id, source_type, is_live, shared_at),
+        INDEX idx_order_live_user (user_id, is_live)
+      )
+    `);
+    const addColumn = (sql) => query(sql).catch((error) => {
+      if (error?.code !== "ER_DUP_FIELDNAME") throw error;
+    });
+    await addColumn("ALTER TABLE order_live_locations ADD COLUMN source_type ENUM('rider','customer') NOT NULL DEFAULT 'rider' AFTER user_id");
+    await addColumn("ALTER TABLE order_live_locations ADD COLUMN heading DECIMAL(6,2) NULL AFTER longitude");
+    await addColumn("ALTER TABLE order_live_locations ADD COLUMN speed DECIMAL(8,3) NULL AFTER heading");
+    await addColumn("ALTER TABLE order_live_locations ADD COLUMN accuracy DECIMAL(8,2) NULL AFTER speed");
+    await addColumn("ALTER TABLE order_live_locations ADD COLUMN is_live BOOLEAN NOT NULL DEFAULT TRUE AFTER accuracy");
+    await addColumn("ALTER TABLE order_live_locations ADD COLUMN shared_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP AFTER is_live");
+    await addColumn("ALTER TABLE order_live_locations ADD COLUMN stopped_at DATETIME NULL AFTER shared_at");
+  })().catch((error) => {
     liveLocationTableReady = undefined;
     throw error;
   });

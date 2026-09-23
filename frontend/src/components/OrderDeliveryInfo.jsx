@@ -357,11 +357,24 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
     return api.get(`/live-locations/orders/${order.id}`)
       .then(({ data }) => {
         const payload = (data?.locations || []).find((location) => location?.source_type === "rider") || null;
-        if (!payload) return null;
+        if (!payload) throw new Error("No active live rider location.");
         applyLiveLocation(payload);
         return payload;
       })
-      .catch(() => null);
+      .catch(() => api.get(`/orders/${order.id}/location`)
+        .then(({ data }) => {
+          const payload = {
+            ...data,
+            order_id: Number(order.id),
+            source_type: "rider",
+            is_live: true,
+            trackingActive: true,
+            shared_at: data.updatedAt || data.shared_at || data.timestamp || new Date().toISOString()
+          };
+          applyLiveLocation(payload);
+          return payload;
+        })
+        .catch(() => null));
   }, [applyLiveLocation, liveRouteEnabled, order?.id]);
 
   useEffect(() => {
