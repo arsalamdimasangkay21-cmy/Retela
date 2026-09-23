@@ -70,6 +70,7 @@ export function normalizeStructuredLocation(value = {}) {
     postalCode: firstNonEmptyText(source.postalCode, source.postal_code, source.delivery_postal_code, nestedAddress.postalCode, nestedAddress.postal_code, nestedDeliveryAddress.postalCode, nestedDeliveryAddress.postal_code, nestedLocation.postalCode, nestedLocation.postal_code, addressComponentValue(source, ["postal_code"]), addressComponentValue(nestedAddress, ["postal_code"]), addressComponentValue(nestedDeliveryAddress, ["postal_code"]), addressComponentValue(nestedLocation, ["postal_code"])),
     latitude: finiteLocationCoordinate(source.latitude ?? source.delivery_latitude ?? nestedAddress.latitude ?? nestedDeliveryAddress.latitude ?? nestedLocation.latitude ?? source.geometry?.location?.lat),
     longitude: finiteLocationCoordinate(source.longitude ?? source.delivery_longitude ?? nestedAddress.longitude ?? nestedDeliveryAddress.longitude ?? nestedLocation.longitude ?? source.geometry?.location?.lng),
+    accuracy: finiteLocationCoordinate(source.accuracy ?? source.delivery_accuracy ?? nestedAddress.accuracy ?? nestedDeliveryAddress.accuracy ?? nestedLocation.accuracy),
     placeId: firstNonEmptyText(source.placeId, source.place_id, source.delivery_place_id, nestedAddress.placeId, nestedAddress.place_id, nestedDeliveryAddress.placeId, nestedDeliveryAddress.place_id, nestedLocation.placeId, nestedLocation.place_id),
     locationSource: firstNonEmptyText(source.locationSource, source.location_source, source.delivery_location_source, nestedAddress.locationSource, nestedAddress.location_source, nestedDeliveryAddress.locationSource, nestedDeliveryAddress.location_source, nestedLocation.locationSource, nestedLocation.location_source).toLowerCase(),
     landmark: firstNonEmptyText(source.landmark, source.delivery_landmark, nestedAddress.landmark, nestedDeliveryAddress.landmark, nestedLocation.landmark),
@@ -126,6 +127,7 @@ export function profileFieldsFromLocation(value) {
     delivery_place_id: location.placeId || null,
     delivery_latitude: location.latitude,
     delivery_longitude: location.longitude,
+    delivery_accuracy: location.accuracy,
     delivery_location_source: location.locationSource || null
   };
 }
@@ -142,6 +144,7 @@ export function registrationFieldsFromLocation(value) {
     postalCode: location.postalCode,
     latitude: location.latitude,
     longitude: location.longitude,
+    accuracy: location.accuracy,
     placeId: location.placeId,
     locationSource: location.locationSource
   };

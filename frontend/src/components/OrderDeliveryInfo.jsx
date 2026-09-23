@@ -128,6 +128,13 @@ function routeCacheKey(origin, destination) {
   ].join(":");
 }
 
+function formatCoordinatePair(latitude, longitude) {
+  const lat = Number(latitude);
+  const lng = Number(longitude);
+  if (!validMapCoordinate(lat, lng)) return "";
+  return `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+}
+
 function routeAbortError() {
   const error = new Error("Route request cancelled");
   error.name = "AbortError";
@@ -729,6 +736,13 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
           <div className="retela-route-note">
             <span>Delivery Notes</span>
             <strong>{destinationSnapshot.notes}</strong>
+          </div>
+        ) : null}
+
+        {hasDestinationCoordinates ? (
+          <div className="retela-route-note">
+            <span>Saved Order Coordinates</span>
+            <strong>{formatCoordinatePair(destinationSnapshot.latitude, destinationSnapshot.longitude)}</strong>
           </div>
         ) : null}
 

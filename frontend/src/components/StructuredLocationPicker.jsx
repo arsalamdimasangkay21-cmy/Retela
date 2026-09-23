@@ -13,6 +13,8 @@ import {
 
 const defaultMapCenter = { latitude: 7.1907, longitude: 124.5308 };
 const gpsOptions = { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 };
+const preferredGpsAccuracyMeters = 80;
+const usableGpsAccuracyMeters = 250;
 const deliveryPinIcon = L.divIcon({
   className: "retela-leaflet-pin-icon is-customer retela-structured-leaflet-pin",
   html: "<span></span><strong>Delivery Pin</strong>",
@@ -62,6 +64,74 @@ function gpsErrorMessage(error) {
   return error?.message || "Current location could not be accessed. Search for an address or place the pin manually.";
 }
 
+function fallbackCoordinateAddress(latitude, longitude, source) {
+  const label = source === "geolocation" ? "Current GPS location" : "Pinned location";
+  return `${label} (${Number(latitude).toFixed(6)}, ${Number(longitude).toFixed(6)})`;
+}
+
+function gpsAccuracyMessage(accuracy) {
+  const value = Number(accuracy);
+  if (!Number.isFinite(value)) return "GPS accuracy was not reported. Check the pin and move it manually if needed.";
+  if (value > usableGpsAccuracyMeters) return `GPS accuracy is low (${Math.round(value)} m). The pin uses the reported coordinates; drag it if needed.`;
+  if (value > preferredGpsAccuracyMeters) return `GPS accuracy is about ${Math.round(value)} m. Check the pin before saving.`;
+  return "";
+}
+
+function getFreshGpsPosition() {
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) {
+      reject(new Error("Current location is not supported by this browser."));
+      return;
+    }
+    const requestedAt = Date.now();
+    let settled = false;
+    let watchId = null;
+    let bestPosition = null;
+    const clear = () => {
+      if (watchId !== null) {
+        navigator.geolocation.clearWatch(watchId);
+        watchId = null;
+      }
+    };
+    const finish = (position) => {
+      if (settled) return;
+      settled = true;
+      clear();
+      window.clearTimeout(timeoutId);
+      resolve(position);
+    };
+    const fail = (error) => {
+      if (settled) return;
+      settled = true;
+      clear();
+      window.clearTimeout(timeoutId);
+      reject(error);
+    };
+    const timeoutId = window.setTimeout(() => {
+      if (bestPosition) finish(bestPosition);
+      else fail(Object.assign(new Error("GPS timed out before a fresh location was found."), { code: 3 }));
+    }, gpsOptions.timeout);
+    watchId = navigator.geolocation.watchPosition(
+      (position) => {
+        const timestamp = Number(position.timestamp || 0);
+        const ageMs = timestamp ? Math.abs(Date.now() - timestamp) : Infinity;
+        const staleBeforePress = timestamp && timestamp < requestedAt - 2000;
+        if (staleBeforePress || ageMs > 30000) return;
+        const accuracy = Number(position.coords?.accuracy);
+        if (!bestPosition || (Number.isFinite(accuracy) && accuracy < Number(bestPosition.coords?.accuracy ?? Infinity))) {
+          bestPosition = position;
+        }
+        if (Number.isFinite(accuracy) && accuracy <= preferredGpsAccuracyMeters) finish(position);
+      },
+      (error) => {
+        if (bestPosition) finish(bestPosition);
+        else fail(error);
+      },
+      gpsOptions
+    );
+  });
+}
+
 export default function StructuredLocationPicker({
   value,
   onChange,
@@ -82,6 +152,7 @@ export default function StructuredLocationPicker({
   const [searchError, setSearchError] = useState("");
   const searchAbortRef = useRef(null);
   const reverseAbortRef = useRef(null);
+  const gpsRequestRef = useRef(0);
 
   useEffect(() => {
     if (normalized.formattedAddress !== query && isResolvedLocation(normalized)) {
@@ -153,37 +224,73 @@ export default function StructuredLocationPicker({
     }
   }
 
-  async function resolveCoordinates(latitude, longitude, source) {
+  function applyCoordinateLocation({ latitude, longitude, source, accuracy = null, address = "" }) {
     const nextLatitude = Number(latitude);
     const nextLongitude = Number(longitude);
     if (!validMapCoordinate(nextLatitude, nextLongitude)) {
       setSearchError("That map position is not valid. Please choose another pin location.");
-      return;
+      return null;
+    }
+    const formattedAddress = address || fallbackCoordinateAddress(nextLatitude, nextLongitude, source);
+    const next = normalizeStructuredLocation({
+      formattedAddress,
+      latitude: nextLatitude,
+      longitude: nextLongitude,
+      accuracy,
+      placeId: "",
+      locationSource: source
+    });
+    setQuery(formattedAddress);
+    setSuggestions([]);
+    onChange(next);
+    return next;
+  }
+
+  async function resolveCoordinates(latitude, longitude, source, options = {}) {
+    const nextLatitude = Number(latitude);
+    const nextLongitude = Number(longitude);
+    if (!validMapCoordinate(nextLatitude, nextLongitude)) {
+      setSearchError("That map position is not valid. Please choose another pin location.");
+      return null;
     }
     reverseAbortRef.current?.abort();
     const controller = new AbortController();
     reverseAbortRef.current = controller;
     setResolving(true);
-    setSearchError("");
+    if (!options.keepWarning) setSearchError("");
+    const baseLocation = options.commitFirst
+      ? applyCoordinateLocation({
+        latitude: nextLatitude,
+        longitude: nextLongitude,
+        source,
+        accuracy: options.accuracy,
+        address: options.address
+      })
+      : null;
     try {
       const item = await reverseNominatim(nextLatitude, nextLongitude, controller.signal);
-      const next = locationFromNominatim({ ...item, lat: nextLatitude, lon: nextLongitude }, source);
+      const reverseLocation = locationFromNominatim({ ...item, lat: nextLatitude, lon: nextLongitude }, source);
+      const next = normalizeStructuredLocation({
+        ...reverseLocation,
+        latitude: nextLatitude,
+        longitude: nextLongitude,
+        accuracy: options.accuracy ?? baseLocation?.accuracy ?? null,
+        locationSource: source
+      });
       setQuery(next.formattedAddress);
       setSuggestions([]);
       onChange(next);
+      return next;
     } catch (requestError) {
-      if (requestError?.name === "AbortError") return;
-      const fallbackAddress = `Pinned location (${nextLatitude.toFixed(6)}, ${nextLongitude.toFixed(6)})`;
-      const next = normalizeStructuredLocation({
-        formattedAddress: fallbackAddress,
+      if (requestError?.name === "AbortError") return baseLocation;
+      const next = baseLocation || applyCoordinateLocation({
         latitude: nextLatitude,
         longitude: nextLongitude,
-        placeId: "",
-        locationSource: source
+        source,
+        accuracy: options.accuracy
       });
-      setQuery(fallbackAddress);
-      onChange(next);
-      setSearchError("The pin was saved, but its street address could not be resolved.");
+      if (!options.keepWarning) setSearchError("The pin was saved, but its street address could not be resolved.");
+      return next;
     } finally {
       if (!controller.signal.aborted) setResolving(false);
     }
@@ -194,19 +301,34 @@ export default function StructuredLocationPicker({
       setSearchError("Current location is not supported by this browser.");
       return;
     }
+    const requestId = gpsRequestRef.current + 1;
+    gpsRequestRef.current = requestId;
+    reverseAbortRef.current?.abort();
     setResolving(true);
     setSearchError("");
     setQuery("Finding your current GPS location...");
     setSuggestions([]);
-    navigator.geolocation.getCurrentPosition(
-      (position) => void resolveCoordinates(Number(position.coords.latitude), Number(position.coords.longitude), "geolocation"),
-      (geoError) => {
+    getFreshGpsPosition()
+      .then((position) => {
+        if (requestId !== gpsRequestRef.current) return;
+        const latitude = Number(position.coords.latitude);
+        const longitude = Number(position.coords.longitude);
+        const accuracy = Number.isFinite(Number(position.coords.accuracy)) ? Number(position.coords.accuracy) : null;
+        const warning = gpsAccuracyMessage(accuracy);
+        if (warning) setSearchError(warning);
+        void resolveCoordinates(latitude, longitude, "geolocation", {
+          accuracy,
+          address: fallbackCoordinateAddress(latitude, longitude, "geolocation"),
+          commitFirst: true,
+          keepWarning: Boolean(warning)
+        });
+      })
+      .catch((geoError) => {
+        if (requestId !== gpsRequestRef.current) return;
         setResolving(false);
         setSearchError(gpsErrorMessage(geoError));
         setQuery(normalized.formattedAddress || "");
-      },
-      gpsOptions
-    );
+      });
   }
 
   function useManualAddress() {
@@ -220,6 +342,8 @@ export default function StructuredLocationPicker({
 
   const showManualFallback = query.trim().length >= 3 && !searching && (Boolean(searchError) || (attemptedSearch && !suggestions.length));
   const details = [normalized.barangay, normalized.municipality, normalized.province, normalized.region, normalized.postalCode].filter(Boolean);
+  const accuracy = Number(normalized.accuracy);
+  const accuracyText = Number.isFinite(accuracy) ? `GPS accuracy: ${Math.round(accuracy)} m` : "";
 
   return (
     <div className={`retela-structured-location ${compact ? "is-compact" : ""}`}>
@@ -272,6 +396,7 @@ export default function StructuredLocationPicker({
         <div className="retela-structured-location-selection">
           <strong>{normalized.formattedAddress}</strong>
           {details.length ? <span>{details.join(" | ")}</span> : null}
+          {accuracyText ? <span>{accuracyText}</span> : null}
           {!hasLocationCoordinates(normalized) ? <span className="is-warning">Manual address saved. Map coordinates are unavailable.</span> : null}
         </div>
       ) : null}
