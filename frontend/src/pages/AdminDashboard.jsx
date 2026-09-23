@@ -4357,6 +4357,7 @@ function paymentLabel(method) {
 function OrderManagement({ rows, updateOrder, onNavigate, showToast }) {
   const [selectedOrderId, setSelectedOrderId] = useState(null);
   const [selectedOrder, setSelectedOrder] = useState(null);
+  const [autoTrackingOrderId, setAutoTrackingOrderId] = useState(null);
   const [loadingOrderId, setLoadingOrderId] = useState(null);
   const [reloadToken, setReloadToken] = useState(0);
   const [meetupScrollToken, setMeetupScrollToken] = useState(0);
@@ -4416,6 +4417,8 @@ function OrderManagement({ rows, updateOrder, onNavigate, showToast }) {
     payment_key: row.payment_method,
     fulfillment: row.fulfillment_method === "pickup" ? "Pick up" : "Delivery",
     fulfillment_key: row.fulfillment_method || "delivery",
+    live_tracking_available: (row.fulfillment_method || "delivery") === "delivery"
+      && ["ready", "out_for_delivery"].includes(canonicalOrderStatus(row)),
     items: row.item_count || 0,
     tracking: row.tracking_number || "Not set",
     created_at: row.created_at
@@ -4447,6 +4450,12 @@ function OrderManagement({ rows, updateOrder, onNavigate, showToast }) {
     setOrderSearch("");
     setOrderFilters({ status: "all", payment: "all", fulfillment: "all", date: "all" });
     setFiltersOpen(false);
+  }
+
+  function openLiveTracking(order) {
+    if (!order?.live_tracking_available) return;
+    setAutoTrackingOrderId(Number(order.id));
+    setSelectedOrderId(order.id);
   }
 
   useEffect(() => {
@@ -4528,7 +4537,7 @@ function OrderManagement({ rows, updateOrder, onNavigate, showToast }) {
           </button>
         </div>
       </section>
-      <OrdersResponsiveView rows={visible} onViewDetails={setSelectedOrderId} />
+      <OrdersResponsiveView rows={visible} onViewDetails={(orderId) => { setAutoTrackingOrderId(null); setSelectedOrderId(orderId); }} onLiveTracking={openLiveTracking} />
       <OrdersPagination page={currentPage} pageCount={pageCount} onPageChange={setOrderPage} />
       <AnimatePresence>
         {selectedOrderId ? (
@@ -4538,6 +4547,7 @@ function OrderManagement({ rows, updateOrder, onNavigate, showToast }) {
             trackingNumber={trackingNumber}
             setTrackingNumber={setTrackingNumber}
             saveTracking={saveTracking}
+            autoStartLiveTracking={Number(autoTrackingOrderId) === Number(selectedOrder?.order?.id)}
             updateOrder={updateOrder}
             meetupScrollToken={meetupScrollToken}
             onStatusChanged={(updatedOrder, options = {}) => {
@@ -4569,7 +4579,7 @@ function OrderManagement({ rows, updateOrder, onNavigate, showToast }) {
               }));
               onNavigate?.("Messages");
             }}
-            onClose={() => setSelectedOrderId(null)}
+            onClose={() => { setAutoTrackingOrderId(null); setSelectedOrderId(null); }}
           />
         ) : null}
       </AnimatePresence>
@@ -4609,7 +4619,7 @@ function manilaTimeInputValue(value = new Date()) {
   }).format(value);
 }
 
-function OrdersResponsiveView({ rows, onViewDetails }) {
+function OrdersResponsiveView({ rows, onViewDetails, onLiveTracking }) {
   if (!rows.length) {
     return (
       <Card className="admin-orders-list-card">
@@ -4652,7 +4662,12 @@ function OrdersResponsiveView({ rows, onViewDetails }) {
                   <td><OrderStatusBadge status={order.status_key} label={order.status} /></td>
                   <td className="orders-total-cell">{order.total}</td>
                   <td>{order.payment}</td>
-                  <td><OrderDetailsButton order={order} onViewDetails={onViewDetails} /></td>
+                  <td>
+                    <div className="order-action-group">
+                      <OrderDetailsButton order={order} onViewDetails={onViewDetails} />
+                      <OrderLiveTrackingButton order={order} onLiveTracking={onLiveTracking} />
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -4678,6 +4693,7 @@ function OrdersResponsiveView({ rows, onViewDetails }) {
             </div>
             <div className="order-mobile-actions">
               <OrderDetailsButton order={order} onViewDetails={onViewDetails} />
+              <OrderLiveTrackingButton order={order} onLiveTracking={onLiveTracking} />
             </div>
           </article>
         ))}
@@ -4700,6 +4716,16 @@ function OrderDetailsButton({ order, onViewDetails }) {
     <button type="button" onClick={() => onViewDetails(order.id)} className="order-details-btn" aria-label={`View details for ${order.order_no}`}>
       <Eye size={16} />
       Details
+    </button>
+  );
+}
+
+function OrderLiveTrackingButton({ order, onLiveTracking }) {
+  const disabled = !order.live_tracking_available;
+  return (
+    <button type="button" onClick={() => onLiveTracking?.(order)} disabled={disabled} className="order-details-btn order-live-tracking-btn" aria-label={`Open live tracking for ${order.order_no}`} title={disabled ? "Live tracking is available once the order is out for delivery." : "Open live tracking"}>
+      <MapPin size={16} />
+      Live Tracking
     </button>
   );
 }
@@ -4887,7 +4913,7 @@ function orderMeetupEligibility(order, fallback = {}) {
   };
 }
 
-function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTrackingNumber, saveTracking, updateOrder, meetupScrollToken = 0, onStatusChanged, onMeetingPlaceSaved, onMessageCustomer, onClose }) {
+function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTrackingNumber, saveTracking, autoStartLiveTracking = false, updateOrder, meetupScrollToken = 0, onStatusChanged, onMeetingPlaceSaved, onMessageCustomer, onClose }) {
   const source = selectedOrder?.order;
   const [meetingPlaceDraft, setMeetingPlaceDraft] = useState("");
   const [meetupDateDraft, setMeetupDateDraft] = useState("");
@@ -5132,7 +5158,7 @@ function OrderDetailsModal({ loading, selectedOrder, trackingNumber, setTracking
                   <button type="button" onClick={saveTracking} className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-emerald-700">Save</button>
                 </div>
               </div>
-              {isDeliveryOrder ? <OrderDeliveryInfo order={source} title="Delivery Location" mapLabel="View Delivery Route" routeEnabled liveRouteEnabled canShareLiveLocation routeInitiallyVisible={false} onRouteMetrics={handleRouteMetrics} /> : null}
+              {isDeliveryOrder ? <OrderDeliveryInfo order={source} title="Delivery Location" mapLabel="View Delivery Route" routeEnabled liveRouteEnabled canShareLiveLocation autoStartTracking={autoStartLiveTracking} routeInitiallyVisible={autoStartLiveTracking} onRouteMetrics={handleRouteMetrics} /> : null}
               {showMeetupDetails ? <section ref={meetupSectionRef} className="admin-meeting-place-card">
                 <div>
                   <p className="text-xs font-bold uppercase tracking-[0.16em] text-emerald-700">COD meetup</p>

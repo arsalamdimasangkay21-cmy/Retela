@@ -223,9 +223,6 @@ router.post("/orders/:id", requireAuth, requireApproved, asyncHandler(async (req
   if (sourceType === "customer" && req.user.role !== "customer") throw new HttpError(403, "Only the customer can publish customer live location.");
   const order = await loadOrderForLiveLocation(orderId, req.user);
   assertTrackableOrder(order);
-  if (sourceType === "rider" && order.rider_id && Number(order.rider_id) !== Number(req.user.id)) {
-    throw new HttpError(403, "Only the rider assigned to this order can publish live location.");
-  }
   const sharedAt = parseClientTimestamp(input.timestamp);
 
   await query(

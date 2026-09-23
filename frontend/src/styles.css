@@ -4742,6 +4742,8 @@ button {
 
 .order-mobile-actions {
   display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
   justify-content: stretch;
   margin-top: 12px;
 }
@@ -5140,6 +5142,31 @@ button {
   transform: translateY(-1px);
 }
 
+.order-action-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.order-live-tracking-btn {
+  border-color: #bfdbfe;
+  color: #1d4ed8;
+}
+
+.order-live-tracking-btn:hover {
+  border-color: #93c5fd;
+  background: #eff6ff;
+}
+
+.order-details-btn:disabled,
+.order-details-btn:disabled:hover {
+  cursor: not-allowed;
+  border-color: #e2e8f0;
+  background: #f8fafc;
+  color: #94a3b8;
+  transform: none;
+}
+
 .order-mobile-card {
   background: var(--surface, #ffffff);
   border-color: rgba(22, 101, 52, 0.14);
@@ -5209,6 +5236,9 @@ button {
 
 .order-mobile-actions .order-details-btn {
   width: 100%;
+}
+
+.order-mobile-actions .order-details-btn:first-child {
   margin-top: 14px;
 }
 
