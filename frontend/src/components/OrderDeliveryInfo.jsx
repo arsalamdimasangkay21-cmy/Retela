@@ -7,9 +7,15 @@ import { api, cachedGet, getApiErrorMessage, getStoredAuthToken } from "../api/c
 import { acquireSocket, releaseSocket } from "../api/socket";
 import { OSM_ATTRIBUTION, OSM_TILE_URL, routeUrl, validMapCoordinate } from "../config/maps";
 
+const LIVE_LOCATION_STALE_MS = 2 * 60 * 1000;
+
 function finiteCoordinate(value) {
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
+}
+
+function isExplicitFalse(value) {
+  return value === false || value === 0 || value === "0" || String(value).toLowerCase() === "false";
 }
 
 function devLog(label, payload) {
@@ -63,7 +69,8 @@ function normalizeLiveLocation(value = {}) {
   const latitude = finiteCoordinate(value.latitude);
   const longitude = finiteCoordinate(value.longitude);
   if (!validMapCoordinate(latitude, longitude)) return null;
-  const isLive = value.trackingActive !== false && value.is_live !== false && value.status !== "stopped";
+  const isLive = !isExplicitFalse(value.trackingActive) && !isExplicitFalse(value.is_live) && value.status !== "stopped";
+  const sharedAt = value.shared_at || value.sharedAt || value.updatedAt || value.timestamp || null;
   return {
     order_id: Number(value.order_id ?? value.orderId ?? 0) || null,
     user_id: Number(value.user_id ?? value.userId ?? 0) || null,
@@ -75,8 +82,8 @@ function normalizeLiveLocation(value = {}) {
     accuracy: finiteCoordinate(value.accuracy),
     is_live: isLive,
     trackingActive: isLive,
-    shared_at: value.shared_at || value.sharedAt || value.updatedAt || value.timestamp || new Date().toISOString(),
-    timestamp: value.timestamp || value.shared_at || value.sharedAt || value.updatedAt || new Date().toISOString()
+    shared_at: sharedAt,
+    timestamp: value.timestamp || sharedAt
   };
 }
 
@@ -84,7 +91,7 @@ function normalizeOrderRiderLocation(order = {}) {
   const latitude = finiteCoordinate(order.rider_latitude ?? order.riderLatitude);
   const longitude = finiteCoordinate(order.rider_longitude ?? order.riderLongitude);
   if (!validMapCoordinate(latitude, longitude)) return null;
-  const sharedAt = order.location_updated_at || order.locationUpdatedAt || order.updated_at || order.updatedAt || new Date().toISOString();
+  const sharedAt = order.location_updated_at || order.locationUpdatedAt || order.updated_at || order.updatedAt || null;
   return {
     order_id: Number(order.id || 0) || null,
     user_id: Number(order.rider_id ?? order.riderId ?? 0) || null,
@@ -94,8 +101,8 @@ function normalizeOrderRiderLocation(order = {}) {
     heading: null,
     speed: null,
     accuracy: null,
-    is_live: true,
-    trackingActive: true,
+    is_live: false,
+    trackingActive: false,
     shared_at: sharedAt,
     timestamp: sharedAt
   };
@@ -137,6 +144,18 @@ function formatUpdatedAgo(value) {
   if (seconds < 60) return `${seconds} sec ago`;
   const minutes = Math.round(seconds / 60);
   return `${minutes} min ago`;
+}
+
+function formatUpdatedTime(value) {
+  if (!value) return "";
+  const timestamp = new Date(value);
+  if (Number.isNaN(timestamp.getTime())) return "";
+  return timestamp.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
+
+function isLocationStale(location, now = Date.now()) {
+  const timestamp = new Date(location?.shared_at || location?.timestamp || 0).getTime();
+  return !timestamp || now - timestamp > LIVE_LOCATION_STALE_MS;
 }
 
 function routeCacheKey(origin, destination) {
@@ -244,6 +263,7 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
   const [loadingRoute, setLoadingRoute] = useState(false);
   const [error, setError] = useState("");
   const [liveError, setLiveError] = useState("");
+  const [statusNow, setStatusNow] = useState(Date.now());
   const watchIdRef = useRef(null);
   const socketRef = useRef(null);
   const socketHandlersRef = useRef(null);
@@ -283,6 +303,7 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
     setDisplayedLiveLocation(null);
     setError("");
     setLiveError("");
+    setStatusNow(Date.now());
     liveRouteRefreshRef.current = { point: null, at: 0 };
     lastPublishedRef.current = { point: null, at: 0 };
     routeRequestRef.current += 1;
@@ -297,30 +318,32 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
     trackingActiveRef.current = trackingActive;
   }, [trackingActive]);
 
+  useEffect(() => {
+    if (!displayedLiveLocation) return undefined;
+    const intervalId = window.setInterval(() => setStatusNow(Date.now()), 30000);
+    return () => window.clearInterval(intervalId);
+  }, [displayedLiveLocation]);
+
   const applyLiveLocation = useCallback((payload) => {
     const payloadOrderId = Number(payload?.order_id ?? payload?.orderId ?? 0);
     if (payloadOrderId && payloadOrderId !== Number(order?.id || 0)) return;
-    if (payload?.trackingActive === false || payload?.is_live === false || payload?.status === "stopped") {
-      setLiveLocation(null);
-      setRiderPosition(null);
-      setLiveRoute(null);
-      setDisplayedLiveLocation(null);
-      return;
-    }
     const next = normalizeLiveLocation(payload);
-    if (!next || Number(next.order_id) !== Number(order?.id || 0)) return;
-    if (next.source_type !== "rider") return;
-    if (!next.is_live) {
-      setLiveLocation(null);
-      setRiderPosition(null);
-      setLiveRoute(null);
+    if (!next) {
+      if (payload?.status === "stopped" || isExplicitFalse(payload?.trackingActive) || isExplicitFalse(payload?.is_live)) {
+        setLiveLocation((current) => current ? { ...current, is_live: false, trackingActive: false, stopped_at: payload?.stopped_at || payload?.updatedAt || new Date().toISOString() } : current);
+        setDisplayedLiveLocation((current) => current ? { ...current, is_live: false, trackingActive: false, stopped_at: payload?.stopped_at || payload?.updatedAt || new Date().toISOString() } : current);
+        setStatusNow(Date.now());
+      }
       return;
     }
+    if (Number(next.order_id) !== Number(order?.id || 0)) return;
+    if (next.source_type !== "rider") return;
     devLog("[SOCKET] rider location received", {
       orderId: next.order_id,
       latitude: next.latitude,
       longitude: next.longitude,
-      accuracy: next.accuracy
+      accuracy: next.accuracy,
+      isLive: next.is_live
     });
     const markerPosition = {
       lat: next.latitude,
@@ -331,7 +354,9 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
     };
     setRiderPosition(markerPosition);
     setLiveLocation(next);
+    setDisplayedLiveLocation(next);
     setLocating(false);
+    setStatusNow(Date.now());
   }, [order?.id]);
 
   const applySavedRiderLocation = useCallback((message = "") => {
@@ -348,6 +373,7 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
     setDisplayedLiveLocation(savedRiderLocation);
     setFollowRider(true);
     setLocating(false);
+    setStatusNow(Date.now());
     if (message) setLiveError(message);
     return true;
   }, [order?.id, savedRiderLocation]);
@@ -356,8 +382,8 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
     if (!liveRouteEnabled || !order?.id) return Promise.resolve(null);
     return api.get(`/live-locations/orders/${order.id}`)
       .then(({ data }) => {
-        const payload = (data?.locations || []).find((location) => location?.source_type === "rider") || null;
-        if (!payload) throw new Error("No active live rider location.");
+        const payload = (data?.locations || []).find((location) => (location?.source_type || location?.sourceType) === "rider") || null;
+        if (!payload) throw new Error("No rider location saved.");
         applyLiveLocation(payload);
         return payload;
       })
@@ -367,9 +393,9 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
             ...data,
             order_id: Number(order.id),
             source_type: "rider",
-            is_live: true,
-            trackingActive: true,
-            shared_at: data.updatedAt || data.shared_at || data.timestamp || new Date().toISOString()
+            is_live: data.is_live ?? data.trackingActive ?? false,
+            trackingActive: data.trackingActive ?? data.is_live ?? false,
+            shared_at: data.updatedAt || data.shared_at || data.timestamp || null
           };
           applyLiveLocation(payload);
           return payload;
@@ -504,12 +530,12 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
   }, [destinationSnapshot.latitude, destinationSnapshot.longitude, hasDestinationCoordinates, hasShopCoordinates, loadingSettings, routeRequested, shop.latitude, shop.longitude]);
 
   useEffect(() => {
-    const metricsRoute = liveRoute || route;
+    const metricsRoute = liveRouteEnabled ? liveRoute : route;
     if (!metricsRoute || typeof onRouteMetrics !== "function") return;
     const distanceKm = Number.isFinite(metricsRoute.distanceMeters) ? Math.round((metricsRoute.distanceMeters / 1000) * 10) / 10 : null;
     const durationMinutes = Number.isFinite(metricsRoute.durationSeconds) ? Math.max(1, Math.round(metricsRoute.durationSeconds / 60)) : null;
     onRouteMetrics({ distanceKm, durationMinutes });
-  }, [liveRoute, onRouteMetrics, route]);
+  }, [liveRoute, liveRouteEnabled, onRouteMetrics, route]);
 
   useEffect(() => {
     const routeOrigin = riderPosition && validMapCoordinate(riderPosition.lat, riderPosition.lng)
@@ -758,7 +784,7 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
     const latest = await fetchLatestLiveLocation();
     if (latest) return;
     const showedSaved = applySavedRiderLocation("No fresh live update yet. Showing the latest saved rider location.");
-    if (!showedSaved) setLiveError("Rider location is not available yet. Ask the admin to start Live Tracking and allow location permission.");
+    if (!showedSaved) setLiveError("Rider location not available yet.");
   }
 
   const hasLiveRider = Boolean(
@@ -767,23 +793,27 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
       || (riderPosition && validMapCoordinate(riderPosition.lat, riderPosition.lng))
   );
   const activeRoute = routeVisible ? (hasLiveRider ? liveRoute : route) : null;
+  const metricRoute = liveRouteEnabled && !hasLiveRider ? null : activeRoute;
   const showLiveLocation = liveRouteEnabled ? displayedLiveLocation : null;
   const mapRiderPosition = showLiveLocation
     ? { lat: showLiveLocation.latitude, lng: showLiveLocation.longitude, heading: showLiveLocation.heading, accuracy: showLiveLocation.accuracy, shared_at: showLiveLocation.shared_at }
     : riderPosition;
   const riderAccuracy = finiteCoordinate(displayedLiveLocation?.accuracy ?? liveLocation?.accuracy ?? riderPosition?.accuracy);
-  const updatedText = displayedLiveLocation ? formatUpdatedAgo(displayedLiveLocation.shared_at) : "Waiting for live location";
+  const riderIsLive = Boolean(displayedLiveLocation?.is_live) && !isLocationStale(displayedLiveLocation, statusNow);
+  const updatedAgoText = displayedLiveLocation ? formatUpdatedAgo(displayedLiveLocation.shared_at) : "Waiting for live location";
+  const updatedClockText = displayedLiveLocation ? formatUpdatedTime(displayedLiveLocation.shared_at) : "";
+  const updatedText = updatedClockText ? `${updatedClockText} (${updatedAgoText})` : updatedAgoText;
   const routeButtonLabel = loadingRoute && routeVisible ? "Loading Route..." : routeVisible ? "Hide Route" : "Show Route";
-  const distanceValue = activeRoute
-    ? activeRoute.distanceText || (Number.isFinite(activeRoute.distanceMeters) ? `${(activeRoute.distanceMeters / 1000).toFixed(1)} km` : "Unavailable")
+  const distanceValue = metricRoute
+    ? metricRoute.distanceText || (Number.isFinite(metricRoute.distanceMeters) ? `${(metricRoute.distanceMeters / 1000).toFixed(1)} km` : "Unavailable")
     : loadingRoute || locating ? "Loading..." : "Unavailable";
-  const durationValue = activeRoute
-    ? activeRoute.durationText || (Number.isFinite(activeRoute.durationSeconds) ? `${Math.max(1, Math.round(activeRoute.durationSeconds / 60))} min` : "Unavailable")
+  const durationValue = metricRoute
+    ? metricRoute.durationText || (Number.isFinite(metricRoute.durationSeconds) ? `${Math.max(1, Math.round(metricRoute.durationSeconds / 60))} min` : "Unavailable")
     : loadingRoute || locating ? "Loading..." : "Unavailable";
-  const liveStatusTitle = displayedLiveLocation ? "Rider is live" : routeVisible ? "Rider location temporarily unavailable" : "Map ready";
+  const liveStatusTitle = displayedLiveLocation ? (riderIsLive ? "Rider is live" : "Last known rider location") : routeVisible ? "Rider location not available yet" : "Map ready";
   const liveStatusDetail = displayedLiveLocation
-    ? `Live GPS - Last updated ${updatedText}${riderAccuracy !== null ? ` - Accuracy ${Math.round(riderAccuracy)} m` : ""}`
-    : "Rider location temporarily unavailable.";
+    ? `${riderIsLive ? "Live GPS" : "Last known"} - Last updated ${updatedText}${riderAccuracy !== null ? ` - Device accuracy ${Math.round(riderAccuracy)} m` : ""}`
+    : "Rider location not available yet.";
 
   return <div className="retela-inline-route">
         <div className="retela-route-summary">
@@ -819,6 +849,7 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
               route={activeRoute}
               riderPosition={mapRiderPosition}
               riderAccuracy={riderAccuracy}
+              riderIsLive={riderIsLive}
               followRider={followRider}
               onFollowInterrupted={() => setFollowRider(false)}
             />
@@ -890,7 +921,7 @@ function RouteMetric({ label, value }) {
   );
 }
 
-function DeliveryRouteMap({ shop, destination, route, riderPosition = null, riderAccuracy = null, followRider = false, onFollowInterrupted }) {
+function DeliveryRouteMap({ shop, destination, route, riderPosition = null, riderAccuracy = null, riderIsLive = false, followRider = false, onFollowInterrupted }) {
   const mapRef = useRef(null);
   const shopPosition = useMemo(() => [Number(shop.latitude), Number(shop.longitude)], [shop.latitude, shop.longitude]);
   const destinationPosition = useMemo(() => [Number(destination.latitude), Number(destination.longitude)], [destination.latitude, destination.longitude]);
@@ -906,7 +937,7 @@ function DeliveryRouteMap({ shop, destination, route, riderPosition = null, ride
   ), [route]);
   const shopIcon = useMemo(() => deliveryMarkerIcon("shop"), []);
   const customerIcon = useMemo(() => deliveryMarkerIcon("customer"), []);
-  const riderIcon = useMemo(() => deliveryMarkerIcon("rider", riderPosition?.heading), [riderPosition?.heading]);
+  const riderIcon = useMemo(() => deliveryMarkerIcon("rider", riderPosition?.heading, { live: riderIsLive }), [riderIsLive, riderPosition?.heading]);
   const accuracyRadius = Number.isFinite(Number(riderAccuracy)) && Number(riderAccuracy) > 0 ? Number(riderAccuracy) : null;
 
   const fitMap = useCallback((includeRider = false) => {
@@ -1027,11 +1058,12 @@ function DeliveryRouteMapController({ shopPosition, destinationPosition, riderPo
   return null;
 }
 
-function deliveryMarkerIcon(type, heading = 0) {
+function deliveryMarkerIcon(type, heading = 0, options = {}) {
   if (type === "rider") {
+    const statusLabel = options.live ? "Live" : "Last known";
     return L.divIcon({
       className: "retela-leaflet-rider-icon",
-      html: `<span style="transform: rotate(${Number(heading || 0)}deg)"></span><strong>Rider<br><em>Live</em></strong>`,
+      html: `<span style="transform: rotate(${Number(heading || 0)}deg)"></span><strong>Rider<br><em>${statusLabel}</em></strong>`,
       iconSize: [74, 48],
       iconAnchor: [17, 24]
     });

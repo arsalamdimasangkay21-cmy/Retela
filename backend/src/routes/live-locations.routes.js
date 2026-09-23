@@ -197,11 +197,11 @@ router.get("/orders/:id", requireAuth, requireApproved, asyncHandler(async (req,
     `SELECT *
      FROM order_live_locations
      WHERE order_id = :orderId
-       AND is_live = TRUE
+       AND source_type = 'rider'
      ORDER BY
-       CASE source_type WHEN 'rider' THEN 0 ELSE 1 END,
+       is_live DESC,
        shared_at DESC
-     LIMIT 5`,
+     LIMIT 1`,
     { orderId }
   );
   res.json({

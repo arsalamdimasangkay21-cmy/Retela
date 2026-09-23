@@ -705,20 +705,40 @@ function trackingCustomerLocation(order) {
 
 async function latestRiderLocation(orderId, order = null) {
   const rows = await query(
-    `SELECT latitude, longitude, shared_at
+    `SELECT latitude, longitude, accuracy, heading, speed, is_live, shared_at, stopped_at
      FROM order_live_locations
      WHERE order_id = :orderId
        AND source_type = 'rider'
-       AND is_live = TRUE
-     ORDER BY shared_at DESC
+     ORDER BY is_live DESC, shared_at DESC
      LIMIT 1`,
     { orderId }
   );
   const row = rows[0];
   const livePoint = row ? serializeCoordinatePoint(row.latitude, row.longitude) : null;
-  if (livePoint) return { ...livePoint, updatedAt: row.shared_at };
+  if (livePoint) {
+    return {
+      ...livePoint,
+      accuracy: row.accuracy === null || row.accuracy === undefined ? null : Number(row.accuracy),
+      heading: row.heading === null || row.heading === undefined ? null : Number(row.heading),
+      speed: row.speed === null || row.speed === undefined ? null : Number(row.speed),
+      is_live: Boolean(Number(row.is_live)),
+      trackingActive: Boolean(Number(row.is_live)),
+      updatedAt: row.shared_at,
+      shared_at: row.shared_at,
+      timestamp: row.shared_at,
+      stopped_at: row.stopped_at || null
+    };
+  }
   const savedPoint = order ? serializeCoordinatePoint(order.rider_latitude, order.rider_longitude) : null;
-  return savedPoint ? { ...savedPoint, updatedAt: order.location_updated_at || null } : null;
+  return savedPoint ? {
+    ...savedPoint,
+    accuracy: null,
+    is_live: false,
+    trackingActive: false,
+    updatedAt: order.location_updated_at || null,
+    shared_at: order.location_updated_at || null,
+    timestamp: order.location_updated_at || null
+  } : null;
 }
 
 router.post("/:id/location", requireAuth, requireApproved, requireRole("admin", "staff"), asyncHandler(async (req, res) => {
