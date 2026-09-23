@@ -244,7 +244,8 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
   const orderStatus = String(order?.status || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
   const deliveryStatus = String(order?.delivery_status || order?.deliveryStatus || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
   const outForDelivery = orderStatus === "ready" || orderStatus === "out_for_delivery" || deliveryStatus === "out_for_delivery";
-  const liveRouteUsable = liveRouteEnabled && outForDelivery && !terminalOrder && hasDestinationCoordinates;
+  const liveTrackingAllowed = liveRouteEnabled && outForDelivery && !terminalOrder;
+  const liveRouteUsable = liveTrackingAllowed && hasDestinationCoordinates;
 
   useEffect(() => {
     currentOrderIdRef.current = Number(order?.id || 0) || null;
@@ -606,13 +607,16 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
   async function startLiveTracking({ requireFreshPosition = false } = {}) {
     if (!order?.id || locating || trackingActive) return;
     setLiveError("");
-    if (!liveRouteUsable) {
-      setLiveError(hasDestinationCoordinates ? "Live route tracking is unavailable for this order status." : "Coordinates unavailable. Live routing needs a saved delivery pin.");
+    if (!liveTrackingAllowed) {
+      setLiveError("Live route tracking is unavailable for this order status.");
       return;
     }
     if (!navigator.geolocation) {
       setLiveError("Location sharing is not supported in this browser.");
       return;
+    }
+    if (!hasDestinationCoordinates) {
+      setLiveError("Live GPS is sharing. Distance and ETA need the customer's saved delivery pin.");
     }
     trackingActiveRef.current = true;
     setTrackingActive(true);
@@ -640,11 +644,11 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
 
   useEffect(() => {
     const orderId = Number(order?.id || 0);
-    if (!autoStartTracking || !canShareLiveLocation || !liveRouteUsable || trackingActive || locating || !orderId) return;
+    if (!autoStartTracking || !canShareLiveLocation || !liveTrackingAllowed || trackingActive || locating || !orderId) return;
     if (autoStartedRef.current === orderId) return;
     autoStartedRef.current = orderId;
-    startLiveTracking();
-  }, [autoStartTracking, canShareLiveLocation, liveRouteUsable, locating, order?.id, trackingActive]);
+    startLiveTracking({ requireFreshPosition: true });
+  }, [autoStartTracking, canShareLiveLocation, liveTrackingAllowed, locating, order?.id, trackingActive]);
 
   function stopLiveTracking({ notifyServer = true } = {}) {
     if (watchIdRef.current !== null && navigator.geolocation) {
@@ -771,7 +775,7 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
                     </button>
                   ) : null}
                   {canShareLiveLocation ? !trackingActive ? (
-                    <button type="button" onClick={startLiveTracking} disabled={locating || !liveRouteUsable}>
+                    <button type="button" onClick={() => startLiveTracking({ requireFreshPosition: true })} disabled={locating || !liveTrackingAllowed}>
                       {locating ? <Loader2 size={15} className="animate-spin" /> : <Radio size={15} />}
                       {locating ? "Locating..." : "Start Live Tracking"}
                     </button>

@@ -160,7 +160,7 @@ async function loadOrderForLiveLocation(orderId, user) {
   return order;
 }
 
-function assertTrackableOrder(order) {
+function assertTrackableOrder(order, { requireDeliveryCoordinates = true } = {}) {
   const status = normalizeStatus(order.status);
   const deliveryStatus = normalizeStatus(order.delivery_status);
   if (terminalStatuses.has(status)) throw new HttpError(409, "Live route tracking is stopped for this order status.");
@@ -170,7 +170,7 @@ function assertTrackableOrder(order) {
   if (String(order.fulfillment_method || "delivery").toLowerCase() !== "delivery") {
     throw new HttpError(409, "Live route tracking is only available for delivery orders.");
   }
-  if (!validCoordinates(order.delivery_latitude, order.delivery_longitude)) {
+  if (requireDeliveryCoordinates && !validCoordinates(order.delivery_latitude, order.delivery_longitude)) {
     throw new HttpError(409, "Customer delivery coordinates are unavailable for this order.");
   }
 }
@@ -222,7 +222,7 @@ router.post("/orders/:id", requireAuth, requireApproved, asyncHandler(async (req
   if (sourceType === "rider" && !["admin", "staff"].includes(req.user.role)) throw new HttpError(403, "Only staff can publish rider live location.");
   if (sourceType === "customer" && req.user.role !== "customer") throw new HttpError(403, "Only the customer can publish customer live location.");
   const order = await loadOrderForLiveLocation(orderId, req.user);
-  assertTrackableOrder(order);
+  assertTrackableOrder(order, { requireDeliveryCoordinates: sourceType !== "rider" });
   const sharedAt = parseClientTimestamp(input.timestamp);
 
   await query(
