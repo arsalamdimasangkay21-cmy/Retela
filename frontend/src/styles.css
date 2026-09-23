@@ -8887,6 +8887,33 @@ button {
   transform-origin: center;
 }
 
+.retela-leaflet-rider-icon strong {
+  position: absolute;
+  left: 30px;
+  top: 1px;
+  min-width: 44px;
+  border: 1px solid rgba(37, 99, 235, 0.2);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.97);
+  padding: 4px 7px;
+  color: #123526;
+  font-size: 0.66rem;
+  font-weight: 950;
+  line-height: 1.05;
+  text-align: center;
+  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.16);
+  white-space: nowrap;
+}
+
+.retela-leaflet-rider-icon strong em {
+  display: block;
+  color: #2563eb;
+  font-style: normal;
+  font-size: 0.58rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
 .retela-route-map-tools {
   position: absolute;
   right: 12px;

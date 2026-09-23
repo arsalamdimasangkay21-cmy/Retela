@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { LocateFixed, Loader2, MapPin, Radio, RotateCcw, Route, Square } from "lucide-react";
-import { MapContainer, Marker, Polyline, TileLayer, useMap } from "react-leaflet";
+import { Circle, MapContainer, Marker, Polyline, TileLayer, useMap } from "react-leaflet";
 import { api, cachedGet, getApiErrorMessage, getStoredAuthToken } from "../api/client";
 import { acquireSocket, releaseSocket } from "../api/socket";
 import { OSM_ATTRIBUTION, OSM_TILE_URL, routeUrl, validMapCoordinate } from "../config/maps";
@@ -10,6 +10,14 @@ import { OSM_ATTRIBUTION, OSM_TILE_URL, routeUrl, validMapCoordinate } from "../
 function finiteCoordinate(value) {
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
+}
+
+function devLog(label, payload) {
+  if (import.meta.env.DEV) console.info(label, payload);
+}
+
+function devWarn(label, payload) {
+  if (import.meta.env.DEV) console.warn(label, payload);
 }
 
 function validShopCoordinate(latitude, longitude) {
@@ -67,7 +75,8 @@ function normalizeLiveLocation(value = {}) {
     accuracy: finiteCoordinate(value.accuracy),
     is_live: isLive,
     trackingActive: isLive,
-    shared_at: value.shared_at || value.sharedAt || value.updatedAt || new Date().toISOString()
+    shared_at: value.shared_at || value.sharedAt || value.updatedAt || value.timestamp || new Date().toISOString(),
+    timestamp: value.timestamp || value.shared_at || value.sharedAt || value.updatedAt || new Date().toISOString()
   };
 }
 
@@ -129,8 +138,10 @@ async function fetchDrivingRoute(origin, destination, { signal, cache } = {}) {
   const key = routeCacheKey(origin, destination);
   if (cache?.has(key)) return cache.get(key);
   if (signal?.aborted) throw routeAbortError();
-  console.log("ROUTE START:", { lat: Number(origin.latitude), lng: Number(origin.longitude) });
-  console.log("ROUTE END:", { lat: Number(destination.latitude), lng: Number(destination.longitude) });
+  devLog("[ROUTE] rider -> customer", {
+    origin: { latitude: Number(origin.latitude), longitude: Number(origin.longitude) },
+    destination: { latitude: Number(destination.latitude), longitude: Number(destination.longitude) }
+  });
   const response = await fetch(routeUrl(origin, destination), { signal });
   if (!response.ok) throw new Error("Road route is temporarily unavailable.");
   const data = await response.json();
@@ -151,7 +162,7 @@ async function fetchDrivingRoute(origin, destination, { signal, cache } = {}) {
     distanceText: Number.isFinite(distanceMeters) ? `${(distanceMeters / 1000).toFixed(1)} km` : "",
     durationText: Number.isFinite(durationSeconds) ? `${Math.max(1, Math.round(durationSeconds / 60))} minutes` : ""
   };
-  console.log("ROUTE SUCCESS:", { distance: route.distanceText, duration: route.durationText });
+  devLog("[ROUTE] success", { distance: route.distanceText, duration: route.durationText });
   if (cache && key) cache.set(key, route);
   return route;
 }
@@ -242,11 +253,21 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
   useEffect(() => {
     setRouteVisible(Boolean(routeInitiallyVisible));
     setRouteRequested(true);
+    setRoute(null);
     setLiveRoute(null);
     setLiveLocation(null);
     setRiderPosition(null);
     setDisplayedLiveLocation(null);
+    setError("");
+    setLiveError("");
     liveRouteRefreshRef.current = { point: null, at: 0 };
+    lastPublishedRef.current = { point: null, at: 0 };
+    routeRequestRef.current += 1;
+    routeCacheRef.current.clear();
+    if (animationRef.current) {
+      window.cancelAnimationFrame(animationRef.current);
+      animationRef.current = null;
+    }
   }, [order?.id, routeInitiallyVisible]);
 
   useEffect(() => {
@@ -272,14 +293,19 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
       setLiveRoute(null);
       return;
     }
+    devLog("[SOCKET] rider location received", {
+      orderId: next.order_id,
+      latitude: next.latitude,
+      longitude: next.longitude,
+      accuracy: next.accuracy
+    });
     const markerPosition = {
       lat: next.latitude,
       lng: next.longitude,
       heading: next.heading,
+      accuracy: next.accuracy,
       shared_at: next.shared_at
     };
-    console.log("Receiving rider location:", next.latitude, next.longitude);
-    console.log("MAP RIDER POSITION:", markerPosition);
     setRiderPosition(markerPosition);
     setLiveLocation(next);
     setLocating(false);
@@ -302,7 +328,9 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
     if (!socket) return;
     if (socketHandlersRef.current) {
       socket.off("live-location:update", socketHandlersRef.current.updateHandler);
+      socket.off("delivery:rider-location", socketHandlersRef.current.updateHandler);
       socket.off("live-location:stopped", socketHandlersRef.current.stoppedHandler);
+      socket.off("delivery:rider-location-stopped", socketHandlersRef.current.stoppedHandler);
     }
     if (joinedOrderIdRef.current) socket.emit("order-live:leave", joinedOrderIdRef.current);
     releaseSocket(socket);
@@ -319,9 +347,14 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
     leaveLiveSocket();
     const updateHandler = (payload) => applyLiveLocation(payload);
     const stoppedHandler = (payload) => applyLiveLocation(payload);
-    socket.emit("order-live:join", orderId);
+    socket.emit("order-live:join", orderId, (ack) => {
+      if (ack?.ok === false) setLiveError(ack.message || "Could not join live rider tracking.");
+      else devLog("[SOCKET] joined order room", { orderId });
+    });
     socket.on("live-location:update", updateHandler);
+    socket.on("delivery:rider-location", updateHandler);
     socket.on("live-location:stopped", stoppedHandler);
+    socket.on("delivery:rider-location-stopped", stoppedHandler);
     socketRef.current = socket;
     socketHandlersRef.current = { updateHandler, stoppedHandler };
     joinedOrderIdRef.current = orderId;
@@ -333,9 +366,7 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
     if (!liveRouteEnabled || !order?.id) return undefined;
     joinLiveSocket();
     fetchLatestLiveLocation();
-    const intervalId = window.setInterval(fetchLatestLiveLocation, 5000);
     return () => {
-      window.clearInterval(intervalId);
       leaveLiveSocket();
     };
   }, [fetchLatestLiveLocation, joinLiveSocket, leaveLiveSocket, liveRouteEnabled, order?.id]);
@@ -367,9 +398,9 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
 
   useEffect(() => {
     if (import.meta.env.DEV && hasShopCoordinates && hasDestinationCoordinates) {
-      console.info("[delivery-map] shop", { latitude: shop.latitude, longitude: shop.longitude });
-      console.info("[delivery-map] customer", { latitude: destinationSnapshot.latitude, longitude: destinationSnapshot.longitude });
-      console.info("[route] provider", "OSRM");
+      devLog("[DELIVERY] shop location", { latitude: shop.latitude, longitude: shop.longitude });
+      devLog("[DELIVERY] customer location", { latitude: destinationSnapshot.latitude, longitude: destinationSnapshot.longitude });
+      devLog("[ROUTE] provider", "OSRM");
     }
   }, [destinationSnapshot.latitude, destinationSnapshot.longitude, hasDestinationCoordinates, hasShopCoordinates, shop.latitude, shop.longitude]);
 
@@ -395,15 +426,15 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
     const controller = new AbortController();
     setLoadingRoute(true);
     setError("");
-    if (import.meta.env.DEV) console.info("[route] request", { origin: { latitude: shop.latitude, longitude: shop.longitude }, destination: { latitude: destinationSnapshot.latitude, longitude: destinationSnapshot.longitude } });
+    devLog("[ROUTE] shop -> customer request", { origin: { latitude: shop.latitude, longitude: shop.longitude }, destination: { latitude: destinationSnapshot.latitude, longitude: destinationSnapshot.longitude } });
     fetchDrivingRoute(shop, destinationSnapshot, { signal: controller.signal, cache: routeCacheRef.current })
       .then((routeData) => {
         setRoute(routeData);
-        if (import.meta.env.DEV) console.info("[route] response", { distanceMeters: routeData.distanceMeters, durationSeconds: routeData.durationSeconds });
+        devLog("[ROUTE] shop -> customer response", { distanceMeters: routeData.distanceMeters, durationSeconds: routeData.durationSeconds });
       })
       .catch((requestError) => {
         if (requestError?.name !== "AbortError") {
-          if (import.meta.env.DEV) console.warn("[route] error", requestError?.message);
+          devWarn("[ROUTE] shop route error", requestError?.message);
           setError(requestError?.message || "Route details are temporarily unavailable.");
         }
       })
@@ -428,22 +459,40 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
     if (!routeVisible || !liveRouteUsable || !routeOrigin) return undefined;
     const now = Date.now();
     const lastRequest = liveRouteRefreshRef.current;
-    if (lastRequest.point && now - lastRequest.at < 10000) return undefined;
+    const movedMeters = lastRequest.point ? distanceMetersBetween(lastRequest.point, routeOrigin) : Infinity;
+    if (lastRequest.point && movedMeters < 40 && now - lastRequest.at < 15000) return undefined;
     liveRouteRefreshRef.current = { point: routeOrigin, at: now };
     const requestId = routeRequestRef.current + 1;
     routeRequestRef.current = requestId;
     const controller = new AbortController();
+    setLoadingRoute(true);
+    devLog("[ROUTE] rider -> customer request", {
+      orderId: Number(order?.id || 0),
+      movedMeters: Number.isFinite(movedMeters) ? Math.round(movedMeters) : null
+    });
     fetchDrivingRoute(routeOrigin, destinationSnapshot, { signal: controller.signal, cache: routeCacheRef.current })
       .then((routeData) => {
         if (requestId !== routeRequestRef.current) return;
         setLiveRoute(routeData);
         setLiveError("");
+        devLog("[ROUTE] distance/duration", {
+          distance: routeData.distanceText,
+          duration: routeData.durationText,
+          distanceMeters: routeData.distanceMeters,
+          durationSeconds: routeData.durationSeconds
+        });
       })
       .catch((requestError) => {
-        if (requestError?.name !== "AbortError") setLiveError(requestError?.message || "Live road route is temporarily unavailable.");
+        if (requestError?.name !== "AbortError") {
+          devWarn("[ROUTE] live route error", requestError?.message);
+          setLiveError(requestError?.message || "Live road route is temporarily unavailable.");
+        }
+      })
+      .finally(() => {
+        if (requestId === routeRequestRef.current) setLoadingRoute(false);
       });
     return () => controller.abort();
-  }, [destinationSnapshot, liveLocation, liveRoute, liveRouteUsable, riderPosition, routeVisible]);
+  }, [destinationSnapshot, liveLocation, liveRouteUsable, order?.id, riderPosition, routeVisible]);
 
   useEffect(() => {
     if (!liveLocation) return;
@@ -487,7 +536,15 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
       accuracy: Number.isFinite(coords.accuracy) ? coords.accuracy : null
     };
     if (!validMapCoordinate(point.latitude, point.longitude)) return;
-    console.log("REAL RIDER LOCATION:", point.latitude, point.longitude);
+    const timestamp = position.timestamp ? new Date(position.timestamp).toISOString() : new Date().toISOString();
+    devLog("[GPS] position received", {
+      latitude: point.latitude,
+      longitude: point.longitude,
+      accuracy: point.accuracy,
+      heading: point.heading,
+      speed: point.speed,
+      timestamp
+    });
     const now = Date.now();
     const previous = lastPublishedRef.current.point;
     lastPublishedRef.current = { point, at: now };
@@ -495,22 +552,29 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
     const payload = {
       latitude: point.latitude,
       longitude: point.longitude,
-      timestamp: new Date().toISOString()
+      accuracy: point.accuracy,
+      heading,
+      speed: point.speed,
+      timestamp
     };
     const nextRiderPosition = {
       lat: point.latitude,
       lng: point.longitude,
       heading,
+      accuracy: point.accuracy,
       shared_at: payload.timestamp
     };
     setRiderPosition(nextRiderPosition);
-    applyLiveLocation({ ...payload, heading, speed: point.speed, accuracy: point.accuracy, order_id: Number(order.id), user_id: 0, source_type: "rider", is_live: true, shared_at: new Date().toISOString() });
+    applyLiveLocation({ ...payload, order_id: Number(order.id), user_id: 0, source_type: "rider", is_live: true, shared_at: timestamp });
+    devLog("[DELIVERY] sending rider location", {
+      orderId: Number(order.id),
+      latitude: point.latitude,
+      longitude: point.longitude,
+      accuracy: point.accuracy
+    });
     api.post(`/live-locations/orders/${order.id}`, {
       ...payload,
-      source_type: "rider",
-      heading,
-      speed: point.speed,
-      accuracy: point.accuracy
+      source_type: "rider"
     }).catch((requestError) => {
       setLiveError(getApiErrorMessage(requestError, "Could not publish live location."));
     });
@@ -520,20 +584,23 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
     return new Promise((resolve, reject) => {
       navigator.geolocation.getCurrentPosition(resolve, reject, {
         enableHighAccuracy: true,
-        maximumAge: 3000,
-        timeout: 10000
+        maximumAge: 5000,
+        timeout: 15000
       });
     });
   }
 
   function showGpsError(geoError) {
-    console.error("GPS ERROR:", geoError);
+    devWarn("[GPS] error", {
+      code: geoError?.code,
+      message: geoError?.message
+    });
     const messages = {
-      1: "Location permission is required for delivery tracking.",
-      2: "Live location is unavailable on this device.",
-      3: "Live location timed out. Try again when GPS is ready."
+      1: "Location permission is required to share the rider's live location.",
+      2: `Live location is unavailable on this device.${geoError?.message ? ` ${geoError.message}` : ""}`,
+      3: `Live location timed out. Try again when GPS is ready.${geoError?.message ? ` ${geoError.message}` : ""}`
     };
-    setLiveError(messages[geoError?.code] || "Could not read live location.");
+    setLiveError(messages[geoError?.code] || geoError?.message || "Could not read live location.");
   }
 
   async function startLiveTracking({ requireFreshPosition = false } = {}) {
@@ -551,7 +618,7 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
     setTrackingActive(true);
     setLocating(true);
     joinLiveSocket();
-    console.log("GPS started");
+    devLog("[GPS] watch started", { orderId: Number(order.id) });
     if (requireFreshPosition) {
       try {
         publishPosition(await getFreshDevicePosition());
@@ -567,7 +634,7 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
         showGpsError(geoError);
         setLocating(false);
       },
-      { enableHighAccuracy: true, maximumAge: 3000, timeout: 10000 }
+      { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 }
     );
   }
 
@@ -621,19 +688,29 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
     }
   }
 
-  const activeRoute = routeVisible ? (liveRoute || (liveRouteEnabled ? null : route)) : null;
+  const hasLiveRider = Boolean(
+    displayedLiveLocation
+      || liveLocation
+      || (riderPosition && validMapCoordinate(riderPosition.lat, riderPosition.lng))
+  );
+  const activeRoute = routeVisible ? (hasLiveRider ? liveRoute : route) : null;
   const showLiveLocation = liveRouteEnabled ? displayedLiveLocation : null;
   const mapRiderPosition = showLiveLocation
-    ? { lat: showLiveLocation.latitude, lng: showLiveLocation.longitude, heading: showLiveLocation.heading, shared_at: showLiveLocation.shared_at }
+    ? { lat: showLiveLocation.latitude, lng: showLiveLocation.longitude, heading: showLiveLocation.heading, accuracy: showLiveLocation.accuracy, shared_at: showLiveLocation.shared_at }
     : riderPosition;
+  const riderAccuracy = finiteCoordinate(displayedLiveLocation?.accuracy ?? liveLocation?.accuracy ?? riderPosition?.accuracy);
   const updatedText = displayedLiveLocation ? formatUpdatedAgo(displayedLiveLocation.shared_at) : "Waiting for live location";
-  const routeButtonLabel = loadingRoute && routeVisible ? "Loading Route..." : routeVisible ? "Hide Route" : "Show Routes";
+  const routeButtonLabel = loadingRoute && routeVisible ? "Loading Route..." : routeVisible ? "Hide Route" : "Show Route";
   const distanceValue = activeRoute
     ? activeRoute.distanceText || (Number.isFinite(activeRoute.distanceMeters) ? `${(activeRoute.distanceMeters / 1000).toFixed(1)} km` : "Unavailable")
     : loadingRoute || locating ? "Loading..." : "Unavailable";
   const durationValue = activeRoute
     ? activeRoute.durationText || (Number.isFinite(activeRoute.durationSeconds) ? `${Math.max(1, Math.round(activeRoute.durationSeconds / 60))} min` : "Unavailable")
     : loadingRoute || locating ? "Loading..." : "Unavailable";
+  const liveStatusTitle = displayedLiveLocation ? "Rider is live" : routeVisible ? "Rider location temporarily unavailable" : "Map ready";
+  const liveStatusDetail = displayedLiveLocation
+    ? `Live GPS - Last updated ${updatedText}${riderAccuracy !== null ? ` - Accuracy ${Math.round(riderAccuracy)} m` : ""}`
+    : "Rider location temporarily unavailable.";
 
   return <div className="retela-inline-route">
         <div className="retela-route-summary">
@@ -668,7 +745,9 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
               destination={destinationSnapshot}
               route={activeRoute}
               riderPosition={mapRiderPosition}
+              riderAccuracy={riderAccuracy}
               followRider={followRider}
+              onFollowInterrupted={() => setFollowRider(false)}
             />
             <div className="retela-route-metrics">
               <RouteMetric label="Distance" value={distanceValue} />
@@ -678,8 +757,8 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
               <div className="retela-live-route-panel">
                 <div>
                   <p>{canShareLiveLocation ? "Route Controls" : "Delivery Tracking"}</p>
-                  <strong>{displayedLiveLocation ? "Rider location available" : routeVisible ? "Road route ready" : "Map ready"}</strong>
-                  <span>{displayedLiveLocation ? `Live - Updated ${updatedText}` : "Rider location temporarily unavailable."}</span>
+                  <strong>{liveStatusTitle}</strong>
+                  <span>{liveStatusDetail}</span>
                 </div>
                 <div className="retela-live-route-actions">
                   <button type="button" onClick={() => void toggleRouteVisibility()} disabled={loadingRoute && routeVisible}>
@@ -732,7 +811,7 @@ function RouteMetric({ label, value }) {
   );
 }
 
-function DeliveryRouteMap({ shop, destination, route, riderPosition = null, followRider = false }) {
+function DeliveryRouteMap({ shop, destination, route, riderPosition = null, riderAccuracy = null, followRider = false, onFollowInterrupted }) {
   const mapRef = useRef(null);
   const shopPosition = useMemo(() => [Number(shop.latitude), Number(shop.longitude)], [shop.latitude, shop.longitude]);
   const destinationPosition = useMemo(() => [Number(destination.latitude), Number(destination.longitude)], [destination.latitude, destination.longitude]);
@@ -749,6 +828,7 @@ function DeliveryRouteMap({ shop, destination, route, riderPosition = null, foll
   const shopIcon = useMemo(() => deliveryMarkerIcon("shop"), []);
   const customerIcon = useMemo(() => deliveryMarkerIcon("customer"), []);
   const riderIcon = useMemo(() => deliveryMarkerIcon("rider", riderPosition?.heading), [riderPosition?.heading]);
+  const accuracyRadius = Number.isFinite(Number(riderAccuracy)) && Number(riderAccuracy) > 0 ? Number(riderAccuracy) : null;
 
   const fitMap = useCallback((includeRider = false) => {
     const map = mapRef.current;
@@ -779,9 +859,16 @@ function DeliveryRouteMap({ shop, destination, route, riderPosition = null, foll
         aria-label="Delivery route map"
       >
         <TileLayer attribution={OSM_ATTRIBUTION} url={OSM_TILE_URL} />
-        {routePositions.length ? <Polyline positions={routePositions} pathOptions={{ color: "#2563eb", opacity: 0.92, weight: 5 }} /> : null}
+        {routePositions.length ? <Polyline positions={routePositions} pathOptions={{ color: riderLatLng ? "#2563eb" : "#0b8f59", opacity: 0.92, weight: 5, lineCap: "round", lineJoin: "round" }} /> : null}
         <Marker position={shopPosition} icon={shopIcon} />
         <Marker position={destinationPosition} icon={customerIcon} />
+        {riderLatLng && accuracyRadius ? (
+          <Circle
+            center={riderLatLng}
+            radius={accuracyRadius}
+            pathOptions={{ color: "#2563eb", fillColor: "#2563eb", fillOpacity: 0.08, opacity: 0.28, weight: 1 }}
+          />
+        ) : null}
         {riderLatLng ? <Marker position={riderLatLng} icon={riderIcon} zIndexOffset={800} /> : null}
         <DeliveryRouteMapController
           shopPosition={shopPosition}
@@ -789,6 +876,7 @@ function DeliveryRouteMap({ shop, destination, route, riderPosition = null, foll
           riderPosition={riderLatLng}
           routePositions={routePositions}
           followRider={followRider}
+          onFollowInterrupted={onFollowInterrupted}
         />
       </MapContainer>
       <div className="retela-route-map-tools">
@@ -801,25 +889,61 @@ function DeliveryRouteMap({ shop, destination, route, riderPosition = null, foll
   );
 }
 
-function DeliveryRouteMapController({ shopPosition, destinationPosition, riderPosition, routePositions, followRider }) {
+function DeliveryRouteMapController({ shopPosition, destinationPosition, riderPosition, routePositions, followRider, onFollowInterrupted }) {
   const map = useMap();
+  const fittedLiveRef = useRef(false);
+  const programmaticMoveRef = useRef(false);
 
   useEffect(() => {
     window.setTimeout(() => map.invalidateSize(), 80);
   }, [map]);
 
   useEffect(() => {
+    fittedLiveRef.current = false;
+  }, [destinationPosition, shopPosition]);
+
+  useEffect(() => {
     const points = [shopPosition, destinationPosition, ...routePositions];
     if (riderPosition) points.push(riderPosition);
     const bounds = L.latLngBounds(points);
-    if (bounds.isValid()) map.fitBounds(bounds, { paddingTopLeft: [48, 64], paddingBottomRight: [48, 58], maxZoom: 17 });
-  }, [destinationPosition, map, riderPosition, routePositions, shopPosition]);
+    if (!bounds.isValid()) return;
+    programmaticMoveRef.current = true;
+    map.fitBounds(bounds, { paddingTopLeft: [48, 64], paddingBottomRight: [48, 58], maxZoom: 17 });
+    window.setTimeout(() => { programmaticMoveRef.current = false; }, 250);
+    if (riderPosition) fittedLiveRef.current = true;
+  }, [destinationPosition, map, routePositions, shopPosition]);
+
+  useEffect(() => {
+    if (!riderPosition || fittedLiveRef.current || followRider) return;
+    const points = [shopPosition, destinationPosition, riderPosition, ...routePositions];
+    const bounds = L.latLngBounds(points);
+    if (!bounds.isValid()) return;
+    programmaticMoveRef.current = true;
+    map.fitBounds(bounds, { paddingTopLeft: [48, 64], paddingBottomRight: [48, 58], maxZoom: 17 });
+    window.setTimeout(() => { programmaticMoveRef.current = false; }, 250);
+    fittedLiveRef.current = true;
+  }, [destinationPosition, followRider, map, riderPosition, routePositions, shopPosition]);
 
   useEffect(() => {
     if (!followRider || !riderPosition) return;
-    map.panTo(riderPosition);
+    programmaticMoveRef.current = true;
+    map.panTo(riderPosition, { animate: true, duration: 0.45 });
     if (Number(map.getZoom() || 0) < 16) map.setZoom(16);
+    window.setTimeout(() => { programmaticMoveRef.current = false; }, 250);
   }, [followRider, map, riderPosition]);
+
+  useEffect(() => {
+    const handleManualMove = () => {
+      if (programmaticMoveRef.current || !followRider) return;
+      onFollowInterrupted?.();
+    };
+    map.on("dragstart", handleManualMove);
+    map.on("zoomstart", handleManualMove);
+    return () => {
+      map.off("dragstart", handleManualMove);
+      map.off("zoomstart", handleManualMove);
+    };
+  }, [followRider, map, onFollowInterrupted]);
 
   return null;
 }
@@ -828,9 +952,9 @@ function deliveryMarkerIcon(type, heading = 0) {
   if (type === "rider") {
     return L.divIcon({
       className: "retela-leaflet-rider-icon",
-      html: `<span style="transform: rotate(${Number(heading || 0)}deg)"></span>`,
-      iconSize: [34, 34],
-      iconAnchor: [17, 17]
+      html: `<span style="transform: rotate(${Number(heading || 0)}deg)"></span><strong>Rider<br><em>Live</em></strong>`,
+      iconSize: [74, 48],
+      iconAnchor: [17, 24]
     });
   }
   return L.divIcon({

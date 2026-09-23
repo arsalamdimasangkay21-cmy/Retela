@@ -55,8 +55,11 @@ function serializeLiveLocation(row) {
   const isLive = Boolean(Number(row.is_live));
   return {
     order_id: Number(row.order_id),
+    orderId: Number(row.order_id),
     user_id: Number(row.user_id),
+    rider_id: Number(row.user_id),
     source_type: row.source_type,
+    sourceType: row.source_type,
     latitude: Number(row.latitude),
     longitude: Number(row.longitude),
     heading: row.heading === null || row.heading === undefined ? null : Number(row.heading),
@@ -66,9 +69,47 @@ function serializeLiveLocation(row) {
     trackingActive: isLive,
     updatedAt: row.shared_at,
     shared_at: row.shared_at,
+    timestamp: row.shared_at,
     stopped_at: row.stopped_at || null,
     status: isLive ? "live" : "stopped"
   };
+}
+
+function parseClientTimestamp(value) {
+  if (value === undefined || value === null || value === "") return new Date();
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) throw new HttpError(400, "A valid GPS timestamp is required.");
+  const now = Date.now();
+  if (date.getTime() > now + 5 * 60 * 1000) throw new HttpError(400, "GPS timestamp cannot be in the future.");
+  return date;
+}
+
+function emitLiveLocation(req, orderId, payload) {
+  const io = req.app.get("io");
+  if (!io) return;
+  io.to(`order-live:${orderId}`).emit("live-location:update", payload);
+  io.to(`order-live:${orderId}`).emit("delivery:rider-location", payload);
+  io.to(`order:${orderId}`).emit("delivery:rider-location", payload);
+  io.to("admin").emit("live-location:update", payload);
+  io.to("admin").emit("delivery:rider-location", payload);
+  if (process.env.NODE_ENV !== "production") {
+    console.info("[SOCKET] rider location emitted", {
+      orderId,
+      latitude: payload.latitude,
+      longitude: payload.longitude,
+      accuracy: payload.accuracy
+    });
+  }
+}
+
+function emitLiveLocationStopped(req, orderId, payload) {
+  const io = req.app.get("io");
+  if (!io) return;
+  io.to(`order-live:${orderId}`).emit("live-location:stopped", payload);
+  io.to(`order-live:${orderId}`).emit("delivery:rider-location-stopped", payload);
+  io.to(`order:${orderId}`).emit("delivery:rider-location-stopped", payload);
+  io.to("admin").emit("live-location:stopped", payload);
+  io.to("admin").emit("delivery:rider-location-stopped", payload);
 }
 
 async function notifyCustomerOnce(req, { userId, orderId, title, body }) {
@@ -105,7 +146,7 @@ async function notifyCustomerOnce(req, { userId, orderId, title, body }) {
 
 async function loadOrderForLiveLocation(orderId, user) {
   const rows = await query(
-    `SELECT id, user_id, status, delivery_status, fulfillment_method, delivery_address, delivery_latitude, delivery_longitude
+    `SELECT id, user_id, rider_id, status, delivery_status, fulfillment_method, delivery_address, delivery_latitude, delivery_longitude
      FROM orders
      WHERE id = :orderId
      LIMIT 1`,
@@ -173,7 +214,8 @@ router.post("/orders/:id", requireAuth, requireApproved, asyncHandler(async (req
     longitude: z.coerce.number().min(-180).max(180),
     heading: z.coerce.number().min(0).max(360).nullable().optional(),
     speed: z.coerce.number().min(0).max(120).nullable().optional(),
-    accuracy: z.coerce.number().min(0).max(10000).nullable().optional()
+    accuracy: z.coerce.number().min(0).max(10000).nullable().optional(),
+    timestamp: z.string().trim().optional()
   }).parse(req.body);
   if (!validCoordinates(input.latitude, input.longitude)) throw new HttpError(400, "A valid live location is required.");
   const sourceType = normalizeSourceType(req, input.source_type);
@@ -181,6 +223,10 @@ router.post("/orders/:id", requireAuth, requireApproved, asyncHandler(async (req
   if (sourceType === "customer" && req.user.role !== "customer") throw new HttpError(403, "Only the customer can publish customer live location.");
   const order = await loadOrderForLiveLocation(orderId, req.user);
   assertTrackableOrder(order);
+  if (sourceType === "rider" && order.rider_id && Number(order.rider_id) !== Number(req.user.id)) {
+    throw new HttpError(403, "Only the rider assigned to this order can publish live location.");
+  }
+  const sharedAt = parseClientTimestamp(input.timestamp);
 
   await query(
     `UPDATE order_live_locations
@@ -195,7 +241,7 @@ router.post("/orders/:id", requireAuth, requireApproved, asyncHandler(async (req
     `INSERT INTO order_live_locations
        (order_id, user_id, source_type, latitude, longitude, heading, speed, accuracy, is_live, shared_at, stopped_at)
      VALUES
-       (:orderId, :userId, :sourceType, :latitude, :longitude, :heading, :speed, :accuracy, TRUE, NOW(), NULL)
+       (:orderId, :userId, :sourceType, :latitude, :longitude, :heading, :speed, :accuracy, TRUE, :sharedAt, NULL)
      ON DUPLICATE KEY UPDATE
        latitude = VALUES(latitude),
        longitude = VALUES(longitude),
@@ -203,7 +249,7 @@ router.post("/orders/:id", requireAuth, requireApproved, asyncHandler(async (req
        speed = VALUES(speed),
        accuracy = VALUES(accuracy),
        is_live = TRUE,
-       shared_at = NOW(),
+       shared_at = VALUES(shared_at),
        stopped_at = NULL`,
     {
       orderId,
@@ -213,7 +259,8 @@ router.post("/orders/:id", requireAuth, requireApproved, asyncHandler(async (req
       longitude: input.longitude,
       heading: input.heading ?? null,
       speed: input.speed ?? null,
-      accuracy: input.accuracy ?? null
+      accuracy: input.accuracy ?? null,
+      sharedAt
     }
   );
   if (sourceType === "rider") {
@@ -227,14 +274,15 @@ router.post("/orders/:id", requireAuth, requireApproved, asyncHandler(async (req
            rider_longitude = :longitude,
            customer_latitude = COALESCE(customer_latitude, delivery_latitude),
            customer_longitude = COALESCE(customer_longitude, delivery_longitude),
-           location_updated_at = NOW()
+           location_updated_at = :sharedAt
        WHERE id = :orderId`,
       {
         orderId,
         riderId: req.user.id,
         riderName,
         latitude: input.latitude,
-        longitude: input.longitude
+        longitude: input.longitude,
+        sharedAt
       }
     );
   }
@@ -248,18 +296,20 @@ router.post("/orders/:id", requireAuth, requireApproved, asyncHandler(async (req
     speed: input.speed ?? null,
     accuracy: input.accuracy ?? null,
     is_live: 1,
-    shared_at: new Date().toISOString(),
+    shared_at: sharedAt.toISOString(),
     stopped_at: null
   });
-  console.info("[live-location] rider location updated", {
-    orderId,
-    userId: req.user.id,
-    latitude: payload.latitude,
-    longitude: payload.longitude,
-    trackingActive: payload.trackingActive
-  });
-  req.app.get("io")?.to(`order-live:${orderId}`).emit("live-location:update", payload);
-  req.app.get("io")?.to("admin").emit("live-location:update", payload);
+  if (process.env.NODE_ENV !== "production") {
+    console.info("[DELIVERY] rider location saved", {
+      orderId,
+      userId: req.user.id,
+      latitude: payload.latitude,
+      longitude: payload.longitude,
+      accuracy: payload.accuracy,
+      trackingActive: payload.trackingActive
+    });
+  }
+  emitLiveLocation(req, orderId, payload);
   if (sourceType === "rider") {
     await notifyCustomerOnce(req, {
       userId: order.user_id,
@@ -299,9 +349,8 @@ router.delete("/orders/:id", requireAuth, requireApproved, asyncHandler(async (r
        AND source_type = :sourceType`,
     { orderId, userId: req.user.id, sourceType }
   );
-  const payload = { order_id: orderId, user_id: Number(req.user.id), source_type: sourceType, is_live: false, trackingActive: false, status: "stopped", stopped_at: new Date().toISOString(), updatedAt: new Date().toISOString() };
-  req.app.get("io")?.to(`order-live:${orderId}`).emit("live-location:stopped", payload);
-  req.app.get("io")?.to("admin").emit("live-location:stopped", payload);
+  const payload = { order_id: orderId, orderId, user_id: Number(req.user.id), rider_id: Number(req.user.id), source_type: sourceType, sourceType, is_live: false, trackingActive: false, status: "stopped", stopped_at: new Date().toISOString(), updatedAt: new Date().toISOString(), timestamp: new Date().toISOString() };
+  emitLiveLocationStopped(req, orderId, payload);
   res.json(payload);
 }));
 
@@ -310,9 +359,8 @@ router.delete("/orders/:id/all", requireAuth, requireRole("admin", "staff"), asy
   const orderId = Number(req.params.id);
   if (!Number.isInteger(orderId) || orderId <= 0) throw new HttpError(400, "A valid order ID is required.");
   await query("UPDATE order_live_locations SET is_live = FALSE, stopped_at = NOW() WHERE order_id = :orderId", { orderId });
-  const payload = { order_id: orderId, is_live: false, trackingActive: false, status: "stopped", stopped_at: new Date().toISOString(), updatedAt: new Date().toISOString() };
-  req.app.get("io")?.to(`order-live:${orderId}`).emit("live-location:stopped", payload);
-  req.app.get("io")?.to("admin").emit("live-location:stopped", payload);
+  const payload = { order_id: orderId, orderId, is_live: false, trackingActive: false, status: "stopped", stopped_at: new Date().toISOString(), updatedAt: new Date().toISOString(), timestamp: new Date().toISOString() };
+  emitLiveLocationStopped(req, orderId, payload);
   res.json(payload);
 }));
 

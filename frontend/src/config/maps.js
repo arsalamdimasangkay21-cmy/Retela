@@ -1,4 +1,4 @@
-export const OSM_ATTRIBUTION = "OpenStreetMap contributors";
+export const OSM_ATTRIBUTION = "&copy; OpenStreetMap contributors";
 export const OSM_TILE_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
 export const OSRM_ROUTE_ENDPOINT = "https://router.project-osrm.org/route/v1/driving";
 
@@ -15,5 +15,5 @@ export function validMapCoordinate(latitude, longitude) {
 }
 
 export function routeUrl(origin, destination) {
-  return `${OSRM_ROUTE_ENDPOINT}/${origin.longitude},${origin.latitude};${destination.longitude},${destination.latitude}?overview=full&geometries=geojson`;
+  return `${OSRM_ROUTE_ENDPOINT}/${origin.longitude},${origin.latitude};${destination.longitude},${destination.latitude}?overview=full&geometries=geojson&steps=true`;
 }

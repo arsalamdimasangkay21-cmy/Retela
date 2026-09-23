@@ -303,30 +303,17 @@ function formatRouteDuration(seconds) {
   return remainder ? `${hours} hr ${remainder} min` : `${hours} hr`;
 }
 
-function fallbackRouteInfo(riderLocation, customerLocation) {
-  const distanceKm = haversineDistanceKm(riderLocation, customerLocation);
-  const distanceMeters = distanceKm === null ? null : Math.round(distanceKm * 1000);
-  const durationSeconds = distanceMeters === null ? null : Math.max(60, Math.round((distanceMeters / 1000 / 25) * 3600));
-  return {
-    provider: "estimated",
-    distanceMeters,
-    durationSeconds,
-    distance: formatRouteDistance(distanceMeters),
-    duration: formatRouteDuration(durationSeconds),
-    routeCoordinates: [riderLocation, customerLocation]
-  };
-}
-
 async function osrmRouteInfo(riderLocation, customerLocation) {
   const url = new URL(`https://router.project-osrm.org/route/v1/driving/${riderLocation.longitude},${riderLocation.latitude};${customerLocation.longitude},${customerLocation.latitude}`);
   url.searchParams.set("overview", "full");
   url.searchParams.set("geometries", "geojson");
+  url.searchParams.set("steps", "true");
   try {
     const response = await fetch(url);
-    if (!response.ok) return fallbackRouteInfo(riderLocation, customerLocation);
+    if (!response.ok) return { provider: "osrm", distanceMeters: null, durationSeconds: null, distance: null, duration: null, routeCoordinates: [], error: "Road route is temporarily unavailable." };
     const data = await response.json();
     const route = Array.isArray(data.routes) ? data.routes[0] : null;
-    if (data.code !== "Ok" || !route) return fallbackRouteInfo(riderLocation, customerLocation);
+    if (data.code !== "Ok" || !route) return { provider: "osrm", distanceMeters: null, durationSeconds: null, distance: null, duration: null, routeCoordinates: [], error: data.message || "No road route is available for these locations." };
     const distanceMeters = Number(route.distance);
     const durationSeconds = Number(route.duration);
     const coordinates = Array.isArray(route.geometry?.coordinates) ? route.geometry.coordinates : [];
@@ -342,7 +329,7 @@ async function osrmRouteInfo(riderLocation, customerLocation) {
       routeCoordinates: routeCoordinates.length ? routeCoordinates : [riderLocation, customerLocation]
     };
   } catch {
-    return fallbackRouteInfo(riderLocation, customerLocation);
+    return { provider: "osrm", distanceMeters: null, durationSeconds: null, distance: null, duration: null, routeCoordinates: [], error: "Road route is temporarily unavailable." };
   }
 }
 
@@ -787,16 +774,23 @@ router.post("/:id/location", requireAuth, requireApproved, requireRole("admin", 
   const updatedOrder = await loadDecoratedOrder(orderId, { role: "admin" });
   const payload = {
     order_id: orderId,
+    orderId,
     user_id: Number(req.user.id),
+    rider_id: Number(req.user.id),
     source_type: "rider",
+    sourceType: "rider",
     latitude: Number(input.latitude),
     longitude: Number(input.longitude),
     updatedAt: new Date().toISOString(),
     shared_at: new Date().toISOString(),
+    timestamp: new Date().toISOString(),
     is_live: true
   };
   req.app.get("io")?.to(`order-live:${orderId}`).emit("live-location:update", payload);
+  req.app.get("io")?.to(`order-live:${orderId}`).emit("delivery:rider-location", payload);
+  req.app.get("io")?.to(`order:${orderId}`).emit("delivery:rider-location", payload);
   req.app.get("io")?.to("admin").emit("live-location:update", payload);
+  req.app.get("io")?.to("admin").emit("delivery:rider-location", payload);
   if (order.user_id) req.app.get("io")?.to(`user:${order.user_id}`).emit("order:update", updatedOrder || { id: orderId, delivery_status: "Out for Delivery", rider_latitude: input.latitude, rider_longitude: input.longitude });
   res.status(201).json({ latitude: Number(input.latitude), longitude: Number(input.longitude), updatedAt: payload.updatedAt, order: updatedOrder });
 }));
@@ -952,7 +946,10 @@ router.patch("/:id/cancel", requireAuth, requireApproved, asyncHandler(async (re
     req.app.get("io")?.to("admin").emit("order:update", { id: orderId, status: "cancelled", payment_status: "cancelled" });
     await ensureLiveLocationTable();
     await query("UPDATE order_live_locations SET is_live = FALSE, stopped_at = NOW() WHERE order_id = :orderId AND is_live = TRUE", { orderId });
-    req.app.get("io")?.to(`order-live:${orderId}`).emit("live-location:stopped", { order_id: orderId, is_live: false, status: "stopped", stopped_at: new Date().toISOString() });
+    const stoppedPayload = { order_id: orderId, orderId, is_live: false, status: "stopped", stopped_at: new Date().toISOString(), timestamp: new Date().toISOString() };
+    req.app.get("io")?.to(`order-live:${orderId}`).emit("live-location:stopped", stoppedPayload);
+    req.app.get("io")?.to(`order-live:${orderId}`).emit("delivery:rider-location-stopped", stoppedPayload);
+    req.app.get("io")?.to(`order:${orderId}`).emit("delivery:rider-location-stopped", stoppedPayload);
     inventoryUpdates.forEach((update) => {
       req.app.get("io")?.emit("inventory:update", { type: "inventory", action: "order_cancelled", ...update });
     });
@@ -1460,7 +1457,10 @@ router.patch("/:id/reject", requireAuth, requireRole("admin"), asyncHandler(asyn
   io?.to("admin").emit("order:update", updatePayload);
   await ensureLiveLocationTable();
   await query("UPDATE order_live_locations SET is_live = FALSE, stopped_at = NOW() WHERE order_id = :orderId AND is_live = TRUE", { orderId });
-  io?.to(`order-live:${orderId}`).emit("live-location:stopped", { order_id: orderId, is_live: false, status: "stopped", stopped_at: new Date().toISOString() });
+  const stoppedPayload = { order_id: orderId, orderId, is_live: false, trackingActive: false, status: "stopped", stopped_at: new Date().toISOString(), timestamp: new Date().toISOString() };
+  io?.to(`order-live:${orderId}`).emit("live-location:stopped", stoppedPayload);
+  io?.to(`order-live:${orderId}`).emit("delivery:rider-location-stopped", stoppedPayload);
+  io?.to(`order:${orderId}`).emit("delivery:rider-location-stopped", stoppedPayload);
   result.inventoryUpdates.forEach((update) => {
     io?.emit("inventory:update", { type: "inventory", action: "payment-failed-rejected-restock", ...update });
   });
@@ -1529,7 +1529,10 @@ router.patch("/:id/status", requireAuth, requireRole("admin"), asyncHandler(asyn
     req.app.get("io")?.to("admin").emit("order:update", updatePayload);
     await ensureLiveLocationTable();
     await query("UPDATE order_live_locations SET is_live = FALSE, stopped_at = NOW() WHERE order_id = :orderId AND is_live = TRUE", { orderId });
-    req.app.get("io")?.to(`order-live:${orderId}`).emit("live-location:stopped", { order_id: orderId, is_live: false, status: "stopped", stopped_at: new Date().toISOString() });
+    const stoppedPayload = { order_id: orderId, orderId, is_live: false, status: "stopped", stopped_at: new Date().toISOString(), timestamp: new Date().toISOString() };
+    req.app.get("io")?.to(`order-live:${orderId}`).emit("live-location:stopped", stoppedPayload);
+    req.app.get("io")?.to(`order-live:${orderId}`).emit("delivery:rider-location-stopped", stoppedPayload);
+    req.app.get("io")?.to(`order:${orderId}`).emit("delivery:rider-location-stopped", stoppedPayload);
     result.inventoryUpdates.forEach((update) => {
       req.app.get("io")?.emit("inventory:update", { type: "inventory", action: "payment-failed-rejected-restock", ...update });
     });
@@ -1640,7 +1643,10 @@ router.patch("/:id/status", requireAuth, requireRole("admin"), asyncHandler(asyn
   if (terminalStatuses.has(status)) {
     await ensureLiveLocationTable();
     await query("UPDATE order_live_locations SET is_live = FALSE, stopped_at = NOW() WHERE order_id = :orderId AND is_live = TRUE", { orderId });
-    req.app.get("io")?.to(`order-live:${orderId}`).emit("live-location:stopped", { order_id: orderId, is_live: false, status: "stopped", stopped_at: new Date().toISOString() });
+    const stoppedPayload = { order_id: orderId, orderId, is_live: false, trackingActive: false, status: "stopped", stopped_at: new Date().toISOString(), timestamp: new Date().toISOString() };
+    req.app.get("io")?.to(`order-live:${orderId}`).emit("live-location:stopped", stoppedPayload);
+    req.app.get("io")?.to(`order-live:${orderId}`).emit("delivery:rider-location-stopped", stoppedPayload);
+    req.app.get("io")?.to(`order:${orderId}`).emit("delivery:rider-location-stopped", stoppedPayload);
   }
   inventoryResult.inventoryUpdates.forEach((update) => {
     req.app.get("io")?.emit("inventory:update", { type: "inventory", action: "order-completed", ...update });

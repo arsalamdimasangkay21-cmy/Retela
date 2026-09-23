@@ -71,6 +71,7 @@ export function configureSocket(io) {
           return;
         }
         socket.join(`order-live:${orderId}`);
+        socket.join(`order:${orderId}`);
         ack?.({ ok: true });
       } catch (error) {
         console.error("[socket] Failed to join order live room", {
@@ -85,7 +86,10 @@ export function configureSocket(io) {
 
     socket.on("order-live:leave", (orderIdInput) => {
       const orderId = Number(orderIdInput);
-      if (Number.isInteger(orderId) && orderId > 0) socket.leave(`order-live:${orderId}`);
+      if (Number.isInteger(orderId) && orderId > 0) {
+        socket.leave(`order-live:${orderId}`);
+        socket.leave(`order:${orderId}`);
+      }
     });
 
     socket.on("typing", ({ conversationId, isTyping }) => {
