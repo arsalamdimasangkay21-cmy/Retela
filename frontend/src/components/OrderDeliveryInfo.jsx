@@ -843,10 +843,12 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
                       <LocateFixed size={14} /> {followRider ? "Following Rider" : "Follow Rider"}
                     </button>
                   ) : null}
-                  <button type="button" onClick={() => void showRiderOnMap()} disabled={locating}>
-                    {locating ? <Loader2 size={15} className="animate-spin" /> : <LocateFixed size={14} />}
-                    Show Rider
-                  </button>
+                  {!canShareLiveLocation ? (
+                    <button type="button" onClick={() => void showRiderOnMap()} disabled={locating}>
+                      {locating ? <Loader2 size={15} className="animate-spin" /> : <LocateFixed size={14} />}
+                      Show Rider
+                    </button>
+                  ) : null}
                   {canShareLiveLocation ? !trackingActive ? (
                     <button type="button" onClick={() => startLiveTracking({ requireFreshPosition: true })} disabled={locating || !liveTrackingAllowed}>
                       {locating ? <Loader2 size={15} className="animate-spin" /> : <Radio size={15} />}
