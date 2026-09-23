@@ -3,11 +3,10 @@ import { z } from "zod";
 import { query } from "../config/db.js";
 import { requireAuth, requireApproved, requireRole } from "../middleware/auth.js";
 import { asyncHandler, HttpError } from "../utils/errors.js";
-import { validCoordinates } from "../utils/shippingCalculator.js";
+import { haversineDistanceKm, validCoordinates } from "../utils/shippingCalculator.js";
 
 const router = Router();
 let liveLocationTableReady;
-let notificationOrderSchemaReady;
 
 const activeTrackingStatuses = new Set(["ready"]);
 const terminalStatuses = new Set(["completed", "cancelled", "payment_failed", "rejected"]);
@@ -38,26 +37,6 @@ export async function ensureLiveLocationTable() {
     throw error;
   });
   return liveLocationTableReady;
-}
-
-async function ensureNotificationOrderSchema() {
-  notificationOrderSchemaReady ||= (async () => {
-    const rows = await query(
-      `SELECT COLUMN_NAME
-       FROM INFORMATION_SCHEMA.COLUMNS
-       WHERE TABLE_SCHEMA = DATABASE()
-         AND TABLE_NAME = 'notifications'
-         AND COLUMN_NAME = 'order_id'`
-    );
-    if (!rows.length) {
-      await query("ALTER TABLE notifications ADD COLUMN order_id INT NULL AFTER product_id");
-      await query("CREATE INDEX idx_notifications_order ON notifications (order_id)").catch(() => {});
-    }
-  })().catch((error) => {
-    notificationOrderSchemaReady = undefined;
-    throw error;
-  });
-  return notificationOrderSchemaReady;
 }
 
 function normalizeStatus(value) {
@@ -135,22 +114,20 @@ function emitLiveLocationStopped(req, orderId, payload) {
 
 async function notifyCustomerOnce(req, { userId, orderId, title, body }) {
   if (!userId || !orderId || !title || !body) return null;
-  await ensureNotificationOrderSchema();
   const existing = await query(
     `SELECT id
      FROM notifications
      WHERE user_id = :userId
        AND type = 'order'
-       AND order_id = :orderId
        AND title = :title
        AND body = :body
      LIMIT 1`,
-    { userId, orderId, title, body }
+    { userId, title, body }
   );
   if (existing.length) return null;
   const result = await query(
-    "INSERT INTO notifications (user_id, order_id, type, title, body) VALUES (:userId, :orderId, 'order', :title, :body)",
-    { userId, orderId, title, body }
+    "INSERT INTO notifications (user_id, type, title, body) VALUES (:userId, 'order', :title, :body)",
+    { userId, title, body }
   );
   const payload = {
     id: result.insertId,
@@ -246,11 +223,8 @@ router.post("/orders/:id", requireAuth, requireApproved, asyncHandler(async (req
   if (sourceType === "customer" && req.user.role !== "customer") throw new HttpError(403, "Only the customer can publish customer live location.");
   const order = await loadOrderForLiveLocation(orderId, req.user);
   assertTrackableOrder(order);
-  if (sourceType === "rider") {
-    if (!order.rider_id) throw new HttpError(409, "Assign a rider before live location sharing starts.");
-    if (Number(order.rider_id) !== Number(req.user.id)) {
-      throw new HttpError(403, "Only the rider assigned to this order can publish live location.");
-    }
+  if (sourceType === "rider" && order.rider_id && Number(order.rider_id) !== Number(req.user.id)) {
+    throw new HttpError(403, "Only the rider assigned to this order can publish live location.");
   }
   const sharedAt = parseClientTimestamp(input.timestamp);
 
@@ -340,9 +314,21 @@ router.post("/orders/:id", requireAuth, requireApproved, asyncHandler(async (req
     await notifyCustomerOnce(req, {
       userId: order.user_id,
       orderId,
-      title: "Your rider is on the way",
-      body: "Tap to view live tracking."
+      title: "Rider location available",
+      body: `Your rider location is now available for order #${orderId}.`
     });
+    const distanceKm = haversineDistanceKm(
+      { latitude: input.latitude, longitude: input.longitude },
+      { latitude: order.delivery_latitude, longitude: order.delivery_longitude }
+    );
+    if (distanceKm !== null && distanceKm <= 0.5) {
+      await notifyCustomerOnce(req, {
+        userId: order.user_id,
+        orderId,
+        title: "Rider approaching",
+        body: `Your rider is approaching the delivery area for order #${orderId}.`
+      });
+    }
   }
   res.status(201).json(payload);
 }));

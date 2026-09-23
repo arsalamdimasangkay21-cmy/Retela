@@ -355,7 +355,6 @@ export default function CustomerDashboard({ active, onChange }) {
   const [profilePhoto, setProfilePhoto] = useState(null);
   const [deliveryLocation, setDeliveryLocation] = useState(null);
   const [locationSelectorOpen, setLocationSelectorOpen] = useState(false);
-  const [orderTrackingOpenId, setOrderTrackingOpenId] = useState(null);
   const [shippingQuote, setShippingQuote] = useState(null);
   const [shippingQuoteLoading, setShippingQuoteLoading] = useState(false);
   const [shippingQuoteError, setShippingQuoteError] = useState("");
@@ -401,13 +400,6 @@ export default function CustomerDashboard({ active, onChange }) {
     onChange("Shop");
   }
 
-  const openOrderTracking = useCallback((orderId) => {
-    const numericOrderId = Number(orderId);
-    if (!Number.isInteger(numericOrderId) || numericOrderId <= 0) return;
-    setOrderTrackingOpenId(numericOrderId);
-    onChange("Orders");
-  }, [onChange]);
-
   useEffect(() => {
     function handleViewProduct(event) {
       const productId = Number(event.detail?.productId);
@@ -420,14 +412,6 @@ export default function CustomerDashboard({ active, onChange }) {
     window.addEventListener("retela:view-product", handleViewProduct);
     return () => window.removeEventListener("retela:view-product", handleViewProduct);
   }, [onChange]);
-
-  useEffect(() => {
-    function handleOpenOrderTracking(event) {
-      openOrderTracking(event.detail?.orderId || event.detail?.order_id);
-    }
-    window.addEventListener("retela:open-order-tracking", handleOpenOrderTracking);
-    return () => window.removeEventListener("retela:open-order-tracking", handleOpenOrderTracking);
-  }, [openOrderTracking]);
 
   const load = useCallback(async (options = filtersRef.current, { cancelled, force = false } = {}) => {
     const params = new URLSearchParams();
@@ -910,14 +894,6 @@ export default function CustomerDashboard({ active, onChange }) {
       return;
     }
     const selectedDeliveryLocation = normalizeDeliveryLocation(deliveryLocation);
-    if (fulfillmentMethod === "delivery") {
-      const locationMessage = locationValidationMessage(selectedDeliveryLocation, { requireCoordinates: true });
-      if (locationMessage) {
-        notifyCart(locationMessage, "warning");
-        setLocationSelectorOpen(true);
-        return;
-      }
-    }
     if (fulfillmentMethod === "delivery" && !hasDeliveryLocation(selectedDeliveryLocation)) {
       notifyCart("Please set your delivery location before checkout.", "warning");
       return;
@@ -965,13 +941,6 @@ export default function CustomerDashboard({ active, onChange }) {
         delivery_address: selectedDeliveryLocation.address,
         delivery_latitude: selectedDeliveryLocation.latitude,
         delivery_longitude: selectedDeliveryLocation.longitude,
-        delivery_barangay: selectedDeliveryLocation.barangay,
-        delivery_municipality: selectedDeliveryLocation.municipality,
-        delivery_province: selectedDeliveryLocation.province,
-        delivery_region: selectedDeliveryLocation.region,
-        delivery_postal_code: selectedDeliveryLocation.postalCode,
-        delivery_place_id: selectedDeliveryLocation.placeId,
-        delivery_location_source: selectedDeliveryLocation.locationSource,
         delivery_landmark: selectedDeliveryLocation.landmark,
         delivery_notes: selectedDeliveryLocation.notes,
         items: selectedCartItems.map(({ product_id, quantity }) => ({ product_id, quantity }))
@@ -1062,7 +1031,7 @@ export default function CustomerDashboard({ active, onChange }) {
 
   async function saveCheckoutDeliveryLocation(nextLocation) {
     const normalized = normalizeDeliveryLocation(nextLocation);
-    const validationMessage = locationValidationMessage(normalized, { requireCoordinates: true });
+    const validationMessage = locationValidationMessage(normalized);
     if (validationMessage) {
       notifyCart(validationMessage, "warning");
       return false;
@@ -1149,7 +1118,7 @@ export default function CustomerDashboard({ active, onChange }) {
             onAddToCart={(item) => addToCart(item, "Added to cart successfully.")}
             onBuyNow={buyNow}
           />
-          <FloatingNotificationsWidget rows={notifications} customerId={user?.id} onViewAll={() => onChange("Notifications")} onOpenOrder={openOrderTracking} />
+          <FloatingNotificationsWidget rows={notifications} customerId={user?.id} onViewAll={() => onChange("Notifications")} />
         </div>
         <Shop products={filteredProducts.slice(0, 6)} paginate={false} addToCart={addToCart} buyNow={buyNow} filters={filters} setFilters={updateFilters} filterOptions={filterOptions} clearFilters={clearFilters} focusProductId={chatTargetProductId} onFocusProductHandled={() => setChatTargetProductId(null)} />
       </div>
@@ -1334,8 +1303,6 @@ export default function CustomerDashboard({ active, onChange }) {
       reviews={reviews}
       returnRequests={returnRequests}
       onNavigate={onChange}
-      openOrderId={orderTrackingOpenId}
-      onOpenOrderHandled={() => setOrderTrackingOpenId(null)}
       onPaymentUpdated={applyPaymentOrderUpdate}
         onMeetupConfirmation={confirmMeetup}
         onQrPayment={(payment) => { setQrPayment(payment); onChange("Cart"); }}
@@ -1354,7 +1321,6 @@ export default function CustomerDashboard({ active, onChange }) {
         onRead={(id) => setNotifications((items) => items.map((item) => Number(item.id) === Number(id) ? { ...item, is_read: true } : item))}
         onShopSale={openSaleProducts}
         onNavigate={onChange}
-        onOpenOrder={openOrderTracking}
       />
     );
   }
@@ -1379,16 +1345,12 @@ export default function CustomerDashboard({ active, onChange }) {
   );
 }
 
-function FloatingNotificationsWidget({ rows = [], customerId, onViewAll, onOpenOrder }) {
+function FloatingNotificationsWidget({ rows = [], customerId, onViewAll }) {
   const notifications = customerNotificationRows(rows, customerId).map((notification) => ({
     ...notification,
     badge: customerNotificationCategoryLabel(notification)
   }));
-  return <NotificationPreviewPanel notifications={notifications} onNotificationClick={(notification) => {
-    const orderId = notificationOrderId(notification);
-    if (orderId) onOpenOrder?.(orderId);
-    else onViewAll?.();
-  }} onViewAll={onViewAll} maxItems={3} />;
+  return <NotificationPreviewPanel notifications={notifications} onViewAll={onViewAll} maxItems={3} />;
 }
 
 function CartPage({
@@ -2240,7 +2202,7 @@ function DeliveryLocationSelector({ initialLocation, onClose, onSave }) {
   async function submitLocation(event) {
     event.preventDefault();
     const next = normalizeDeliveryLocation(draft);
-    const message = locationValidationMessage(next, { requireCoordinates: true });
+    const message = locationValidationMessage(next);
     if (message) {
       setValidationError(message);
       return;
@@ -2602,7 +2564,7 @@ function PaymentLoadingOverlay({ method }) {
   );
 }
 
-function Notifications({ rows = [], customerId, onRead, onShopSale, onNavigate, onOpenOrder }) {
+function Notifications({ rows = [], customerId, onRead, onShopSale, onNavigate }) {
   const [selectedNotification, setSelectedNotification] = useState(null);
   const [selectedFilter, setSelectedFilter] = useState("all");
   const customerRows = useMemo(
@@ -2635,8 +2597,7 @@ function Notifications({ rows = [], customerId, onRead, onShopSale, onNavigate, 
       window.dispatchEvent(new CustomEvent("retela:notification-read", { detail: { id: notification.id } }));
       await api.patch(`/notifications/${notification.id}/read`).catch(() => {});
     }
-    if (target.orderId) onOpenOrder?.(target.orderId);
-    else if (target.section) onNavigate?.(target.section);
+    if (target.section) onNavigate?.(target.section);
     if (target.openAssistant) {
       window.dispatchEvent(new CustomEvent("retela:open-customer-assistant"));
     }
@@ -2761,15 +2722,6 @@ function notificationSaleProductIds(notification) {
   return sourceIds.map(Number).filter(Boolean);
 }
 
-function notificationOrderId(notification) {
-  const explicitId = Number(notification?.order_id ?? notification?.orderId ?? 0);
-  if (Number.isInteger(explicitId) && explicitId > 0) return explicitId;
-  const text = [notification?.title, notification?.body, notification?.message].map((value) => String(value || "")).join(" ");
-  const match = text.match(/\border\s*#?\s*(\d+)\b/i);
-  const parsed = Number(match?.[1] || 0);
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
-}
-
 function notificationNavigationTarget(notification) {
   const type = notification?.type;
   const displayType = notificationDisplayType(notification);
@@ -2777,7 +2729,7 @@ function notificationNavigationTarget(notification) {
   const promotional = displayType === "promo" || Boolean(notificationPromoStatus(notification));
 
   if (type === "message") return { section: "Home", openAssistant: true, openModal: false };
-  if (type === "order") return { section: "Orders", orderId: notificationOrderId(notification), openModal: false };
+  if (type === "order") return { section: "Orders", openModal: false };
   if (type === "refund") return { section: "Returns", openModal: false };
   if (type === "feedback") return { section: "Feedback", openModal: false };
   if (type === "new_product") return { section: "Shop", openModal: false };
@@ -2920,7 +2872,7 @@ function formatNotificationDate(value) {
   return date.toLocaleString(undefined, { month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
-function Orders({ rows, profile, reviews = [], returnRequests = [], onNavigate, onOrderCancelled, onMeetupConfirmation, onQrPayment, onPaymentUpdated, openOrderId = null, onOpenOrderHandled }) {
+function Orders({ rows, profile, reviews = [], returnRequests = [], onNavigate, onOrderCancelled, onMeetupConfirmation, onQrPayment, onPaymentUpdated }) {
   const flow = ["pending", "awaiting_payment", "paid", "processing", "completed"];
   const [selectedOrderId, setSelectedOrderId] = useState(null);
   const [selectedOrder, setSelectedOrder] = useState(null);
@@ -2935,13 +2887,6 @@ function Orders({ rows, profile, reviews = [], returnRequests = [], onNavigate, 
     returnRequests.forEach((request) => map.set(Number(request.order_id), request.status));
     return map;
   }, [returnRequests]);
-
-  useEffect(() => {
-    const numericOrderId = Number(openOrderId);
-    if (!Number.isInteger(numericOrderId) || numericOrderId <= 0) return;
-    setSelectedOrderId(numericOrderId);
-    onOpenOrderHandled?.();
-  }, [onOpenOrderHandled, openOrderId]);
 
   useEffect(() => {
     const pendingOnlineOrders = rows.filter((order) => {

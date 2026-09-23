@@ -81,10 +81,6 @@ export default function AppLayout({ children, active, onChange }) {
   }, [dismissCustomerToast]);
 
   const openToastPayload = useCallback((payload) => {
-    const orderId = Number(payload?.order_id ?? payload?.orderId ?? 0);
-    if (Number.isInteger(orderId) && orderId > 0 && ["order", "order_cancelled", "payment"].includes(String(payload?.type || "").toLowerCase())) {
-      window.dispatchEvent(new CustomEvent("retela:open-order-tracking", { detail: { orderId } }));
-    }
     onChange(toastTarget(payload?.type, user?.role));
   }, [onChange, user?.role]);
 
