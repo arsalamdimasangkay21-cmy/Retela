@@ -43,7 +43,7 @@ function loadRecaptchaScript() {
   return recaptchaScriptPromise;
 }
 
-function RecaptchaCheckbox({ siteKey, resetKey, onChange, onExpired, onError }) {
+function RecaptchaCheckbox({ siteKey, resetKey, onChange, onExpired, onError, onReady }) {
   const containerRef = useRef(null);
   const widgetIdRef = useRef(null);
 
@@ -60,13 +60,14 @@ function RecaptchaCheckbox({ siteKey, resetKey, onChange, onExpired, onError }) 
             "expired-callback": onExpired,
             "error-callback": onError
           });
+          onReady?.(widgetIdRef.current);
         });
       })
       .catch(onError);
     return () => {
       cancelled = true;
     };
-  }, [siteKey, onChange, onExpired, onError]);
+  }, [siteKey, onChange, onExpired, onError, onReady]);
 
   useEffect(() => {
     if (!siteKey || widgetIdRef.current === null || !window.grecaptcha?.reset) return;
@@ -96,6 +97,7 @@ export default function AuthPage() {
   const [loginForm, setLoginForm] = useState({ username: "", password: "" });
   const [captchaToken, setCaptchaToken] = useState("");
   const [captchaResetKey, setCaptchaResetKey] = useState(0);
+  const captchaWidgetIdRef = useRef(null);
   const [signupForm, setSignupForm] = useState({ username: "", email: "", phoneNumber: "", location: "", otp: "", password: "", confirmPassword: "" });
   const [resetForm, setResetForm] = useState({ email: "", otp: "", password: "", confirmPassword: "" });
   const [logoUrl, setLogoUrl] = useState(RETELA_LOGO_URL);
@@ -142,13 +144,15 @@ export default function AuthPage() {
       setMessage("CAPTCHA is not configured. Please contact support.");
       return;
     }
-    if (!captchaToken) {
+    const currentCaptchaToken = captchaToken || String(window.grecaptcha?.getResponse?.(captchaWidgetIdRef.current) || "").trim();
+    if (!currentCaptchaToken) {
       setMessage("Please complete the CAPTCHA first.");
       return;
     }
+    setCaptchaToken(currentCaptchaToken);
     setLoading("login");
     try {
-      await login({ ...loginForm, captchaToken });
+      await login({ ...loginForm, captchaToken: currentCaptchaToken });
     } catch (error) {
       setMessage(getApiErrorMessage(error, "Login is taking longer than expected. Please try again."));
       setCaptchaToken("");
@@ -171,6 +175,10 @@ export default function AuthPage() {
   const handleCaptchaError = useCallback(() => {
     setCaptchaToken("");
     setMessage("CAPTCHA verification failed. Please try again.");
+  }, []);
+
+  const handleCaptchaReady = useCallback((widgetId) => {
+    captchaWidgetIdRef.current = widgetId;
   }, []);
 
   async function submitSignup(event) {
@@ -393,6 +401,7 @@ export default function AuthPage() {
                 onChange={handleCaptchaChange}
                 onExpired={handleCaptchaExpired}
                 onError={handleCaptchaError}
+                onReady={handleCaptchaReady}
               />
               <button type="submit" className="auth-login-button" disabled={loading === "login" || !captchaConfigured}>
                 <span>{loading === "login" ? <><Spinner /> Logging in...</> : "Login"}</span>
