@@ -320,6 +320,16 @@ router.post("/orders/:id", requireAuth, requireApproved, asyncHandler(async (req
   }
   emitLiveLocation(req, orderId, payload);
   if (sourceType === "rider") {
+    req.app.get("io")?.to(`user:${order.user_id}`).emit("order:update", {
+      id: orderId,
+      delivery_status: "Out for Delivery",
+      rider_id: Number(req.user.id),
+      rider_name: String(req.user.display_name || req.user.username || "Rider").trim().slice(0, 160),
+      rider_latitude: payload.latitude,
+      rider_longitude: payload.longitude,
+      location_updated_at: payload.shared_at,
+      locationUpdatedAt: payload.shared_at
+    });
     await notifyCustomerOnce(req, {
       userId: order.user_id,
       orderId,

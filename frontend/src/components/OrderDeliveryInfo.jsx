@@ -660,9 +660,14 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
     api.post(`/live-locations/orders/${order.id}`, {
       ...payload,
       source_type: "rider"
-    }).catch((requestError) => {
-      setLiveError(getApiErrorMessage(requestError, "Could not publish live location."));
-    });
+    })
+      .then(({ data }) => {
+        applyLiveLocation(data);
+        setLiveError("");
+      })
+      .catch((requestError) => {
+        setLiveError(getApiErrorMessage(requestError, "Could not publish live location."));
+      });
   }
 
   function getFreshDevicePosition() {
@@ -733,6 +738,27 @@ function InlineDeliveryRoute({ order, snapshot, liveRouteEnabled = false, canSha
     autoStartedRef.current = orderId;
     startLiveTracking({ requireFreshPosition: true });
   }, [autoStartTracking, canShareLiveLocation, liveTrackingAllowed, locating, order?.id, trackingActive]);
+
+  useEffect(() => {
+    if (!liveRouteEnabled || canShareLiveLocation || !order?.id || !routeVisible) return undefined;
+    let cancelled = false;
+    let requestInFlight = false;
+    const refreshLatestLocation = async () => {
+      if (cancelled || requestInFlight) return;
+      requestInFlight = true;
+      try {
+        await fetchLatestLiveLocation();
+      } finally {
+        requestInFlight = false;
+      }
+    };
+    refreshLatestLocation();
+    const intervalId = window.setInterval(refreshLatestLocation, displayedLiveLocation ? 10000 : 4000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [canShareLiveLocation, displayedLiveLocation, fetchLatestLiveLocation, liveRouteEnabled, order?.id, routeVisible]);
 
   function stopLiveTracking({ notifyServer = true } = {}) {
     if (watchIdRef.current !== null && navigator.geolocation) {
