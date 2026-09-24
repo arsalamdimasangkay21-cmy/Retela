@@ -4480,7 +4480,7 @@ function canPayOrder(order) {
 function customerOrderStatusClass(status) {
   const normalized = normalizeOrderStatus(status);
   if (normalized === "completed") return "border-emerald-100 bg-emerald-50 text-emerald-700";
-  if (normalized === "cancelled" || normalized === "canceled") return "border-rose-100 bg-rose-50 text-rose-700";
+  if (normalized === "cancelled" || normalized === "canceled" || normalized === "rejected") return "border-rose-100 bg-rose-50 text-rose-700";
   if (normalized === "payment_failed") return "border-rose-100 bg-rose-50 text-rose-700";
   if (normalized === "pending" || normalized === "awaiting_payment") return "border-amber-100 bg-amber-50 text-amber-700";
   return "border-sky-100 bg-sky-50 text-sky-700";
