@@ -2410,25 +2410,6 @@ button {
   box-shadow: 0 0 0 4px rgba(32, 182, 106, 0.13), 0 12px 28px rgba(15, 61, 46, 0.08);
 }
 
-.auth-captcha-box {
-  display: flex;
-  justify-content: center;
-  max-width: 100%;
-  min-height: 78px;
-  overflow: hidden;
-}
-
-.auth-captcha-config {
-  border: 1px solid rgba(217, 119, 6, 0.24);
-  border-radius: 14px;
-  background: #fffbeb;
-  padding: 0.8rem 1rem;
-  color: #92400e;
-  font-size: 0.86rem;
-  font-weight: 700;
-  text-align: center;
-}
-
 .auth-login-button {
   display: inline-flex;
   min-height: 54px;
@@ -2516,17 +2497,6 @@ button {
 
   .auth-form-panel {
     padding-top: 1.5rem;
-  }
-}
-
-@media (max-width: 370px) {
-  .auth-captcha-box {
-    justify-content: flex-start;
-  }
-
-  .auth-captcha-box > div {
-    transform: scale(0.88);
-    transform-origin: top left;
   }
 }
 

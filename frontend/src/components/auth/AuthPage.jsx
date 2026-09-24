@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ArrowRight, CheckCircle2, KeyRound, Loader2, Mail, RotateCcw, ShieldCheck, User, UserPlus } from "lucide-react";
 import { api, cachedGet, getApiErrorMessage } from "../../api/client";
 import { logoFromSettings, RETELA_LOGO_URL } from "../../config/branding";
@@ -19,72 +19,6 @@ function rememberLogoUrl(url) {
   else localStorage.removeItem("retela_logo_url");
 }
 
-let recaptchaScriptPromise;
-
-function loadRecaptchaScript() {
-  if (window.grecaptcha?.render) return Promise.resolve(window.grecaptcha);
-  if (recaptchaScriptPromise) return recaptchaScriptPromise;
-  recaptchaScriptPromise = new Promise((resolve, reject) => {
-    const existing = document.getElementById("retela-recaptcha-script");
-    if (existing) {
-      existing.addEventListener("load", () => resolve(window.grecaptcha), { once: true });
-      existing.addEventListener("error", reject, { once: true });
-      return;
-    }
-    const script = document.createElement("script");
-    script.id = "retela-recaptcha-script";
-    script.src = "https://www.google.com/recaptcha/api.js?render=explicit";
-    script.async = true;
-    script.defer = true;
-    script.onload = () => resolve(window.grecaptcha);
-    script.onerror = reject;
-    document.head.appendChild(script);
-  });
-  return recaptchaScriptPromise;
-}
-
-function RecaptchaCheckbox({ siteKey, resetKey, onChange, onExpired, onError, onReady }) {
-  const containerRef = useRef(null);
-  const widgetIdRef = useRef(null);
-
-  useEffect(() => {
-    if (!siteKey) return undefined;
-    let cancelled = false;
-    loadRecaptchaScript()
-      .then((grecaptcha) => {
-        grecaptcha.ready(() => {
-          if (cancelled || !containerRef.current || widgetIdRef.current !== null) return;
-          widgetIdRef.current = grecaptcha.render(containerRef.current, {
-            sitekey: siteKey,
-            callback: onChange,
-            "expired-callback": onExpired,
-            "error-callback": onError
-          });
-          onReady?.(widgetIdRef.current);
-        });
-      })
-      .catch(onError);
-    return () => {
-      cancelled = true;
-    };
-  }, [siteKey, onChange, onExpired, onError, onReady]);
-
-  useEffect(() => {
-    if (!siteKey || widgetIdRef.current === null || !window.grecaptcha?.reset) return;
-    window.grecaptcha.reset(widgetIdRef.current);
-  }, [siteKey, resetKey]);
-
-  if (!siteKey) {
-    return <p className="auth-captcha-config">CAPTCHA is not configured for this environment.</p>;
-  }
-
-  return (
-    <div className="auth-captcha-box" aria-label="CAPTCHA verification">
-      <div ref={containerRef} />
-    </div>
-  );
-}
-
 export default function AuthPage() {
   const { login } = useAuth();
   const [signupOpen, setSignupOpen] = useState(false);
@@ -95,9 +29,6 @@ export default function AuthPage() {
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState("");
   const [loginForm, setLoginForm] = useState({ username: "", password: "" });
-  const [captchaToken, setCaptchaToken] = useState("");
-  const [captchaResetKey, setCaptchaResetKey] = useState(0);
-  const captchaWidgetIdRef = useRef(null);
   const [signupForm, setSignupForm] = useState({ username: "", email: "", phoneNumber: "", location: "", otp: "", password: "", confirmPassword: "" });
   const [resetForm, setResetForm] = useState({ email: "", otp: "", password: "", confirmPassword: "" });
   const [logoUrl, setLogoUrl] = useState(RETELA_LOGO_URL);
@@ -107,14 +38,6 @@ export default function AuthPage() {
   const resetPasswordBlueprint = useMemo(() => getPasswordBlueprint(resetForm.password), [resetForm.password]);
   const resetPasswordStrength = useMemo(() => getPasswordStrength(resetPasswordBlueprint), [resetPasswordBlueprint]);
   const resetPasswordStrong = resetPasswordBlueprint.every((item) => item.met);
-  const captchaSiteKey = import.meta.env.VITE_RECAPTCHA_SITE_KEY?.trim() || "";
-  const captchaConfigured = Boolean(captchaSiteKey);
-
-  useEffect(() => {
-    if (import.meta.env.DEV) {
-      console.log("reCAPTCHA configured:", captchaConfigured);
-    }
-  }, [captchaConfigured]);
 
   useEffect(() => {
     let cancelled = false;
@@ -140,46 +63,15 @@ export default function AuthPage() {
     event.preventDefault();
     if (loading === "login") return;
     setMessage("");
-    if (!captchaConfigured) {
-      setMessage("CAPTCHA is not configured. Please contact support.");
-      return;
-    }
-    const currentCaptchaToken = captchaToken || String(window.grecaptcha?.getResponse?.(captchaWidgetIdRef.current) || "").trim();
-    if (!currentCaptchaToken) {
-      setMessage("Please complete the CAPTCHA first.");
-      return;
-    }
-    setCaptchaToken(currentCaptchaToken);
     setLoading("login");
     try {
-      await login({ ...loginForm, captchaToken: currentCaptchaToken });
+      await login(loginForm);
     } catch (error) {
       setMessage(getApiErrorMessage(error, "Login is taking longer than expected. Please try again."));
-      setCaptchaToken("");
-      setCaptchaResetKey((value) => value + 1);
     } finally {
       setLoading("");
     }
   }
-
-  const handleCaptchaChange = useCallback((token) => {
-    setCaptchaToken(token || "");
-    setMessage("");
-  }, []);
-
-  const handleCaptchaExpired = useCallback(() => {
-    setCaptchaToken("");
-    setMessage("CAPTCHA expired. Please verify again.");
-  }, []);
-
-  const handleCaptchaError = useCallback(() => {
-    setCaptchaToken("");
-    setMessage("CAPTCHA verification failed. Please try again.");
-  }, []);
-
-  const handleCaptchaReady = useCallback((widgetId) => {
-    captchaWidgetIdRef.current = widgetId;
-  }, []);
 
   async function submitSignup(event) {
     event.preventDefault();
@@ -395,15 +287,7 @@ export default function AuthPage() {
               <h2 className="font-display text-4xl font-black uppercase tracking-[0.08em] text-slate-950">LOGIN</h2>
               <Field id="login-username" name="username" autoComplete="username" icon={User} placeholder="Username" value={loginForm.username} onChange={(e) => setLoginForm({ ...loginForm, username: e.target.value })} wrapperClassName="auth-login-field" />
               <Field id="login-password" name="password" autoComplete="current-password" icon={KeyRound} type="password" placeholder="Password" value={loginForm.password} onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })} wrapperClassName="auth-login-field" />
-              <RecaptchaCheckbox
-                siteKey={captchaSiteKey}
-                resetKey={captchaResetKey}
-                onChange={handleCaptchaChange}
-                onExpired={handleCaptchaExpired}
-                onError={handleCaptchaError}
-                onReady={handleCaptchaReady}
-              />
-              <button type="submit" className="auth-login-button" disabled={loading === "login" || !captchaConfigured}>
+              <button type="submit" className="auth-login-button" disabled={loading === "login"}>
                 <span>{loading === "login" ? <><Spinner /> Logging in...</> : "Login"}</span>
                 {loading === "login" ? null : <ArrowRight size={18} />}
               </button>
